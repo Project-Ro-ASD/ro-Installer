@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Ro-ASD</vendor>
+  <vendor_url>https://github.com/Project-Ro-ASD</vendor_url>
+  <action id="com.roasd.installer.run">
+    <description>Run Ro-Installer as Root</description>
+    <message>Authentication is required to run the OS Installer</message>
+    <defaults>
+      <!-- "yes" ensures that in the LiveOS environment, no password is asked for installation -->
+      <allow_any>yes</allow_any>
+      <allow_inactive>yes</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <!-- Gerekli çalıştırılabilir dosya yolu. Gerçek paketlemede nereye atılıyorsa orası olmalı -->
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/ro_installer_beta</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>
