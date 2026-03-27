@@ -81,7 +81,12 @@ class NetworkService {
     return networks;
   }
 
-  Future<bool> connectWifi(String ssid, String password) async {
+  Future<bool> connectWifi(String ssid, String password, {bool isMock = false}) async {
+    if (isMock) {
+      // Simülasyon modunda ağ ayarlarını değiştirmiyoruz.
+      await Future.delayed(const Duration(seconds: 1));
+      return true;
+    }
     try {
       final List<String> args = ['dev', 'wifi', 'connect', ssid];
       if (password.isNotEmpty) {

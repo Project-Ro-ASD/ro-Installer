@@ -233,6 +233,81 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
     );
   }
 
+  void _openResizeDialog(BuildContext context, InstallerState state) {
+    if (_selectedIndex == null || _selectedIndex! >= state.manualPartitions.length) return;
+    
+    final part = state.manualPartitions[_selectedIndex!];
+    // Kullanıcı yeni eklediği planlı bir bölümü (henüz diske yazılmamış) veya zaten boş olan alanı küçültmemelidir.
+    if (part['isFreeSpace'] == true || part['isPlanned'] == true) return; 
+
+    final maxMb = (part['sizeBytes'] as int) ~/ (1024 * 1024);
+    final textController = TextEditingController(text: maxMb.toString());
+
+    showDialog(
+       context: context,
+       builder: (c) {
+          return StatefulBuilder(builder: (c, setDialogState) {
+             return AlertDialog(
+                title: Text("Bölümü Küçült: ${part['name']}"),
+                content: Column(
+                   mainAxisSize: MainAxisSize.min,
+                   children: [
+                      const Text("DİKKAT: Veri kaybı riski nedeniyle, sistemin varsayılan Resize yeteneklerine güvenmek yerine bu işlemi kurulum öncesi Windows üzerinden yapmanız daha güvenlidir.", style: TextStyle(color: Colors.orange, fontSize: 12)),
+                      const SizedBox(height: 16),
+                      Text("Mevcut Boyut: $maxMb MB", style: const TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 16),
+                      TextField(
+                         controller: textController,
+                         keyboardType: TextInputType.number,
+                         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                         decoration: InputDecoration(
+                            labelText: 'Yeni Boyut (MB) [Maksimum: $maxMb MB]',
+                         ),
+                         onChanged: (v) {
+                            int? parsed = int.tryParse(v);
+                            if (parsed != null && parsed > maxMb) {
+                               textController.text = maxMb.toString();
+                            }
+                         },
+                      ),
+                   ],
+                ),
+                actions: [
+                   TextButton(onPressed: () => Navigator.pop(c), child: const Text("İptal")),
+                   ElevatedButton(
+                      onPressed: () {
+                         int chosenMb = int.tryParse(textController.text) ?? maxMb;
+                         if (chosenMb <= 0 || chosenMb >= maxMb) return;
+                         
+                         int newBytes = chosenMb * 1024 * 1024;
+                         int remainingBytes = (part['sizeBytes'] as int) - newBytes;
+
+                         setState(() {
+                            part['sizeBytes'] = newBytes;
+                            part['isResized'] = true; // Yükleyici son adımda bunu yakalayacak
+
+                            // Kestiğimiz alanı yeni "Free Space" olaral hemen altına ekliyoruz
+                            state.manualPartitions.insert(_selectedIndex! + 1, {
+                               'name': 'Free Space',
+                               'type': 'unallocated',
+                               'sizeBytes': remainingBytes,
+                               'mount': 'unmounted',
+                               'flags': '',
+                               'isFreeSpace': true, // Gerçek boş alan yaratıldı
+                               'isPlanned': false 
+                            });
+                         });
+                         Navigator.pop(c);
+                      }, 
+                      child: const Text("Ayarla")
+                   )
+                ]
+             );
+          });
+       }
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<InstallerState>(context);
@@ -372,6 +447,7 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     _actionBtn(context, state.t('part_add'), Icons.add, isSelectedFreeSpace ? () => _openAddDialog(context, state) : null),
+                    _actionBtn(context, "Küçült", Icons.compress, (!isSelectedFreeSpace && hasSelection) ? () => _openResizeDialog(context, state) : null),
                     _actionBtn(context, state.t('part_delete'), Icons.remove, (!isSelectedFreeSpace && hasSelection) ? () => _actionDelete(state) : null),
                     _actionBtn(context, state.t('part_format'), Icons.build, (!isSelectedFreeSpace && hasSelection) ? () => _openFormatDialog(context, state) : null),
                   ],
@@ -400,21 +476,97 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
                 onPressed: () {
                    bool hasRoot = false;
                    bool hasEfi = false;
+                   int rootSize = 0;
+                   int efiSize = 0;
+                   String rootType = '';
+                   String efiType = '';
+                   bool hasSwap = false;
+                   String swapType = '';
+                   bool hasBoot = false;
+                   int bootSize = 0;
+                   String bootType = '';
+
                    for (var p in state.manualPartitions) {
-                      if (p['isFreeSpace'] == true) continue;
-                      if (p['mount'] == '/') hasRoot = true;
-                      if (p['mount'] == '/boot/efi') hasEfi = true;
+                       if (p['isFreeSpace'] == true) continue;
+                       
+                       final size = p['sizeBytes'] as int;
+                       final mb = size ~/ (1024 * 1024);
+                       final mount = p['mount'];
+                       final type = p['type'];
+
+                       if (mount == '/') {
+                           hasRoot = true;
+                           rootSize += mb;
+                           rootType = type;
+                       } else if (mount == '/boot/efi') {
+                           hasEfi = true;
+                           efiSize += mb;
+                           efiType = type;
+                       } else if (mount == '/boot') {
+                           hasBoot = true;
+                           bootSize += mb;
+                           bootType = type;
+                       } else if (mount == '[SWAP]') {
+                           hasSwap = true;
+                           swapType = type;
+                       }
                    }
-                   if (!hasRoot || !hasEfi) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                         const SnackBar(
-                           content: Text("Kuruluma devam etmek için tabloya en az bir Kök (/) ve EFI (/boot/efi) bölümü planlamanız gerekir!"), 
-                           backgroundColor: Colors.red
+
+                   void showError(String msg) {
+                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.redAccent, duration: const Duration(seconds: 4)));
+                   }
+
+                   // 1) Kök Dizini (Root) Kontrolleri
+                   if (!hasRoot) return showError("Kurulum için bir Kök Dizin ( / ) bağlama noktası oluşturmalısınız.");
+                   if (rootSize < 40000) return showError("Kök dizin (/) için en az 40 GB (yaklaşık 40000 MB) alan oluşturmalısınız. (Sistem paketleri için gereklidir.)");
+                   if (rootType == 'fat32' || rootType == 'ntfs') return showError("Kök dizin (/) dosya formatı fat32 veya ntfs olamaz. Lütfen linux odaklı bir format (ör: ext4, btrfs, xfs) seçin.");
+
+                   // 2) EFI Kontrolleri
+                   if (!hasEfi) return showError("Mount noktası /boot/efi olan bir EFI başlangıç dizinine ihtiyacınız var.");
+                   if (efiSize < 100 || efiSize > 2500) return showError("EFI (/boot/efi) boyutu en az 100 MB ve en fazla 2500 MB olmalıdır.");
+                   if (efiType != 'fat32') return showError("UEFI sistemlerde başlatıcı (EFI) bölümünün dosya sistemi muhakkak 'fat32' olmalıdır.");
+
+                   // 3) İsteğe Bağlı Boot Kontrolleri
+                   if (hasBoot) {
+                      if (bootSize < 500) return showError("Ayrı bir /boot dizini oluşturduysanız boyutu linux çekirdeği için en az 500 MB olmalıdır.");
+                      if (bootType == 'fat32' || bootType == 'ntfs') return showError("/boot dosya sistemi linux tabanlı (örn: ext4) olmalıdır. 'fat32' formatı yalnızca /boot/efi için lazımdır.");
+                   }
+
+                   // 4) SWAP Format Kontrolü
+                   if (hasSwap && swapType != 'linux-swap') return showError("Takas alanı (SWAP) dosya sistemi 'linux-swap' olmalıdır.");
+
+                   // 5) SWAP Uyarı Pop-Up Yönetimi
+                   if (!hasSwap) {
+                      showDialog(
+                         context: context,
+                         builder: (c) => AlertDialog(
+                            title: const Text("Takas Alanı (SWAP) Eksik", style: TextStyle(color: Colors.orange)),
+                            content: const Text(
+                               "Tablonuzda bir SWAP alanı veya mount noktası bulunamadı.\n\n"
+                               "Avantajı: Takas alanı (SWAP), sistem belleği (RAM) tamamen dolduğunda ani çöküşleri engeller ve uyku moduna (hibernate) destek sağlar.\n\n"
+                               "Dezavantajı: Disk üzerinde alan kaplar.\n\n"
+                               "Linux için genellikle en az 4GB SWAP önerilir. Yine de SWAP olmadan kuruluma geçmek istiyor musunuz?"
+                            ),
+                            actions: [
+                               TextButton(
+                                  onPressed: () => Navigator.pop(c),
+                                  child: const Text("Geri Dön ve Ayır")
+                               ),
+                               ElevatedButton(
+                                  onPressed: () {
+                                     Navigator.pop(c);
+                                     state.nextStep(); // Geçerli tabloyı kabul et ve devam et
+                                  },
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                                  child: const Text("SWAP Olmadan İlerle", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                               )
+                            ]
                          )
                       );
-                      return;
+                   } else {
+                      // Tüm engeller aşıldı ve Swap alanı da var, doğrudan ileri git
+                      state.nextStep();
                    }
-                   state.nextStep();
                 },
                 icon: const Icon(Icons.arrow_forward),
                 label: Text(state.t('next')),

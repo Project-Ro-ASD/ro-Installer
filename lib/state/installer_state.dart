@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/network_service.dart';
+import '../services/disk_service.dart';
 
 class InstallerState extends ChangeNotifier {
   int _currentStep = 0;
@@ -55,7 +56,7 @@ class InstallerState extends ChangeNotifier {
   }
 
   Future<bool> connectToWifi(String ssid, String password) async {
-     final success = await NetworkService.instance.connectWifi(ssid, password);
+     final success = await NetworkService.instance.connectWifi(ssid, password, isMock: isMockEnabled);
      if (success) {
        await scanWifiNetworks(); // Listeyi yenile
        networkStatus = 'connected';
@@ -64,17 +65,26 @@ class InstallerState extends ChangeNotifier {
      return success;
   }
 
-  // Adımlar listesi (Dinamik - partitionMethod'a göre Partitions ekranı eklenir)
+  // Adımlar listesi (Dinamik - partitionMethod ve installType'a göre şekillenir)
   List<String> get steps {
+    List<String> baseSteps = ["Welcome", "Theme", "Location", "Network", "Account", "Type", "Disk"];
+    
     if (partitionMethod == 'manual') {
-      return ["Welcome", "Theme", "Location", "Network", "Account", "Type", "Disk", "Partitions", "Kernel", "Install"];
+      baseSteps.add("Partitions");
     }
-    return ["Welcome", "Theme", "Location", "Network", "Account", "Type", "Disk", "Kernel", "Install"];
+    
+    // Standart kurulumda Kernel adımı kullanıcıya gösterilmez (Atlanır)
+    if (installType == 'advanced') {
+      baseSteps.add("Kernel");
+    }
+    
+    baseSteps.add("Install");
+    return baseSteps;
   }
 
   // ---- Geliştirici & Test Modu ----
-  bool isDeveloperMode = true; // Geliştirici arayüz elemanlarını gösterir
-  bool isMockEnabled = true;    // FFI çağrılarını simüle eder (Disk güvenliği için)
+  bool isDeveloperMode = false; // Geliştirici arayüz elemanlarını (varsa) gizler
+  bool isMockEnabled = false;   // GERÇEK KURULUM MODU: FFI/Sistem komutları DİREKT olarak çalıştırılır!
 
   // ---- 1. Welcome ----
   String selectedLanguage = 'tr'; // Varsayılan Türkçe
@@ -112,7 +122,14 @@ class InstallerState extends ChangeNotifier {
 
   // Manuel Bölümlendirme Planı / Haritası
   List<Map<String, dynamic>> manualPartitions = [];
-  
+
+  // ---- Alongside (Yanına Kur) Algılama ----
+  bool hasExistingOS = false;
+  String detectedOS = '';
+  bool hasExistingEfi = false;
+  String existingEfiPartition = '';
+  int diskFreeSpaceBytes = 0;
+  bool isDetectingOS = false; // UI'da loading göstermek için
   
   // ---- 8. Kernel ----
   String kernelType = 'experimental'; // Deneysel varsayılan
@@ -148,6 +165,10 @@ class InstallerState extends ChangeNotifier {
 
   void updateInstallType(String type) {
     installType = type;
+    // Eğer standart kurulum seçilirse, deneysel kernel kapatılıp otomatik stable yapılır
+    if (type == 'standard') {
+       kernelType = 'stable';
+    }
     notifyListeners();
   }
 
@@ -189,6 +210,32 @@ class InstallerState extends ChangeNotifier {
        }
        linuxDiskSizeGB = totalDiskSizeGB - 20; // Varsayılan slider pozisyonu
     }
+    notifyListeners();
+
+    // Alongside için arka planda disk detaylarını çek
+    _detectDiskOS(newDisk);
+  }
+
+  Future<void> _detectDiskOS(String diskName) async {
+    isDetectingOS = true;
+    notifyListeners();
+
+    try {
+      final details = await DiskService.instance.detectDiskDetails(diskName);
+      hasExistingOS = details['hasExistingOS'] as bool;
+      detectedOS = details['detectedOS'] as String;
+      hasExistingEfi = details['hasEfiPartition'] as bool;
+      existingEfiPartition = details['efiPartitionName'] as String;
+      diskFreeSpaceBytes = details['freeSpaceBytes'] as int;
+    } catch (e) {
+      hasExistingOS = false;
+      detectedOS = '';
+      hasExistingEfi = false;
+      existingEfiPartition = '';
+      diskFreeSpaceBytes = 0;
+    }
+
+    isDetectingOS = false;
     notifyListeners();
   }
 }

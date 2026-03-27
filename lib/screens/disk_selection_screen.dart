@@ -359,8 +359,27 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
     final theme = Theme.of(context);
     final isDark = state.themeMode == 'dark';
     final isSelected = state.partitionMethod == code;
+
+    // Alongside erişilebilirlik kontrolü
+    bool isDisabled = false;
+    String? disabledReason;
+    
+    if (code == 'alongside') {
+      final freeGB = state.diskFreeSpaceBytes / (1024 * 1024 * 1024);
+      if (state.isDetectingOS) {
+        disabledReason = "Disk analiz ediliyor...";
+        isDisabled = true;
+      } else if (!state.hasExistingOS) {
+        disabledReason = "Bu diskte başka bir işletim sistemi algılanmadı.";
+        isDisabled = true;
+      } else if (freeGB < 45) {
+        disabledReason = "Yetersiz boş alan (${freeGB.toStringAsFixed(1)} GB). En az 45 GB boş (unallocated) alan gereklidir.";
+        isDisabled = true;
+      }
+    }
+
     return GestureDetector(
-      onTap: () {
+      onTap: isDisabled ? null : () {
         state.partitionMethod = code;
         state.notifyListeners();
       },
@@ -368,34 +387,71 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
         duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isSelected ? theme.colorScheme.primary.withOpacity(0.2) : Colors.transparent,
+          color: isDisabled 
+              ? Colors.grey.withOpacity(0.05) 
+              : (isSelected ? theme.colorScheme.primary.withOpacity(0.2) : Colors.transparent),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isSelected ? theme.colorScheme.primary : Colors.grey.withOpacity(0.3)),
+          border: Border.all(
+            color: isDisabled 
+                ? Colors.grey.withOpacity(0.15) 
+                : (isSelected ? theme.colorScheme.primary : Colors.grey.withOpacity(0.3)),
+          ),
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icon, color: isSelected ? theme.colorScheme.primary : Colors.grey),
+                Icon(icon, color: isDisabled ? Colors.grey.withOpacity(0.4) : (isSelected ? theme.colorScheme.primary : Colors.grey)),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: isSelected ? theme.colorScheme.primary : (isDark ? Colors.white : Colors.black87),
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isDisabled 
+                              ? Colors.grey.withOpacity(0.4) 
+                              : (isSelected ? theme.colorScheme.primary : (isDark ? Colors.white : Colors.black87)),
+                        ),
+                      ),
+                      // Alongside aktifse ve OS algılandıysa bilgi göster
+                      if (code == 'alongside' && !isDisabled && state.hasExistingOS)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            "✓ ${state.detectedOS} algılandı. Yanına kurulacak.",
+                            style: TextStyle(fontSize: 11, color: Colors.greenAccent.shade400, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                if (isSelected) Icon(Icons.radio_button_checked, color: theme.colorScheme.primary)
-                else const Icon(Icons.radio_button_unchecked, color: Colors.grey),
+                if (isDisabled) 
+                  Icon(Icons.lock_outline, color: Colors.grey.withOpacity(0.3), size: 20)
+                else if (isSelected) 
+                  Icon(Icons.radio_button_checked, color: theme.colorScheme.primary)
+                else 
+                  const Icon(Icons.radio_button_unchecked, color: Colors.grey),
               ],
             ),
+
+            // Disabled nedeni
+            if (isDisabled && disabledReason != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8, left: 40),
+                child: Text(
+                  disabledReason,
+                  style: TextStyle(fontSize: 11, color: Colors.redAccent.withOpacity(0.7), fontStyle: FontStyle.italic),
+                ),
+              ),
             
             // Yanına Kur Seçildiyse Slider Animasyonu ile Altta Gösterilir
             AnimatedCrossFade(
               duration: const Duration(milliseconds: 300),
-              crossFadeState: (isSelected && code == 'alongside') ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+              crossFadeState: (isSelected && code == 'alongside' && !isDisabled) ? CrossFadeState.showSecond : CrossFadeState.showFirst,
               firstChild: const SizedBox(width: double.infinity, height: 0),
               secondChild: Padding(
                 padding: const EdgeInsets.only(top: 24, bottom: 8),
@@ -421,8 +477,8 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                       ),
                       child: Slider(
                         value: state.linuxDiskSizeGB,
-                        min: 40.0, // Minimum 40GB sınır
-                        max: state.totalDiskSizeGB - 20, // Windows'a da bi 20gb falan kalsın
+                        min: 44.0, // 40 GB root + 4 GB swap = min 44 GB
+                        max: state.totalDiskSizeGB - 20, // Mevcut OS'a da en az 20 GB kalsın
                         onChanged: (val) {
                           state.linuxDiskSizeGB = val;
                           state.notifyListeners();

@@ -61,14 +61,7 @@ class KernelScreen extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.end,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildInfoChip(
-                      context,
-                      icon: Icons.memory,
-                      iconColor: Colors.blueAccent,
-                      title: state.t('system_ram'),
-                      value: state.t('ram_avail'),
-                    ),
-                    const SizedBox(height: 16),
+                    // Sistem RAM Bilgisi İptal Edildi
                     _buildInfoChip(
                       context,
                       icon: Icons.cloud_download,
@@ -109,8 +102,14 @@ class KernelScreen extends StatelessWidget {
                         color: Colors.deepOrangeAccent,
                         version: "v2.5.0-BETA.4",
                         features: [state.t('kernel_e_feat1'), state.t('kernel_e_feat2')],
-                        isActive: state.kernelType == 'experimental',
-                        onSelect: () => state.updateKernel('experimental'),
+                        isActive: state.kernelType == 'experimental' && state.networkStatus == 'connected',
+                        onSelect: () {
+                           if (state.networkStatus == 'connected') {
+                              state.updateKernel('experimental');
+                           }
+                        },
+                        isDisabled: state.networkStatus != 'connected',
+                        disabledMessage: "İnternet Bağlantısı Gerekli\n(Sadece Çevrimiçi Kurulum)",
                       ),
                     ),
                   ],
@@ -215,22 +214,28 @@ class KernelScreen extends StatelessWidget {
     required List<String> features,
     required bool isActive,
     required VoidCallback onSelect,
+    bool isDisabled = false,
+    String? disabledMessage,
   }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     
     return GestureDetector(
-      onTap: onSelect,
+      onTap: isDisabled ? null : onSelect,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.all(32),
         decoration: BoxDecoration(
-          color: isActive 
-              ? (isDark ? const Color(0xFF1E1E2E) : Colors.white)
-              : (isDark ? const Color(0xFF1A1A24) : Colors.grey.withOpacity(0.05)),
+          color: isDisabled 
+              ? (isDark ? Colors.black26 : Colors.black12)
+              : (isActive 
+                  ? (isDark ? const Color(0xFF1E1E2E) : Colors.white)
+                  : (isDark ? const Color(0xFF1A1A24) : Colors.grey.withOpacity(0.05))),
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
-            color: isActive ? color : Colors.grey.withOpacity(0.2),
+            color: isDisabled 
+                ? Colors.transparent 
+                : (isActive ? color : Colors.grey.withOpacity(0.2)),
             width: isActive ? 2 : 1,
           ),
           boxShadow: isActive
@@ -271,13 +276,31 @@ class KernelScreen extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 12),
               child: Row(
                 children: [
-                  Icon(Icons.check, size: 16, color: color),
+                  Icon(Icons.check, size: 16, color: isDisabled ? Colors.grey : color),
                   const SizedBox(width: 8),
-                  Text(f, style: TextStyle(fontSize: 13, color: isDark ? Colors.white70 : Colors.black87)),
+                  Expanded(child: Text(f, style: TextStyle(fontSize: 13, color: isDark ? Colors.white70 : Colors.black87))),
                 ],
               ),
             )),
             const Spacer(),
+            if (isDisabled && disabledMessage != null)
+               Container(
+                 width: double.infinity,
+                 padding: const EdgeInsets.all(12),
+                 margin: const EdgeInsets.only(bottom: 16),
+                 decoration: BoxDecoration(
+                   color: Colors.redAccent.withOpacity(0.1),
+                   borderRadius: BorderRadius.circular(8),
+                   border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                 ),
+                 child: Row(
+                   children: [
+                     const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 20),
+                     const SizedBox(width: 8),
+                     Expanded(child: Text(disabledMessage, style: const TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold))),
+                   ],
+                 ),
+               ),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

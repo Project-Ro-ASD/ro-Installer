@@ -93,6 +93,10 @@ class _InstallingScreenState extends State<InstallingScreen> with SingleTickerPr
       'password': state.password,
       'selectedRegion': state.selectedRegion,
       'isAdministrator': state.isAdministrator,
+      // Alongside (Yanına Kur) motoru için
+      'linuxDiskSizeGB': state.linuxDiskSizeGB,
+      'hasExistingEfi': state.hasExistingEfi,
+      'existingEfiPartition': state.existingEfiPartition,
     };
 
     bool success = await InstallService.instance.runInstall(stateMap, (progress, status) {
@@ -105,9 +109,9 @@ class _InstallingScreenState extends State<InstallingScreen> with SingleTickerPr
              _progress = progress;
              _statusText = status;
           });
-          _pushLog("[SİSTEM DURUMU] \$status");
+          _pushLog("[SİSTEM DURUMU] $status");
        }
-    });
+    }, isMock: state.isMockEnabled);
 
     if (!mounted) return;
     

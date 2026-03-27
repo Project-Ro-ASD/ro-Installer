@@ -2,8 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../state/installer_state.dart';
 
-class NetworkScreen extends StatelessWidget {
+class NetworkScreen extends StatefulWidget {
   const NetworkScreen({super.key});
+
+  @override
+  State<NetworkScreen> createState() => _NetworkScreenState();
+}
+
+class _NetworkScreenState extends State<NetworkScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Ekran yüklendiğinde bir kereye mahsus wi-fi taraması başlat.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<InstallerState>(context, listen: false).scanWifiNetworks();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -160,7 +174,7 @@ class NetworkScreen extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
-                    onPressed: () => state.nextStep(),
+                    onPressed: state.networkStatus == 'connected' ? () => state.nextStep() : null,
                     style: theme.elevatedButtonTheme.style?.copyWith(
                       padding: const WidgetStatePropertyAll(
                         EdgeInsets.symmetric(horizontal: 32, vertical: 20),
