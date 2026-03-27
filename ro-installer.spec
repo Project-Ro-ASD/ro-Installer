@@ -37,7 +37,7 @@ Bu paket direkt COPR üzerinde GitHub kaynak kodu alınarak derlenmiştir.
 
 %prep
 # COPR SCM automatically manages the directory name during snapshot.
-%autosetup -p1 -n %{name}
+%autosetup -p1 -n %{name}-%{version}
 
 
 %build
