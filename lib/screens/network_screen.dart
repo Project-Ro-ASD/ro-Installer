@@ -52,15 +52,12 @@ class NetworkScreen extends StatelessWidget {
                     const SizedBox(height: 16),
                     _buildConnectionCard(
                       context,
-                      icon: Icons.lan,
+                      icon: state.isEthernetConnected ? Icons.lan : Icons.cable,
                       title: "Ethernet",
-                      subtitle: "Connected",
-                      subtitleColor: Colors.greenAccent,
-                      isSelected: state.networkStatus == 'connected',
-                      onTap: () {
-                        state.networkStatus = 'connected';
-                        state.notifyListeners();
-                      },
+                      subtitle: state.isEthernetConnected ? "Connected" : "Disconnected",
+                      subtitleColor: state.isEthernetConnected ? Colors.greenAccent : Colors.grey,
+                      isSelected: state.isEthernetConnected,
+                      onTap: () {},
                     ),
                   ],
                 ),
@@ -77,47 +74,53 @@ class NetworkScreen extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(state.t('wifi'), style: _headerStyle(textColor)),
-                        TextButton(
-                          onPressed: () {},
-                          child: Text("Rescan", style: TextStyle(color: theme.colorScheme.primary)),
+                        TextButton.icon(
+                          onPressed: () => state.scanWifiNetworks(),
+                          icon: state.isScanningWifi 
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) 
+                              : const Icon(Icons.refresh, size: 16),
+                          label: Text("Rescan", style: TextStyle(color: theme.colorScheme.primary)),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Expanded(
-                      child: ListView(
-                        children: [
-                          _buildConnectionCard(
-                            context,
-                            icon: Icons.wifi,
-                            title: "Hyperion_5G_Main",
-                            subtitle: "Excellent Signal",
-                            isLocked: true,
-                            isSelected: false,
-                            onTap: () {},
-                          ),
-                          const SizedBox(height: 12),
-                          _buildConnectionCard(
-                            context,
-                            icon: Icons.wifi,
-                            title: "Guest_Network",
-                            subtitle: "Fair Signal",
-                            isLocked: true,
-                            isSelected: false,
-                            onTap: () {},
-                          ),
-                          const SizedBox(height: 12),
-                          _buildConnectionCard(
-                            context,
-                            icon: Icons.wifi,
-                            title: "Starlink_29381",
-                            subtitle: "Good Signal",
-                            isLocked: true,
-                            isSelected: false,
-                            onTap: () {},
-                          ),
-                        ],
-                      ),
+                      child: state.wifiNetworks.isEmpty 
+                         ? Center(
+                             child: Text(
+                               state.isScanningWifi ? "Scanning..." : "No Wi-Fi networks found.", 
+                               style: TextStyle(color: textColor.withOpacity(0.5))
+                             )
+                           )
+                         : ListView.builder(
+                             itemCount: state.wifiNetworks.length,
+                             itemBuilder: (context, index) {
+                                final net = state.wifiNetworks[index];
+                                final signal = net['signal'] as int;
+                                String signalText = "Poor Signal";
+                                if (signal > 80) signalText = "Excellent Signal";
+                                else if (signal > 50) signalText = "Good Signal";
+                                else if (signal > 20) signalText = "Fair Signal";
+                                
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: _buildConnectionCard(
+                                    context,
+                                    icon: net['inUse'] ? Icons.wifi : (signal > 50 ? Icons.wifi : Icons.wifi_2_bar),
+                                    title: net['ssid'],
+                                    subtitle: net['inUse'] ? "Connected" : signalText,
+                                    subtitleColor: net['inUse'] ? Colors.greenAccent : null,
+                                    isLocked: net['security'].isNotEmpty && net['security'] != '--',
+                                    isSelected: net['inUse'],
+                                    onTap: () {
+                                       if (!net['inUse']) {
+                                           _showWifiPasswordDialog(context, state, net['ssid'], net['security']);
+                                       }
+                                    },
+                                  )
+                                );
+                             },
+                           ),
                     ),
                   ],
                 ),
@@ -262,6 +265,79 @@ class NetworkScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  void _showWifiPasswordDialog(BuildContext context, InstallerState state, String ssid, String security) {
+    // Şifresiz ise doğrudan bağlanmayı dene
+    if (security.isEmpty || security == '--' || security == 'NONE') {
+       state.connectToWifi(ssid, '');
+       return;
+    }
+
+    final theme = Theme.of(context);
+    String password = '';
+    bool isConnecting = false;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: theme.cardColor,
+              title: Text("Connect to $ssid"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                   TextField(
+                     obscureText: true,
+                     autofocus: true,
+                     decoration: InputDecoration(
+                        labelText: "Password",
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                     ),
+                     onChanged: (val) => password = val,
+                   ),
+                   if (isConnecting)
+                      const Padding(
+                         padding: EdgeInsets.only(top: 16),
+                         child: CircularProgressIndicator(),
+                      )
+                ]
+              ),
+              actions: [
+                 TextButton(
+                   onPressed: isConnecting ? null : () => Navigator.pop(dialogContext),
+                   child: const Text("Cancel"),
+                 ),
+                 ElevatedButton(
+                   onPressed: (isConnecting || password.isEmpty) ? null : () async {
+                      setState(() => isConnecting = true);
+                      final success = await state.connectToWifi(ssid, password);
+                      
+                      if (!context.mounted) return;
+                      setState(() => isConnecting = false);
+                      
+                      if (success) {
+                         Navigator.pop(dialogContext);
+                      } else {
+                         ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                               content: Text("Failed to connect to $ssid. Please check password."), 
+                               backgroundColor: Colors.redAccent
+                            ),
+                         );
+                      }
+                   },
+                   child: const Text("Connect"),
+                 )
+              ],
+            );
+          }
+        );
+      }
     );
   }
 }

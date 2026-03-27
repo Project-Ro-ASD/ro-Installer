@@ -42,6 +42,8 @@ class BackendBindings {
   static final BackendBindings _instance = BackendBindings._internal();
   factory BackendBindings() => _instance;
 
+  static bool isMockEnabled = true; // Simülasyona zorlar
+  
   late ffi.DynamicLibrary nativeLib;
   late TestConnectionDart _testConnection;
   late GetDisksJsonDart _getDisksJson;
@@ -93,6 +95,9 @@ class BackendBindings {
   }
 
   Future<String> getDisks() async {
+    if (isMockEnabled) {
+       return '[{"name": "/dev/sda", "size": "500GB", "fs": "ext4", "free": "120GB"}, {"name": "/dev/nvme0n1", "size": "1TB", "fs": "btrfs", "free": "300GB"}]';
+    }
     debugPrint("[FFI] Gercek get_disks() cagirildi.");
     try {
       final pointer = _getDisksJson();
@@ -103,6 +108,7 @@ class BackendBindings {
   }
 
   Future<bool> setFormatConfig(String configJson) async {
+    if (isMockEnabled) return true;
     debugPrint("[FFI] Gercek initialize_backend() cagirildi: $configJson");
     try {
       final pointer = configJson.toNativeUtf8();
@@ -115,7 +121,9 @@ class BackendBindings {
   }
 
   Future<bool> shrinkPartition(String disk, String sizeEnd) async {
+      if (isMockEnabled) return true;
       try {
+// ... (rest remains same but within check)
           final diskPtr = disk.toNativeUtf8();
           final sizePtr = sizeEnd.toNativeUtf8();
           final r = _shrinkPartition(diskPtr, sizePtr);
@@ -127,6 +135,7 @@ class BackendBindings {
   }
 
   Future<bool> formatPartition(String partition, String fsType) async {
+       if (isMockEnabled) return true;
        try {
           final partPtr = partition.toNativeUtf8();
           final fsPtr = fsType.toNativeUtf8();
@@ -139,6 +148,7 @@ class BackendBindings {
   }
 
   Future<bool> runInChroot(String partition, String cmd) async {
+       if (isMockEnabled) return true;
        try {
           final partPtr = partition.toNativeUtf8();
           final cmdPtr = cmd.toNativeUtf8();
@@ -151,6 +161,7 @@ class BackendBindings {
   }
 
   Future<bool> extractSystem(String partition, String imagePath) async {
+       if (isMockEnabled) return true;
        try {
           final partPtr = partition.toNativeUtf8();
           final imgPtr = imagePath.toNativeUtf8();

@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../state/installer_state.dart';
-import '../ffi/backend_bindings.dart';
+import '../services/disk_service.dart';
 
 class DiskSelectionScreen extends StatefulWidget {
   const DiskSelectionScreen({super.key});
@@ -23,27 +23,17 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
 
   Future<void> _loadDisks() async {
     setState(() => _isLoading = true);
-    final disksJson = await BackendBindings().getDisks();
+    final diskList = await DiskService.instance.getDisks();
     if (mounted) {
       setState(() {
-        final parsed = jsonDecode(disksJson);
-        if (parsed.containsKey('blockdevices')) {
-           final devices = parsed['blockdevices'] as List<dynamic>;
-           _disks = devices.where((d) => d['type'] == 'disk').map((d) {
-              return {
-                 'name': '/dev/${d['name']}',
-                 'size': d['size'] ?? 'Unknown',
-                 'type': d['type'] ?? 'Disk',
-                 'fs': d['fstype'] ?? 'Unformatted',
-                 'mountpoint': d['mountpoint'] 
-              };
-           }).toList();
-        } else {
-           _disks = parsed; // Fallback yapisi
-        }
+        _disks = diskList;
         final state = Provider.of<InstallerState>(context, listen: false);
+        // Otomatik disk seçimi sadece canlı olmayanları seçecek
         if (_disks.isNotEmpty && state.selectedDisk.isEmpty) {
-          state.selectedDisk = _disks.first['name'];
+          final safeDisks = _disks.where((d) => d['isLive'] != true).toList();
+          if (safeDisks.isNotEmpty) {
+            state.selectDisk(safeDisks.first);
+          }
         }
         _isLoading = false;
       });
@@ -118,12 +108,30 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                             : ListView.builder(
                                 itemCount: _disks.length,
                                 itemBuilder: (context, index) {
-                                  final disk = _disks[index];
+                                  final disk = _disks[index] as Map<String, dynamic>;
                                   final isSelected = state.selectedDisk == disk['name'];
+                                  final isLive = disk['isLive'] == true;
+                                  final isSafe = disk['isSafe'] == true;
+
+                                  IconData diskIcon = Icons.save_alt;
+                                  Color iconColor = isSelected ? theme.colorScheme.primary : Colors.grey;
+
+                                  if (isSafe) {
+                                    diskIcon = Icons.science;
+                                    iconColor = isSelected ? Colors.greenAccent : Colors.green.shade300;
+                                  } else if (isLive) {
+                                    diskIcon = Icons.usb;
+                                    iconColor = Colors.redAccent.withOpacity(0.5);
+                                  }
+
+                                  final double sizeGB = disk['size'] is int ? (disk['size'] as int) / (1024*1024*1024) : 0;
+                                  String subtitle = "${disk['type']} • ${sizeGB.toStringAsFixed(1)} GB";
+                                  if (isLive) subtitle = "Cannot Format (Live OS USB)";
+                                  if (isSafe) subtitle = "Safe Test Environment";
+
                                   return GestureDetector(
                                     onTap: () {
-                                      state.selectedDisk = disk['name'];
-                                      state.notifyListeners();
+                                      state.selectDisk(disk);
                                     },
                                     child: AnimatedContainer(
                                       duration: const Duration(milliseconds: 200),
@@ -139,14 +147,14 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                                       ),
                                       child: Row(
                                         children: [
-                                          Icon(Icons.save_alt, color: isSelected ? theme.colorScheme.primary : Colors.grey),
+                                          Icon(diskIcon, color: iconColor),
                                           const SizedBox(width: 16),
                                           Expanded(
                                             child: Column(
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
-                                                Text(disk['name'], style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
-                                                Text("${disk['type']} • ${disk['size']}", style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                                                Text(disk['name'], style: TextStyle(fontWeight: FontWeight.bold, color: isLive && !isSelected ? Colors.grey : textColor)),
+                                                Text(subtitle, style: TextStyle(color: isLive ? Colors.redAccent.withOpacity(0.7) : Colors.grey, fontSize: 13, fontWeight: isLive ? FontWeight.bold : FontWeight.normal)),
                                               ],
                                             ),
                                           ),
@@ -167,8 +175,9 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
               // Sağ Tarafta Ayarlar (File System & Partition Method)
               Expanded(
                 flex: 2,
-                child: Column(
-                  children: [
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
                     // Dosya Sistemi Seçimi
                     Container(
                       padding: const EdgeInsets.all(20),
@@ -222,7 +231,7 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                     ),
                   ],
                 ),
-              )
+              ))
             ],
           ),
         ),
@@ -242,7 +251,53 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                 ),
               ),
               ElevatedButton.icon(
-                onPressed: state.selectedDisk.isEmpty ? null : () => state.nextStep(),
+                onPressed: () {
+                  if (state.selectedDisk.isEmpty || state.selectedDiskDetails == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Lütfen kurulacak hedef diski seçiniz."), backgroundColor: Colors.orange)
+                    );
+                    return;
+                  }
+
+                  final isLive = state.selectedDiskDetails!['isLive'] == true;
+                  final isSafe = state.selectedDiskDetails!['isSafe'] == true;
+
+                  if (isLive) {
+                    showDialog(
+                      context: context, 
+                      builder: (c) => AlertDialog(
+                        title: const Text("Hatalı Hedef Sürücü", style: TextStyle(color: Colors.red)),
+                        content: const Text("Seçtiğiniz bu sürücü şu an çalıştırmakta olduğunuz Live ISO USB belleğidir. Aktif işletim sistemi medyasını formatlayamazsınız!"),
+                        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text("Tamam"))]
+                      )
+                    );
+                    return;
+                  }
+
+                  // Test modunda veya gerçek disk modunda onay iste
+                  showDialog(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: Text(isSafe ? 'TEST FORMATI ONAYI' : '⚠️ FORMAT UYARISI', style: TextStyle(color: isSafe ? Colors.green : Colors.red)),
+                      content: Text(
+                        isSafe 
+                         ? "${state.selectedDisk} sanal disk testidir. Fiziki disklerinize zarar vermez.\nDevam edilsin mi?"
+                         : "${state.selectedDisk} üzerindeki BÜTÜN VERİLER KALICI OLARAK SİLİNECEK.\nİşlemi onaylıyor musunuz?"
+                      ),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(c), child: const Text("İptal")),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: isSafe ? Colors.green : Colors.redAccent),
+                          onPressed: () {
+                            Navigator.pop(c);
+                            state.nextStep();
+                          }, 
+                          child: Text(isSafe ? "TESTE DEVAM ET" : "DİSKİ SİL VE KUR", style: const TextStyle(color: Colors.white))
+                        )
+                      ]
+                    )
+                  );
+                },
                 icon: const Icon(Icons.arrow_forward),
                 label: Text(state.t('next')),
                 style: theme.elevatedButtonTheme.style?.copyWith(

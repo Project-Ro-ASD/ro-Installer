@@ -1,8 +1,68 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../services/network_service.dart';
 
 class InstallerState extends ChangeNotifier {
   int _currentStep = 0;
   int get currentStep => _currentStep;
+
+  InstallerState() {
+    _initNetworkChecker();
+  }
+
+  Timer? _networkTimer;
+
+  void _initNetworkChecker() {
+    // İlk çalıştırma
+    _checkNetworkPeriodically();
+    // Ardından her 5 saniyede bir kontrol et
+    _networkTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+       _checkNetworkPeriodically();
+    });
+  }
+
+  @override
+  void dispose() {
+    _networkTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _checkNetworkPeriodically() async {
+     final wasEthernetConnected = isEthernetConnected;
+     isEthernetConnected = await NetworkService.instance.checkEthernet();
+     
+     if (wasEthernetConnected != isEthernetConnected) {
+        // Otomatik bağlantı ayarı
+        if (isEthernetConnected) networkStatus = 'connected';
+        notifyListeners();
+     }
+  }
+
+  Future<void> scanWifiNetworks() async {
+     isScanningWifi = true;
+     notifyListeners();
+     
+     wifiNetworks = await NetworkService.instance.scanWifi();
+     
+     // Halihazırda bağlı Wi-Fi varsa statüyü connected yap
+     final isWifiConnected = wifiNetworks.any((net) => net['inUse'] == true);
+     if (isWifiConnected && networkStatus == 'offline') {
+         networkStatus = 'connected';
+     }
+     
+     isScanningWifi = false;
+     notifyListeners();
+  }
+
+  Future<bool> connectToWifi(String ssid, String password) async {
+     final success = await NetworkService.instance.connectWifi(ssid, password);
+     if (success) {
+       await scanWifiNetworks(); // Listeyi yenile
+       networkStatus = 'connected';
+       notifyListeners();
+     }
+     return success;
+  }
 
   // Adımlar listesi (Dinamik - partitionMethod'a göre Partitions ekranı eklenir)
   List<String> get steps {
@@ -12,8 +72,12 @@ class InstallerState extends ChangeNotifier {
     return ["Welcome", "Theme", "Location", "Network", "Account", "Type", "Disk", "Kernel", "Install"];
   }
 
+  // ---- Geliştirici & Test Modu ----
+  bool isDeveloperMode = true; // Geliştirici arayüz elemanlarını gösterir
+  bool isMockEnabled = true;    // FFI çağrılarını simüle eder (Disk güvenliği için)
+
   // ---- 1. Welcome ----
-  String selectedLanguage = 'en';
+  String selectedLanguage = 'tr'; // Varsayılan Türkçe
 
   // ---- 2. Theme ----
   String themeMode = 'dark'; // 'light' veya 'dark'
@@ -25,26 +89,30 @@ class InstallerState extends ChangeNotifier {
 
   // ---- 4. Network ----
   String networkStatus = 'offline'; // 'offline' or 'connected'
+  bool isEthernetConnected = false;
+  List<Map<String, dynamic>> wifiNetworks = [];
+  bool isScanningWifi = false;
   
   // ---- 5. Account ----
-  String fullName = '';
-  String username = '';
-  String password = '';
-  bool isAdministrator = false;
+  String fullName = 'Geliştirici Test';
+  String username = 'dev';
+  String password = 'dev';
+  bool isAdministrator = true;
   
   // ---- 6. Type ----
-  String installType = 'standard'; // 'standard' veya 'advanced'
+  String installType = 'advanced'; // Deneysel varsayılan
   
   // ---- 7. Disk ----
   String selectedDisk = '';
-  double totalDiskSizeGB = 500.0; // Mock 500 gb seçili disk
-  String fileSystem = 'ext4'; // 'btrfs', 'ext4', 'xfs'
-  String partitionMethod = 'full'; // 'full', 'alongside', 'manual'
-  double linuxDiskSizeGB = 40.0; // 'alongside' için ayrılan alan
+  Map<String, dynamic>? selectedDiskDetails;
+  double totalDiskSizeGB = 120.0; 
+  String fileSystem = 'btrfs'; // Deneysel için btrfs
+  String partitionMethod = 'full'; 
+  double linuxDiskSizeGB = 60.0; 
   
   
   // ---- 8. Kernel ----
-  String kernelType = 'stable'; // 'stable' veya 'experimental'
+  String kernelType = 'experimental'; // Deneysel varsayılan
 
   // Navigasyon metodları
   void nextStep() {
@@ -97,6 +165,22 @@ class InstallerState extends ChangeNotifier {
     selectedDisk = disk;
     fileSystem = fs;
     partitionMethod = partition;
+    notifyListeners();
+  }
+
+  void selectDisk(Map<String, dynamic> diskObj) {
+    selectedDiskDetails = diskObj;
+    selectedDisk = diskObj['name'] as String;
+    
+    // Boyutu Byte'dan GB'a çeviriyoruz
+    final sizeBytes = diskObj['size'];
+    if (sizeBytes != null && sizeBytes is int) {
+       totalDiskSizeGB = sizeBytes / (1024 * 1024 * 1024);
+       if (totalDiskSizeGB < 40) {
+          totalDiskSizeGB = 40.0; // Slider patlamaması için min değer
+       }
+       linuxDiskSizeGB = totalDiskSizeGB - 20; // Varsayılan slider pozisyonu
+    }
     notifyListeners();
   }
 }
