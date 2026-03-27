@@ -8,14 +8,17 @@ OUTDIR ?= .
 tarball:
 	@echo ">>> Kaynak kodlar (tar.gz) arşivleniyor..."
 	mkdir -p $(NAME)-$(VERSION)
-	rsync -a --exclude='$(NAME)-$(VERSION)' \
-	         --exclude='.git' \
-	         --exclude='.dart_tool' \
-	         --exclude='.pub-cache' \
-	         --exclude='build' \
-	         --exclude='*.tar.gz' \
-	         --exclude='*.rpm' \
-	         ./ $(NAME)-$(VERSION)/
+	# rsync her ortamda yüklü olmadığı için cp ve tar kullanıyoruz
+	cp -a * $(NAME)-$(VERSION)/ 2>/dev/null || true
+	cp -a .[^.]* $(NAME)-$(VERSION)/ 2>/dev/null || true
+	# Arşiv içindeki dev ve build klasörlerini siliyoruz
+	rm -rf $(NAME)-$(VERSION)/$(NAME)-$(VERSION)
+	rm -rf $(NAME)-$(VERSION)/.git
+	rm -rf $(NAME)-$(VERSION)/.dart_tool
+	rm -rf $(NAME)-$(VERSION)/.pub-cache
+	rm -rf $(NAME)-$(VERSION)/build
+	rm -f $(NAME)-$(VERSION)/*.tar.gz
+	rm -f $(NAME)-$(VERSION)/*.rpm
 	tar -czf $(NAME)-$(VERSION).tar.gz $(NAME)-$(VERSION)
 	rm -rf $(NAME)-$(VERSION)
 
