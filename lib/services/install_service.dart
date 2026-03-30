@@ -145,8 +145,24 @@ class InstallService {
 
         // Mount
         onProgress(0.3, "Bölümler (/mnt) hedefine bağlanıyor...");
-        await runCmd('umount', ['-R', '/mnt'], log, isMock: isMock); 
-        if (!await runCmd('mount', [rootPart, '/mnt'], log, isMock: isMock)) return false;
+        await runCmd('umount', ['-R', '/mnt'], log, isMock: isMock);
+        
+        if (rootFs == 'btrfs') {
+          // BTRFS Subvolume yapısını kur
+          if (!await runCmd('mount', [rootPart, '/mnt'], log, isMock: isMock)) return false;
+          if (!await runCmd('btrfs', ['subvolume', 'create', '/mnt/@'], log, isMock: isMock)) return false;
+          if (!await runCmd('btrfs', ['subvolume', 'create', '/mnt/@home'], log, isMock: isMock)) return false;
+          await runCmd('umount', ['/mnt'], log, isMock: isMock);
+          
+          // Subvolume'leri bağla
+          if (!await runCmd('mount', ['-o', 'subvol=@', rootPart, '/mnt'], log, isMock: isMock)) return false;
+          if (!await runCmd('mkdir', ['-p', '/mnt/home'], log, isMock: isMock)) return false;
+          if (!await runCmd('mount', ['-o', 'subvol=@home', rootPart, '/mnt/home'], log, isMock: isMock)) return false;
+        } else {
+          // Normal Ext4 / XFS mount
+          if (!await runCmd('mount', [rootPart, '/mnt'], log, isMock: isMock)) return false;
+        }
+
         if (!await runCmd('mkdir', ['-p', '/mnt/boot/efi'], log, isMock: isMock)) return false;
         if (!await runCmd('mount', [efiPart, '/mnt/boot/efi'], log, isMock: isMock)) return false;
 
@@ -258,7 +274,21 @@ class InstallService {
         // ADIM 7: Mount işlemleri
         onProgress(0.3, "Bölümler (/mnt) hedefine bağlanıyor...");
         await runCmd('umount', ['-R', '/mnt'], log, isMock: isMock);
-        if (!await runCmd('mount', [rootPart, '/mnt'], log, isMock: isMock)) return false;
+        
+        if (rootFs == 'btrfs') {
+          // BTRFS Subvolume yapısını kur
+          if (!await runCmd('mount', [rootPart, '/mnt'], log, isMock: isMock)) return false;
+          if (!await runCmd('btrfs', ['subvolume', 'create', '/mnt/@'], log, isMock: isMock)) return false;
+          if (!await runCmd('btrfs', ['subvolume', 'create', '/mnt/@home'], log, isMock: isMock)) return false;
+          await runCmd('umount', ['/mnt'], log, isMock: isMock);
+          
+          // Subvolume'leri bağla
+          if (!await runCmd('mount', ['-o', 'subvol=@', rootPart, '/mnt'], log, isMock: isMock)) return false;
+          if (!await runCmd('mkdir', ['-p', '/mnt/home'], log, isMock: isMock)) return false;
+          if (!await runCmd('mount', ['-o', 'subvol=@home', rootPart, '/mnt/home'], log, isMock: isMock)) return false;
+        } else {
+          if (!await runCmd('mount', [rootPart, '/mnt'], log, isMock: isMock)) return false;
+        }
         
         // Mevcut EFI bölümünü formatlamadan mount et
         if (hasExistingEfi && existingEfiPart.isNotEmpty) {
@@ -330,6 +360,7 @@ class InstallService {
         '--exclude=/media/*',
         '--exclude=/lost+found',
         '--exclude=/etc/machine-id',
+        '--exclude=/var/log/audit/*',
         '/', // Kaynak: Calisan Live Kök
         '/mnt/' // Hedef
       ], log, isMock: isMock);
@@ -350,9 +381,24 @@ class InstallService {
       onProgress(0.8, "Zaman dilimi ve kullanıcı ayarları yapılandırılıyor...");
       String user = state['username'] ?? 'user';
       String pass = state['password'] ?? 'user';
-      String tz = state['selectedRegion'] ?? 'Europe/Istanbul';
+      String tz = state['selectedTimezone'] ?? 'Europe/Istanbul';
+      String kbd = state['selectedKeyboard'] ?? 'trq';
+      String hostname = 'ro-asd';
       
       await runCmd('chroot', ['/mnt', 'ln', '-sf', '/usr/share/zoneinfo/$tz', '/etc/localtime'], log, isMock: isMock);
+      
+      // Sistem kimliği (Machine ID) oluşturma
+      await runCmd('chroot', ['/mnt', 'systemd-machine-id-setup'], log, isMock: isMock);
+      
+      // Hostname (Makine Adı)
+      await runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "$hostname" > /etc/hostname'], log, isMock: isMock);
+      
+      // Vconsole (Klavye Düzeni)
+      await runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "KEYMAP=$kbd" > /etc/vconsole.conf'], log, isMock: isMock);
+      
+      // Locale (Dil)
+      await runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "LANG=en_US.UTF-8" > /etc/locale.conf'], log, isMock: isMock);
+
       await runCmd('chroot', ['/mnt', 'useradd', '-m', '-G', 'wheel,storage,power,network', '-s', '/bin/bash', user], log, isMock: isMock);
       
       await runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "$user:$pass" | chpasswd'], log, isMock: isMock);
@@ -360,6 +406,7 @@ class InstallService {
 
       if (state['isAdministrator'] == true) {
          await runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "$user ALL=(ALL:ALL) ALL" > /etc/sudoers.d/$user'], log, isMock: isMock);
+         await runCmd('chroot', ['/mnt', 'chmod', '0440', '/etc/sudoers.d/$user'], log, isMock: isMock);
       }
 
       // ACT 5: SİSTEM BAŞLATICI, FSTAB ve GÜVENLİK (GRUB2 & SELinux)
@@ -381,7 +428,9 @@ mount | grep " /mnt" | while read -r line; do
   [ -z "\$target_mp" ] && target_mp="/"
   opts="defaults"
   if [ "\$fstype" = "btrfs" ]; then
-     opts="defaults,compress=zstd:1,subvol=/"
+     actual_subvol=\$(echo "\$line" | grep -o 'subvol=[^, )]*')
+     [ -z "\$actual_subvol" ] && actual_subvol="subvol=/"
+     opts="defaults,compress=zstd:1,\$actual_subvol"
   elif [ "\$fstype" = "vfat" ]; then
      opts="umask=0077,shortname=winnt"
   fi
@@ -415,6 +464,7 @@ GRUB_TERMINAL_OUTPUT="console"
 GRUB_CMDLINE_LINUX="rhgb quiet"
 GRUB_DISABLE_RECOVERY="true"
 GRUB_ENABLE_BLSCFG=true
+GRUB_DISABLE_OS_PROBER=false
 EOF
       '''], log, isMock: isMock);
 
