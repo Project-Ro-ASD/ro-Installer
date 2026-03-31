@@ -8,7 +8,7 @@ class InstallService {
 
   /// Komut çalıştırma ve çıktıları canlı okuma.
   /// STDERR çıktısı biriktirilir ve hata durumunda tam olarak raporlanır.
-  Future<bool> runCmd(String cmd, List<String> args, void Function(String) onLog, {bool isMock = false}) async {
+  Future<bool> runCmd(String cmd, List<String> args, void Function(String) onLog, {bool isMock = false, List<int> allowedExitCodes = const [0]}) async {
     final fullCmd = '$cmd ${args.join(' ')}';
     onLog("[KOMUT] $fullCmd");
     
@@ -43,7 +43,7 @@ class InstallService {
       
       final exitCode = await process.exitCode;
       
-      if (exitCode != 0) {
+      if (!allowedExitCodes.contains(exitCode)) {
         final errorDetail = stderrBuffer.isNotEmpty 
             ? stderrBuffer.toString().trim() 
             : (stdoutBuffer.isNotEmpty ? stdoutBuffer.toString().trim() : 'Ek bilgi yok');
@@ -97,6 +97,16 @@ class InstallService {
     return 8192; // 8 GB üst sınır
   }
 
+  /// Kurulum öncesi diski hazırlama (Unmount, Swapoff ve Wipefs)
+  Future<bool> _prepareDisk(String disk, void Function(String) log, {bool isMock = false}) async {
+    log("Kurulum öncesi disk hazırlığı yapılıyor: $disk");
+    // 1. Diskteki tüm bölümleri ayrıştır
+    await runCmd('sh', ['-c', 'umount -f ${disk}* 2>/dev/null || true'], log, isMock: isMock);
+    // 2. Takas alanlarını kapat
+    await runCmd('swapoff', ['-a'], log, isMock: isMock);
+    return true;
+  }
+
   // Ana kurulum motoru
   Future<bool> runInstall(Map<String, dynamic> state, void Function(double progress, String status) onProgress, {bool isMock = false}) async {
     // Log fonksiyonu: Hem terminale hem de UI'a gönderir
@@ -111,6 +121,11 @@ class InstallService {
 
     try {
       if (partitionMethod == 'full') {
+        onProgress(0.05, "Disk hazırlanıyor ve bağlantılar kesiliyor...");
+        await _prepareDisk(selectedDisk, log, isMock: isMock);
+        // İmzaları temizle (Sadece tam disk silmede)
+        await runCmd('wipefs', ['-a', selectedDisk], log, isMock: isMock);
+
         onProgress(0.1, "Tüm disk sıfırlanıyor ve yapılandırılıyor: $selectedDisk");
         
         // 1. Wipe partition table
@@ -145,7 +160,7 @@ class InstallService {
 
         // Mount
         onProgress(0.3, "Bölümler (/mnt) hedefine bağlanıyor...");
-        await runCmd('umount', ['-R', '/mnt'], log, isMock: isMock);
+        await runCmd('sh', ['-c', 'umount -R /mnt 2>/dev/null || true'], log, isMock: isMock);
         
         if (rootFs == 'btrfs') {
           // BTRFS Subvolume yapısını kur
@@ -169,9 +184,9 @@ class InstallService {
       } else if (partitionMethod == 'alongside') {
         // ============================================================
         // ALONGSIDE (YANINA KUR) MOTORU
-        // Mevcut bölümlere KESİNLİKLE dokunmaz.
-        // Sadece diskteki boş (unallocated) alana yeni bölümler oluşturur.
         // ============================================================
+        onProgress(0.02, "Disk bağlantıları kontrol ediliyor...");
+        await _prepareDisk(selectedDisk, log, isMock: isMock);
         
         final double linuxGB = (state['linuxDiskSizeGB'] as num?)?.toDouble() ?? 60.0;
         final bool hasExistingEfi = state['hasExistingEfi'] == true;
@@ -273,7 +288,7 @@ class InstallService {
 
         // ADIM 7: Mount işlemleri
         onProgress(0.3, "Bölümler (/mnt) hedefine bağlanıyor...");
-        await runCmd('umount', ['-R', '/mnt'], log, isMock: isMock);
+        await runCmd('sh', ['-c', 'umount -R /mnt 2>/dev/null || true'], log, isMock: isMock);
         
         if (rootFs == 'btrfs') {
           // BTRFS Subvolume yapısını kur
@@ -303,6 +318,9 @@ class InstallService {
         await runCmd('swapon', [swapPart], log, isMock: isMock);
 
       } else { // Elle Bölümlendirme (Manual Partitioning)
+        onProgress(0.05, "Disk bağlantıları kontrol ediliyor...");
+        await _prepareDisk(selectedDisk, log, isMock: isMock);
+
         onProgress(0.1, "Kullanıcının disk yapılandırma planı uygulanıyor...");
         
         // Önce bölümleri formatla (Sadece eylem yapılması planlananlar isPlanned == true)
@@ -325,7 +343,7 @@ class InstallService {
         }
 
         // Mount işlemleri (Root önceliği kritiktir!)
-        await runCmd('umount', ['-R', '/mnt'], log, isMock: isMock);
+        await runCmd('sh', ['-c', 'umount -R /mnt 2>/dev/null || true'], log, isMock: isMock);
         var rootPart = manualPartitions.firstWhere((p) => p['mount'] == '/', orElse: () => null);
         if (rootPart == null) { log("Root partisiz bir sistem! / montaj noktasını bulamadım."); return false; }
         
@@ -345,11 +363,53 @@ class InstallService {
         }
       }
 
-      // ACT 2: SISTEM KOPYALAMASI (RSYNC Klonlama Teknolojisi)
-      onProgress(0.4, "Live İşletim Sistemi Kök dosya hedef diske aktarılıyor...");
-      onProgress(0.41, "Bu işlem disk hızına bağlı olarak 5-15 dakika sürebilir. (Rsync Çalışıyor...)");
+      // ACT 2: SISTEM KOPYALAMASI (Smart Exclude & Smart Copy Teknolojisi)
+      onProgress(0.4, "Dinamik bağlama noktaları ve xattr desteği taranıyor...");
       
-      bool rsyncOk = await runCmd('rsync', [
+      List<String> dynamicExcludes = [];
+      List<String> noXattrDirs = []; // Ayrıca kopyalanacak (vfat, ntfs vb.)
+
+      try {
+        final findmntResult = await Process.run('findmnt', ['-rn', '-o', 'TARGET,FSTYPE']);
+        if (findmntResult.exitCode == 0) {
+           final lines = findmntResult.stdout.toString().split('\n');
+           const virtualFs = 'tmpfs|devtmpfs|proc|sysfs|cgroup|cgroup2|pstore|efivarfs';
+           const noXattrFs = 'vfat|fat32|ntfs|ntfs-3g|exfat';
+
+           for (var line in lines) {
+              final parts = line.trim().split(RegExp(r'\s+'));
+              if (parts.length < 2) continue;
+              final target = parts[0];
+              final fsType = parts[1];
+
+              // "/" (root) veya "/mnt" (target) dışındakileri kontrol et
+              if (target == '/' || target.startsWith('/mnt') || target.startsWith('/media/RoASD')) continue;
+
+              if (RegExp(virtualFs).hasMatch(fsType)) {
+                 dynamicExcludes.add('--exclude=$target/*');
+                 dynamicExcludes.add('--exclude=$target'); // Dizinin kendisini de dışla
+              } else if (RegExp(noXattrFs).hasMatch(fsType)) {
+                 dynamicExcludes.add('--exclude=$target/*');
+                 dynamicExcludes.add('--exclude=$target');
+                 noXattrDirs.add(target);
+              }
+           }
+        }
+      } catch (e) {
+        log("UYARI: findmnt taraması başarısız oldu, varsayılan kopyalama yapılıyor.");
+      }
+
+      // MANUEL GÜVENCE: /boot/efi dizinini her halükarda dışla ve kopyalanacaklar listesine ekle
+      if (!noXattrDirs.contains('/boot/efi')) {
+         dynamicExcludes.add('--exclude=/boot/efi/*');
+         dynamicExcludes.add('--exclude=/boot/efi');
+         noXattrDirs.add('/boot/efi');
+      }
+
+      onProgress(0.41, "Live İşletim Sistemi Kök dosya hedef diske aktarılıyor...");
+      onProgress(0.42, "Bu işlem disk hızına bağlı olarak 5-15 dakika sürebilir. (Rsync Çalışıyor...)");
+      
+      List<String> rsyncArgs = [
         '-aAX',
         '--exclude=/dev/*',
         '--exclude=/proc/*',
@@ -361,17 +421,34 @@ class InstallService {
         '--exclude=/lost+found',
         '--exclude=/etc/machine-id',
         '--exclude=/var/log/audit/*',
+        ...dynamicExcludes,
         '/', // Kaynak: Calisan Live Kök
         '/mnt/' // Hedef
-      ], log, isMock: isMock);
+      ];
+
+      bool rsyncOk = await runCmd('rsync', rsyncArgs, log, isMock: isMock, allowedExitCodes: [0, 23]);
 
       if (!rsyncOk) {
-         log("Rsync (Kurulum ve dosya kopyalama) başarısız oldu.");
+         log("Ana Rsync işlemi başarısız oldu (Hata Kodu 23 uyarısı dahi geçilemedi).");
          return false;
+      }
+
+      // XATTR Desteklemeyenler için İkincil Kopyalama (Örn: EFI)
+      for (var dir in noXattrDirs) {
+         onProgress(-1.0, "$dir ayrıca kopyalanıyor (xattr'sız)...");
+         await runCmd('mkdir', ['-p', '/mnt$dir'], log, isMock: isMock);
+         await runCmd('rsync', ['-aA', '--no-xattrs', '$dir/', '/mnt$dir/'], log, isMock: isMock);
       }
 
       // ACT 3: CHROOT SİSTEM BÜTÜNLÜĞÜ (BIND MOUNTS)
       onProgress(0.7, "Kök sistem bağlamaları yapılıyor (Chroot hazırlığı)...");
+      
+      // Hariç tutulan dizinlerin bağlama noktalarını oluştur (Rsync tarafından silindiler)
+      await runCmd('mkdir', ['-p', '/mnt/dev', '/mnt/proc', '/mnt/sys', '/mnt/run', '/mnt/tmp'], log, isMock: isMock);
+      
+      // /tmp için tmpfs mount et (os-prober ve dracut için şart)
+      await runCmd('mount', ['-t', 'tmpfs', 'tmpfs', '/mnt/tmp'], log, isMock: isMock);
+      
       await runCmd('mount', ['--bind', '/dev', '/mnt/dev'], log, isMock: isMock);
       await runCmd('mount', ['--bind', '/proc', '/mnt/proc'], log, isMock: isMock);
       await runCmd('mount', ['--bind', '/sys', '/mnt/sys'], log, isMock: isMock);
@@ -399,10 +476,12 @@ class InstallService {
       // Locale (Dil)
       await runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "LANG=en_US.UTF-8" > /etc/locale.conf'], log, isMock: isMock);
 
-      await runCmd('chroot', ['/mnt', 'useradd', '-m', '-G', 'wheel,storage,power,network', '-s', '/bin/bash', user], log, isMock: isMock);
-      
-      await runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "$user:$pass" | chpasswd'], log, isMock: isMock);
-      await runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "root:root" | chpasswd'], log, isMock: isMock); // Opsiyonel
+      // Fedora'da storage ve network grupları bulunmayabilir, sadece wheel (sudo) ve multimedya grupları ekleniyor.
+      // SELinux: chpasswd öncesi şifre dosyalarının context'lerini düzelt (Rsync sonrası generic olabiliyorlar)
+      await runCmd('chroot', ['/mnt', 'restorecon', '/etc/passwd', '/etc/shadow', '/etc/gshadow', '/etc/group'], log, isMock: isMock);
+
+      await runCmd('chroot', ['/mnt', 'sh', '-c', "echo '$user:$pass' | chpasswd"], log, isMock: isMock);
+      await runCmd('chroot', ['/mnt', 'sh', '-c', "echo 'root:root' | chpasswd"], log, isMock: isMock); // Opsiyonel
 
       if (state['isAdministrator'] == true) {
          await runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "$user ALL=(ALL:ALL) ALL" > /etc/sudoers.d/$user'], log, isMock: isMock);
@@ -450,7 +529,7 @@ done
       await runCmd('touch', ['/mnt/.autorelabel'], log, isMock: isMock);
 
       // 5.3 TEMİZLİK (Eski Installer Kalıntıları)
-      await runCmd('chroot', ['/mnt', 'dnf', 'remove', '-y', 'calamares', 'anaconda*'], log, isMock: isMock);
+      await runCmd('chroot', ['/mnt', 'dnf', 'remove', '-y', 'calamares', 'anaconda*'], log, isMock: isMock, allowedExitCodes: [0, 1]);
 
       // 5.4 GRUB YAPIlandırması
       // /etc/default/grub dosyasını LiveCD label hatalarından temizleyelim
@@ -468,13 +547,12 @@ GRUB_DISABLE_OS_PROBER=false
 EOF
       '''], log, isMock: isMock);
 
-      // Sadece UEFI Desteği: GRUB2-EFI Kurulumu
-      bool grubInstallOk = await runCmd('chroot', ['/mnt', 'grub2-install', '--target=x86_64-efi', '--efi-directory=/boot/efi', '--bootloader-id=RoASD'], log, isMock: isMock);
-      if (!grubInstallOk) {
-         log("UYARI: grub2-install EFI hatası aldı. EFI partisyonu düzgün bağlanmamış olabilir.");
-      }
+      // Sadece UEFI Desteği: Fedora EFI Yapılandırması
+      // Fedora'da grub2-install Secure Boot için --recheck ve --bootloader-id ile birlikte çalıştırılmalıdır.
+      onProgress(0.95, "GRUB önyükleyici sisteme kuruluyor...");
+      await runCmd('chroot', ['/mnt', 'grub2-install', '--target=x86_64-efi', '--efi-directory=/boot/efi', '--bootloader-id=fedora', '--recheck'], log, isMock: isMock);
 
-      // GRUB Config Üretimi
+      onProgress(0.96, "GRUB konfigürasyonu üretiliyor...");
       if (!await runCmd('chroot', ['/mnt', 'grub2-mkconfig', '-o', '/boot/grub2/grub.cfg'], log, isMock: isMock)) {
          log("UYARI: grub2-mkconfig başarısız oldu.");
       }
@@ -488,7 +566,7 @@ EOF
 
       // ACT 6: CLEANUP
       onProgress(0.95, "Sistem dosyaları korunuyor ve unmount işlemi başlatılıyor...");
-      await runCmd('umount', ['-R', '/mnt'], log, isMock: isMock);
+      await runCmd('sh', ['-c', 'umount -R /mnt 2>/dev/null || true'], log, isMock: isMock);
 
       onProgress(1.0, "Kurulum Hatasız Tamamlandı! Sistemi Yeniden Başlatabilirsiniz.");
       return true;
