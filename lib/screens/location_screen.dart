@@ -56,8 +56,7 @@ class LocationScreen extends StatelessWidget {
                     items: ['United States', 'Türkiye', 'Germany', 'United Kingdom', 'España'],
                     onChanged: (val) {
                       if (val != null) {
-                        state.selectedRegion = val;
-                        state.notifyListeners();
+                        state.updateLocation(region: val);
                       }
                     },
                   ),
@@ -70,8 +69,7 @@ class LocationScreen extends StatelessWidget {
                     items: ['UTC', 'Europe/Istanbul', 'Europe/Berlin', 'America/New_York', 'Europe/Madrid'],
                     onChanged: (val) {
                       if (val != null) {
-                        state.selectedTimezone = val;
-                        state.notifyListeners();
+                        state.updateLocation(timezone: val);
                       }
                     },
                   ),
@@ -84,8 +82,7 @@ class LocationScreen extends StatelessWidget {
                     items: ['us', 'trq', 'trf', 'de', 'uk', 'es'],
                     onChanged: (val) {
                       if (val != null) {
-                        state.selectedKeyboard = val;
-                        state.notifyListeners();
+                        state.updateLocation(keyboard: val);
                       }
                     },
                   ),

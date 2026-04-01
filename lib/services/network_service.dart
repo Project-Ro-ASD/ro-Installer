@@ -1,14 +1,15 @@
-import 'dart:io';
+import 'command_runner.dart';
 
 class NetworkService {
   NetworkService._();
   static final NetworkService instance = NetworkService._();
+  final CommandRunner _commandRunner = CommandRunner.instance;
 
   Future<bool> checkEthernet() async {
     try {
-      final result = await Process.run('nmcli', ['-t', '-f', 'TYPE,STATE', 'dev', 'status']);
+      final result = await _commandRunner.run('nmcli', ['-t', '-f', 'TYPE,STATE', 'dev', 'status']);
       if (result.exitCode == 0) {
-        final lines = result.stdout.toString().split('\n');
+        final lines = result.stdout.split('\n');
         for (var line in lines) {
           if (line.startsWith('ethernet:connected')) {
             return true;
@@ -25,10 +26,10 @@ class NetworkService {
     final List<Map<String, dynamic>> networks = [];
     try {
       // SSID sonunda yer alıyor, bu nedenle split ederken SSID stringi bozulmaz
-      final result = await Process.run('nmcli', ['-t', '-e', 'no', '-f', 'IN-USE,SIGNAL,SECURITY,SSID', 'dev', 'wifi', 'list']);
+      final result = await _commandRunner.run('nmcli', ['-t', '-e', 'no', '-f', 'IN-USE,SIGNAL,SECURITY,SSID', 'dev', 'wifi', 'list']);
       
       if (result.exitCode == 0) {
-        final lines = result.stdout.toString().trim().split('\n');
+        final lines = result.stdout.trim().split('\n');
         for (var line in lines) {
           if (line.isEmpty) continue;
           final parts = line.split(':');
@@ -92,7 +93,7 @@ class NetworkService {
       if (password.isNotEmpty) {
         args.addAll(['password', password]);
       }
-      final result = await Process.run('nmcli', args);
+      final result = await _commandRunner.run('nmcli', args);
       // Exit code 0 başarlı demek.
       return result.exitCode == 0;
     } catch (e) {

@@ -1,9 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
+import 'command_runner.dart';
 
 class DiskService {
   DiskService._();
   static final DiskService instance = DiskService._();
+  final CommandRunner _commandRunner = CommandRunner.instance;
 
   // EFI System Partition GPT Type UUID (Standart)
   static const String _efiPartTypeUUID = 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b';
@@ -12,9 +13,9 @@ class DiskService {
     List<Map<String, dynamic>> diskList = [];
 
     try {
-      final result = await Process.run('lsblk', ['-J', '-b', '-o', 'NAME,MODEL,SIZE,TYPE,RM,MOUNTPOINTS']);
+      final result = await _commandRunner.run('lsblk', ['-J', '-b', '-o', 'NAME,MODEL,SIZE,TYPE,RM,MOUNTPOINTS']);
       if (result.exitCode == 0) {
-        final Map<String, dynamic> parsed = jsonDecode(result.stdout.toString());
+        final Map<String, dynamic> parsed = jsonDecode(result.stdout);
         if (parsed.containsKey('blockdevices')) {
           final devices = parsed['blockdevices'] as List<dynamic>;
           
@@ -80,12 +81,12 @@ class DiskService {
 
     try {
       // === ADIM 1: lsblk ile bölüm bilgilerini al ===
-      final lsblkResult = await Process.run('lsblk', [
+      final lsblkResult = await _commandRunner.run('lsblk', [
         '-J', '-b', '-o', 'NAME,FSTYPE,SIZE,PARTTYPE,MOUNTPOINTS', diskName
       ]);
 
       if (lsblkResult.exitCode == 0) {
-        final Map<String, dynamic> parsed = jsonDecode(lsblkResult.stdout.toString());
+        final Map<String, dynamic> parsed = jsonDecode(lsblkResult.stdout);
         if (parsed.containsKey('blockdevices')) {
           final devices = parsed['blockdevices'] as List<dynamic>;
           if (devices.isNotEmpty) {
@@ -159,7 +160,7 @@ class DiskService {
 
       // === ADIM 2: Boş alan hesaplaması ===
       // sgdisk ile daha doğru sonuç alınır
-      final sgdiskResult = await Process.run('sgdisk', ['-p', diskName]);
+      final sgdiskResult = await _commandRunner.run('sgdisk', ['-p', diskName]);
       if (sgdiskResult.exitCode == 0) {
         // sgdisk çıktısından "Total free space" satırını ara
         // Alternatif olarak lsblk'den basit hesaplama kullanılabilir

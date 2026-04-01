@@ -67,13 +67,7 @@ class WelcomeScreen extends StatelessWidget {
                       }).toList(),
                       onChanged: (val) {
                         if (val != null) {
-                          state.selectedLanguage = val;
-                          // UI güncellemesi için basitçe state.notifyListeners() çağrılabilir ama
-                          // doğrudan atamada provider tetiklenmiyorsa goToStep kullanamayız.
-                          // State'e _updateLanguage metodunu sonradan ekleyebiliriz veya
-                          // ThemeMode gibi provider tetikleyici bir setter yazarız.
-                          // Şimdilik state'e erişimimiz var.
-                          state.notifyListeners(); // class dışından public erişim varsa (not: yoksa metod yazarız)
+                          state.updateLanguage(val);
                         }
                       },
                     ),

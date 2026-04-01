@@ -24,14 +24,14 @@ Unlike traditional installers (like Calamares or Anaconda), Ro-Installer does no
 ### How it Works
 The architecture of Ro-Installer is built on two primary layers:
 1. **The UI Layer (Flutter):** Provides a reactive, state-driven (Provider) graphical interface supporting theming (Dark/Light mode) and dynamic routing based on user choices.
-2. **The System Backend Layer (Dart FFI & Process):** Operates under `root` privileges. It parses hardware components like disks (`lsblk`) and networks (`nmcli`) securely. 
+2. **The System Backend Layer (Dart Process):** Operates under `root` privileges. It parses hardware components like disks (`lsblk`) and networks (`nmcli`) securely. 
 
 When the user initiates the installation, the `InstallService`:
 - Translates the UI configuration into low-level shell commands.
 - Configures partition tables (`sgdisk` / Manual or Auto).
 - Formats volumes (optimized tightly for **BTRFS**, but supports `ext4`, `xfs`, and `fat32` for EFI).
 - Mirrors the Live environment cleanly into the host disk using `rsync` with massive speed improvements.
-- Handles user accounts, passwords (`useradd`, `chsh`), and installs the bootloader (`rEFInd`).
+- Handles user accounts, passwords, and installs the bootloader (`GRUB2`).
 
 ### How It Was Developed
 Ro-Installer was developed with **Simplicity and Safety** in mind. 
@@ -71,14 +71,14 @@ Geleneksel yükleyicilerin (Calamares veya Anaconda gibi) aksine, Ro-Installer h
 ### Sistem Nasıl Çalışır?
 Ro-Installer mimarisi iki ana katman üzerine kuruludur:
 1. **Arayüz Katmanı (Flutter):** State Management (Provider) tarafından tetiklenen tepkisel bir deneyim sunar. Dark/Light mod temalarını ve kullanıcının adımlarına göre dinamik yapıyı oluşturur.
-2. **Sistem ve Arka Plan Katmanı (Dart FFI & İşlemler):** `root` yetkileri altında çalışır. Diskleri (`lsblk`) ve Ağ donanımını (`nmcli`) güvenli bir şekilde tarar.
+2. **Sistem ve Arka Plan Katmanı (Dart Process İşlemleri):** `root` yetkileri altında çalışır. Diskleri (`lsblk`) ve Ağ donanımını (`nmcli`) güvenli bir şekilde tarar.
 
 Kullanıcı "Kurulumu Başlat" butonuna tıkladığında `InstallService` devreye girer:
 - Arayüzdeki planları en alt seviye BASH komutlarına çevirir.
 - Disk yapılarını ve bölümleri inşa eder (Otomatik veya Manuel Atama).
 - Diskleri biçimlendirir (**BTRFS** optimizasyonlu; `ext4`, `xfs`, EFI için `fat32` desteklenir).
 - Çalışan Canlı (Live OS) ortamınızı sisteminize inanılmaz bir hızda klonlamak için `rsync` teknolojisini kullanır.
-- Kullanıcı hesaplarını şifreler (`useradd`, `chroot`), zaman dilimini yazar ve sistem başlatıcıyı (`rEFInd` Bootloader) yapılandırır.
+- Kullanıcı hesaplarını şifreler, zaman dilimini yazar ve sistem başlatıcıyı (`GRUB2`) yapılandırır.
 
 ### Nasıl Geliştirildi?
 Yazılım, kurulum esnasında **Güvenlik ve Sadelik** felsefesi temel alınarak geliştirildi.

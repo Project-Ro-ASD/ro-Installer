@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../state/installer_state.dart';
@@ -332,8 +331,7 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
     return Expanded(
       child: GestureDetector(
         onTap: () {
-          state.fileSystem = code;
-          state.notifyListeners();
+          state.updateFileSystem(code);
         },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -380,8 +378,7 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
 
     return GestureDetector(
       onTap: isDisabled ? null : () {
-        state.partitionMethod = code;
-        state.notifyListeners();
+        state.updatePartitionMethod(code);
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
@@ -480,8 +477,7 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                         min: 44.0, // 40 GB root + 4 GB swap = min 44 GB
                         max: state.totalDiskSizeGB - 20, // Mevcut OS'a da en az 20 GB kalsın
                         onChanged: (val) {
-                          state.linuxDiskSizeGB = val;
-                          state.notifyListeners();
+                          state.updateLinuxDiskSize(val);
                         },
                       ),
                     ),

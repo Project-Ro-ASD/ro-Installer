@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../state/installer_state.dart';
+import '../services/install_log_export_service.dart';
 import '../services/install_service.dart';
 
 class InstallingScreen extends StatefulWidget {
@@ -16,8 +17,8 @@ class _InstallingScreenState extends State<InstallingScreen> with SingleTickerPr
   String _statusText = "Sistem yapılandırması başlatılıyor...";
   bool _isFinished = false;
   
-  // Custom Log list for Terminal overlay
-  final List<String> _logs = [];
+  final List<String> _statusHistory = [];
+  final List<String> _technicalLogs = [];
   final ScrollController _scrollController = ScrollController();
   
   // Animation state
@@ -65,7 +66,7 @@ class _InstallingScreenState extends State<InstallingScreen> with SingleTickerPr
   void _pushLog(String logMsg) {
      if (!mounted) return;
      setState(() {
-        _logs.add(logMsg);
+        _technicalLogs.add(logMsg);
      });
      // Auto scroll
      WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -79,8 +80,16 @@ class _InstallingScreenState extends State<InstallingScreen> with SingleTickerPr
      });
   }
 
+  void _pushStatus(String status) {
+    if (!mounted) return;
+    setState(() {
+      _statusHistory.add(status);
+    });
+  }
+
   Future<void> _startRealInstallation() async {
     final state = Provider.of<InstallerState>(context, listen: false);
+    final startedAt = DateTime.now();
 
     await Future.delayed(const Duration(seconds: 1)); 
 
@@ -99,19 +108,43 @@ class _InstallingScreenState extends State<InstallingScreen> with SingleTickerPr
       'existingEfiPartition': state.existingEfiPartition,
     };
 
+    _pushStatus(_statusText);
+
     bool success = await InstallService.instance.runInstall(stateMap, (progress, status) {
        if (!mounted) return;
-       // -1 signifies just a log entry
-       if (progress < 0) {
-          _pushLog(status);
-       } else {
-          setState(() {
-             _progress = progress;
-             _statusText = status;
-          });
-          _pushLog("[SİSTEM DURUMU] $status");
-       }
+       setState(() {
+          _progress = progress;
+          _statusText = status;
+       });
+       _pushStatus(status);
+    }, (message) {
+       _pushLog(message);
     }, isMock: state.isMockEnabled);
+
+    final finishedAt = DateTime.now();
+    final exportResult = await InstallLogExportService.instance.exportSession(
+      startedAt: startedAt,
+      finishedAt: finishedAt,
+      success: success,
+      finalStatus: _statusText,
+      statusHistory: _statusHistory,
+      technicalLogs: _technicalLogs,
+      installContext: {
+        'selectedDisk': state.selectedDisk,
+        'partitionMethod': state.partitionMethod,
+        'fileSystem': state.fileSystem,
+        'isAdministrator': state.isAdministrator,
+        'linuxDiskSizeGB': state.linuxDiskSizeGB,
+        'hasExistingEfi': state.hasExistingEfi,
+      },
+    );
+
+    if (exportResult.success) {
+      _pushLog('[LOG] Oturum kaydı yazıldı: ${exportResult.logPath}');
+      _pushLog('[LOG] Oturum özeti yazıldı: ${exportResult.summaryPath}');
+    } else {
+      _pushLog('[LOG] Oturum dışa aktarımı başarısız: ${exportResult.error}');
+    }
 
     if (!mounted) return;
     
@@ -191,26 +224,70 @@ class _InstallingScreenState extends State<InstallingScreen> with SingleTickerPr
 
           // Log Penceresi (Gerçek zamanlı Terminal çıktısı)
           if (_startExpansion)
-             Container(
-                width: 600,
-                height: 150,
-                margin: const EdgeInsets.symmetric(vertical: 10),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                   color: Colors.black.withOpacity(0.8),
-                   borderRadius: BorderRadius.circular(12),
-                   border: Border.all(color: Colors.white24)
-                ),
-                child: ListView.builder(
-                   controller: _scrollController,
-                   itemCount: _logs.length,
-                   itemBuilder: (context, index) {
-                      return Text(
-                         _logs[index],
-                         style: const TextStyle(color: Colors.greenAccent, fontFamily: 'monospace', fontSize: 11),
-                      );
-                   },
-                ),
+             Column(
+                children: [
+                   Container(
+                      width: 600,
+                      constraints: const BoxConstraints(maxHeight: 120),
+                      margin: const EdgeInsets.only(top: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                         color: theme.cardColor.withOpacity(isDark ? 0.45 : 0.7),
+                         borderRadius: BorderRadius.circular(12),
+                         border: Border.all(color: Colors.white24),
+                      ),
+                      child: Column(
+                         crossAxisAlignment: CrossAxisAlignment.start,
+                         children: [
+                            Text(
+                               'Durum Geçmişi',
+                               style: TextStyle(
+                                  color: textColor,
+                                  fontWeight: FontWeight.bold,
+                               ),
+                            ),
+                            const SizedBox(height: 8),
+                            ..._statusHistory.reversed.take(4).map(
+                              (entry) => Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Text(
+                                  entry,
+                                  style: TextStyle(
+                                    color: textColor.withOpacity(0.8),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ),
+                         ],
+                      ),
+                   ),
+                   Container(
+                      width: 600,
+                      height: 150,
+                      margin: const EdgeInsets.symmetric(vertical: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                         color: Colors.black.withOpacity(0.8),
+                         borderRadius: BorderRadius.circular(12),
+                         border: Border.all(color: Colors.white24)
+                      ),
+                      child: ListView.builder(
+                         controller: _scrollController,
+                         itemCount: _technicalLogs.length,
+                         itemBuilder: (context, index) {
+                            final logLine = _technicalLogs[index];
+                            final lineColor = logLine.startsWith('[STDERR]') || logLine.contains('[HATA]')
+                                ? Colors.redAccent
+                                : Colors.greenAccent;
+                            return Text(
+                               logLine,
+                               style: TextStyle(color: lineColor, fontFamily: 'monospace', fontSize: 11),
+                            );
+                         },
+                      ),
+                   ),
+                ],
              ),
 
           // Slayt Gösterisi

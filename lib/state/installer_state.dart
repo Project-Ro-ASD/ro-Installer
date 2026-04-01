@@ -105,12 +105,12 @@ class InstallerState extends ChangeNotifier {
   
   // ---- 5. Account ----
   String fullName = 'Geliştirici Test';
-  String username = 'dev';
-  String password = 'dev';
+  String username = '1234';
+  String password = '1234';
   bool isAdministrator = true;
   
   // ---- 6. Type ----
-  String installType = 'advanced'; // Deneysel varsayılan
+  String installType = 'standard'; // Deneysel varsayılan
   
   // ---- 7. Disk ----
   String selectedDisk = '';
@@ -132,7 +132,7 @@ class InstallerState extends ChangeNotifier {
   bool isDetectingOS = false; // UI'da loading göstermek için
   
   // ---- 8. Kernel ----
-  String kernelType = 'experimental'; // Deneysel varsayılan
+  String kernelType = 'stable'; // Deneysel varsayılan
 
   // Navigasyon metodları
   void nextStep() {
@@ -163,6 +163,22 @@ class InstallerState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateLanguage(String languageCode) {
+    selectedLanguage = languageCode;
+    notifyListeners();
+  }
+
+  void updateLocation({
+    String? region,
+    String? timezone,
+    String? keyboard,
+  }) {
+    if (region != null) selectedRegion = region;
+    if (timezone != null) selectedTimezone = timezone;
+    if (keyboard != null) selectedKeyboard = keyboard;
+    notifyListeners();
+  }
+
   void updateInstallType(String type) {
     installType = type;
     // Eğer standart kurulum seçilirse, deneysel kernel kapatılıp otomatik stable yapılır
@@ -189,6 +205,21 @@ class InstallerState extends ChangeNotifier {
     selectedDisk = disk;
     fileSystem = fs;
     partitionMethod = partition;
+    notifyListeners();
+  }
+
+  void updateFileSystem(String fs) {
+    fileSystem = fs;
+    notifyListeners();
+  }
+
+  void updatePartitionMethod(String method) {
+    partitionMethod = method;
+    notifyListeners();
+  }
+
+  void updateLinuxDiskSize(double sizeGb) {
+    linuxDiskSizeGB = sizeGb;
     notifyListeners();
   }
 

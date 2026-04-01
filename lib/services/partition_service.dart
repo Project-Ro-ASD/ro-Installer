@@ -1,17 +1,18 @@
 import 'dart:convert';
-import 'dart:io';
+import 'command_runner.dart';
 
 class PartitionService {
   PartitionService._();
   static final PartitionService instance = PartitionService._();
+  final CommandRunner _commandRunner = CommandRunner.instance;
 
   Future<List<Map<String, dynamic>>> getPartitions(String diskName) async {
     List<Map<String, dynamic>> partitionList = [];
     
     try {
-      final result = await Process.run('lsblk', ['-J', '-b', '-o', 'NAME,FSTYPE,SIZE,MOUNTPOINT,PARTFLAGS', diskName]);
+      final result = await _commandRunner.run('lsblk', ['-J', '-b', '-o', 'NAME,FSTYPE,SIZE,MOUNTPOINT,PARTFLAGS', diskName]);
       if (result.exitCode == 0) {
-        final Map<String, dynamic> parsed = jsonDecode(result.stdout.toString());
+        final Map<String, dynamic> parsed = jsonDecode(result.stdout);
         if (parsed.containsKey('blockdevices')) {
           final devices = parsed['blockdevices'] as List<dynamic>;
           if (devices.isNotEmpty) {

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'services/command_runner.dart';
 import 'theme/app_theme.dart';
 import 'state/installer_state.dart';
 import 'widgets/installer_layout.dart';
@@ -16,6 +17,7 @@ import 'screens/kernel_screen.dart';
 import 'screens/installing_screen.dart';
 
 void main() async {
+  final commandRunner = CommandRunner.instance;
   // ═══════════════════════════════════════════════════
   // ROOT YETKİ KONTROLÜ
   // Disk yazma, mount, mkfs, sgdisk gibi tüm komutlar
@@ -24,28 +26,29 @@ void main() async {
   // ═══════════════════════════════════════════════════
   
   // Mevcut kullanıcı root mu kontrol et
+  final idResult = await commandRunner.run('id', ['-u']);
   final uid = int.tryParse(Platform.environment['UID'] ?? 
-      (await Process.run('id', ['-u'])).stdout.toString().trim()) ?? -1;
+      idResult.stdout.trim()) ?? -1;
   
   if (uid != 0) {
     // Root değiliz — pkexec ile yeniden başlat
-    print('[ro-Installer] Root yetkisi gerekiyor (UID: $uid). pkexec ile yükseltiliyor...');
+    debugPrint('[ro-Installer] Root yetkisi gerekiyor (UID: $uid). pkexec ile yükseltiliyor...');
     
     // Kendi çalıştırılabilir dosyamızın yolunu bul
     final execPath = Platform.resolvedExecutable;
     
-    try {
-      final result = await Process.run('pkexec', [execPath, ...Platform.executableArguments]);
-      // pkexec bittiğinde (kullanıcı iptal etti veya uygulama kapandı)
-      exit(result.exitCode);
-    } catch (e) {
-      print('[ro-Installer] pkexec başlatılamadı: $e');
-      print('[ro-Installer] Lütfen uygulamayı "sudo ro-installer" ile başlatın.');
+    final result = await commandRunner.run('pkexec', [execPath, ...Platform.executableArguments]);
+    if (!result.started) {
+      debugPrint('[ro-Installer] pkexec başlatılamadı: ${result.stderr}');
+      debugPrint('[ro-Installer] Lütfen uygulamayı "sudo ro-installer" ile başlatın.');
       exit(1);
     }
+
+    // pkexec bittiğinde (kullanıcı iptal etti veya uygulama kapandı)
+    exit(result.exitCode);
   }
 
-  print('[ro-Installer] Root yetkisi doğrulandı (UID: $uid). Başlatılıyor...');
+  debugPrint('[ro-Installer] Root yetkisi doğrulandı (UID: $uid). Başlatılıyor...');
 
   runApp(
     ChangeNotifierProvider(
