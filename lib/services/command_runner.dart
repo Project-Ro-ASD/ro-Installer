@@ -53,11 +53,47 @@ class CommandResult {
 
 typedef CommandLogCallback = void Function(CommandLogEvent event);
 
-class CommandRunner {
-  CommandRunner._();
+/// CommandRunner soyut sınıfı.
+///
+/// Tüm servisler bu arayüz üzerinden komut çalıştırır.
+/// Üretimde [RealCommandRunner], testlerde [FakeCommandRunner] kullanılır.
+///
+/// Kullanım:
+///   CommandRunner.instance         → mevcut aktif runner'a erişir
+///   CommandRunner.setInstance(...)  → test ortamında runner değiştirir
+abstract class CommandRunner {
+  /// Mevcut aktif CommandRunner.
+  /// Varsayılan olarak [RealCommandRunner] kullanılır.
+  /// Test ortamında [setInstance] ile değiştirilebilir.
+  static CommandRunner _instance = RealCommandRunner();
+  static CommandRunner get instance => _instance;
 
-  static final CommandRunner instance = CommandRunner._();
+  /// Test veya özel senaryolarda runner'ı değiştirmek için kullanılır.
+  /// Üretim kodunda çağrılmamalıdır.
+  static void setInstance(CommandRunner runner) {
+    _instance = runner;
+  }
 
+  /// Runner'ı varsayılan [RealCommandRunner]'a geri döndürür.
+  static void resetInstance() {
+    _instance = RealCommandRunner();
+  }
+
+  /// Verilen komutu çalıştırır ve sonucu döndürür.
+  Future<CommandResult> run(
+    String command,
+    List<String> args, {
+    bool isMock = false,
+    CommandLogCallback? onLog,
+  });
+}
+
+/// Gerçek sistem komutları çalıştıran CommandRunner uygulaması.
+///
+/// [Process.start] kullanarak komutları çalıştırır,
+/// stdout/stderr akışlarını dinler ve sonucu döndürür.
+class RealCommandRunner extends CommandRunner {
+  @override
   Future<CommandResult> run(
     String command,
     List<String> args, {

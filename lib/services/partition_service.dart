@@ -2,9 +2,13 @@ import 'dart:convert';
 import 'command_runner.dart';
 
 class PartitionService {
-  PartitionService._();
-  static final PartitionService instance = PartitionService._();
-  final CommandRunner _commandRunner = CommandRunner.instance;
+  PartitionService({CommandRunner? commandRunner})
+      : _commandRunner = commandRunner ?? CommandRunner.instance;
+
+  /// Varsayılan singleton erişimi (geriye uyumluluk için)
+  static final PartitionService instance = PartitionService();
+
+  final CommandRunner _commandRunner;
 
   Future<List<Map<String, dynamic>>> getPartitions(String diskName) async {
     List<Map<String, dynamic>> partitionList = [];

@@ -1,0 +1,30 @@
+{
+  "blockdevices": [
+    {
+      "name": "sda",
+      "model": "VBOX HARDDISK",
+      "size": 107374182400,
+      "type": "disk",
+      "rm": false,
+      "mountpoints": [null],
+      "children": [
+        {
+          "name": "sda1",
+          "model": null,
+          "size": 536870912,
+          "type": "part",
+          "rm": false,
+          "mountpoints": [null]
+        },
+        {
+          "name": "sda2",
+          "model": null,
+          "size": 106837311488,
+          "type": "part",
+          "rm": false,
+          "mountpoints": [null]
+        }
+      ]
+    }
+  ]
+}

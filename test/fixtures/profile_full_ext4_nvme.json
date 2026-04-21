@@ -1,0 +1,10 @@
+{
+  "selectedDisk": "/dev/nvme0n1",
+  "partitionMethod": "full",
+  "fileSystem": "ext4",
+  "username": "admin",
+  "password": "secure123",
+  "timezone": "America/New_York",
+  "keyboard": "us",
+  "isAdministrator": true
+}

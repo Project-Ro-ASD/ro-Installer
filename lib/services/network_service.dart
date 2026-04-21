@@ -1,9 +1,13 @@
 import 'command_runner.dart';
 
 class NetworkService {
-  NetworkService._();
-  static final NetworkService instance = NetworkService._();
-  final CommandRunner _commandRunner = CommandRunner.instance;
+  NetworkService({CommandRunner? commandRunner})
+      : _commandRunner = commandRunner ?? CommandRunner.instance;
+
+  /// Varsayılan singleton erişimi (geriye uyumluluk için)
+  static final NetworkService instance = NetworkService();
+
+  final CommandRunner _commandRunner;
 
   Future<bool> checkEthernet() async {
     try {

@@ -1,0 +1,30 @@
+{
+  "blockdevices": [
+    {
+      "name": "nvme0n1",
+      "model": "Samsung 980 PRO 1TB",
+      "size": 1000204886016,
+      "type": "disk",
+      "rm": false,
+      "mountpoints": [null],
+      "children": [
+        {
+          "name": "nvme0n1p1",
+          "model": null,
+          "size": 536870912,
+          "type": "part",
+          "rm": false,
+          "mountpoints": [null]
+        },
+        {
+          "name": "nvme0n1p2",
+          "model": null,
+          "size": 999667015104,
+          "type": "part",
+          "rm": false,
+          "mountpoints": [null]
+        }
+      ]
+    }
+  ]
+}

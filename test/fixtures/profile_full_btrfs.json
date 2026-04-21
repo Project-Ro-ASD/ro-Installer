@@ -1,0 +1,10 @@
+{
+  "selectedDisk": "/dev/sda",
+  "partitionMethod": "full",
+  "fileSystem": "btrfs",
+  "username": "testuser",
+  "password": "test1234",
+  "timezone": "Europe/Istanbul",
+  "keyboard": "trq",
+  "isAdministrator": true
+}

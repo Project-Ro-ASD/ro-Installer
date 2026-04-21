@@ -22,160 +22,665 @@ class ChrootConfigStage {
     ctx.log('════════════════════════════════════════════');
 
     // ── 6.1: Bind Mount'ları Oluştur ──
-    ctx.onProgress(0.7, 'Kök sistem bağlamaları yapılıyor (Chroot hazırlığı)...');
+    ctx.onProgress(
+      0.7,
+      'Kök sistem bağlamaları yapılıyor (Chroot hazırlığı)...',
+    );
 
     // Rsync tarafından dışlanan dizinlerin bağlama noktalarını oluştur
-    await ctx.runCmd('mkdir', ['-p', '/mnt/dev', '/mnt/proc', '/mnt/sys', '/mnt/run', '/mnt/tmp'], ctx.log, isMock: ctx.isMock);
+    StageResult? failure = await _requireCommand(ctx, 'mkdir', [
+      '-p',
+      '/mnt/dev',
+      '/mnt/proc',
+      '/mnt/sys',
+      '/mnt/run',
+      '/mnt/tmp',
+    ], 'Chroot bağlama dizinleri oluşturulamadı.');
+    if (failure != null) return failure;
 
     // /tmp için tmpfs mount et (os-prober ve dracut için şart)
-    await ctx.runCmd('mount', ['-t', 'tmpfs', 'tmpfs', '/mnt/tmp'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'mount', [
+      '-t',
+      'tmpfs',
+      'tmpfs',
+      '/mnt/tmp',
+    ], '/mnt/tmp için tmpfs bağlanamadı.');
+    if (failure != null) return failure;
 
     // --rbind: /dev/pts, /dev/shm, /sys/firmware/efi/efivars gibi alt mount'ları da dahil eder
     // Bu dracut ve grub2-install için EFI ve cihaz erişiminde kritik önemdedir
-    await ctx.runCmd('mount', ['--rbind', '/dev', '/mnt/dev'], ctx.log, isMock: ctx.isMock);
-    await ctx.runCmd('mount', ['--make-rslave', '/mnt/dev'], ctx.log, isMock: ctx.isMock);
-    await ctx.runCmd('mount', ['--rbind', '/proc', '/mnt/proc'], ctx.log, isMock: ctx.isMock);
-    await ctx.runCmd('mount', ['--make-rslave', '/mnt/proc'], ctx.log, isMock: ctx.isMock);
-    await ctx.runCmd('mount', ['--rbind', '/sys', '/mnt/sys'], ctx.log, isMock: ctx.isMock);
-    await ctx.runCmd('mount', ['--make-rslave', '/mnt/sys'], ctx.log, isMock: ctx.isMock);
-    await ctx.runCmd('mount', ['--rbind', '/run', '/mnt/run'], ctx.log, isMock: ctx.isMock);
-    await ctx.runCmd('mount', ['--make-rslave', '/mnt/run'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'mount', [
+      '--rbind',
+      '/dev',
+      '/mnt/dev',
+    ], '/dev bağı hedef sisteme aktarılamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'mount', [
+      '--make-rslave',
+      '/mnt/dev',
+    ], '/mnt/dev için rslave ayarı uygulanamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'mount', [
+      '--rbind',
+      '/proc',
+      '/mnt/proc',
+    ], '/proc bağı hedef sisteme aktarılamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'mount', [
+      '--make-rslave',
+      '/mnt/proc',
+    ], '/mnt/proc için rslave ayarı uygulanamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'mount', [
+      '--rbind',
+      '/sys',
+      '/mnt/sys',
+    ], '/sys bağı hedef sisteme aktarılamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'mount', [
+      '--make-rslave',
+      '/mnt/sys',
+    ], '/mnt/sys için rslave ayarı uygulanamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'mount', [
+      '--rbind',
+      '/run',
+      '/mnt/run',
+    ], '/run bağı hedef sisteme aktarılamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'mount', [
+      '--make-rslave',
+      '/mnt/run',
+    ], '/mnt/run için rslave ayarı uygulanamadı.');
+    if (failure != null) return failure;
 
     // ── 6.2: Kullanıcı ve Sistem Ayarları ──
-    ctx.onProgress(0.8, 'Zaman dilimi ve kullanıcı ayarları yapılandırılıyor...');
+    ctx.onProgress(
+      0.8,
+      'Zaman dilimi ve kullanıcı ayarları yapılandırılıyor...',
+    );
 
     String user = ctx.state['username'] ?? 'user';
     String pass = ctx.state['password'] ?? 'user';
     String tz = ctx.state['selectedTimezone'] ?? 'Europe/Istanbul';
     String kbd = ctx.state['selectedKeyboard'] ?? 'trq';
     String hostname = 'ro-asd';
+    final isAdministrator = ctx.state['isAdministrator'] == true;
 
     // Zaman dilimi
-    await ctx.runCmd('chroot', ['/mnt', 'ln', '-sf', '/usr/share/zoneinfo/$tz', '/etc/localtime'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'ln',
+      '-sf',
+      '/usr/share/zoneinfo/$tz',
+      '/etc/localtime',
+    ], 'Zaman dilimi ayarlanamadı.');
+    if (failure != null) return failure;
 
     // Sistem kimliği (Machine ID) oluşturma
-    await ctx.runCmd('chroot', ['/mnt', 'systemd-machine-id-setup'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'systemd-machine-id-setup',
+    ], 'Machine ID oluşturulamadı.');
+    if (failure != null) return failure;
 
     // Hostname (Makine Adı)
-    await ctx.runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "$hostname" > /etc/hostname'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      'echo "$hostname" > /etc/hostname',
+    ], 'Hostname yazılamadı.');
+    if (failure != null) return failure;
 
     // Vconsole (Klavye Düzeni)
-    await ctx.runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "KEYMAP=$kbd" > /etc/vconsole.conf'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      'echo "KEYMAP=$kbd" > /etc/vconsole.conf',
+    ], 'Klavye düzeni yapılandırılamadı.');
+    if (failure != null) return failure;
 
     // Locale (Dil)
-    await ctx.runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "LANG=en_US.UTF-8" > /etc/locale.conf'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      'echo "LANG=en_US.UTF-8" > /etc/locale.conf',
+    ], 'Locale yapılandırması yazılamadı.');
+    if (failure != null) return failure;
 
     // ── 6.3: SELinux Context Düzeltmesi (chpasswd öncesi) ──
-    await ctx.runCmd('chroot', ['/mnt', 'restorecon', '/etc/passwd', '/etc/shadow', '/etc/gshadow', '/etc/group'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'restorecon',
+      '/etc/passwd',
+      '/etc/shadow',
+      '/etc/gshadow',
+      '/etc/group',
+    ], 'SELinux hesap dosyası context düzeltmesi başarısız oldu.');
+    if (failure != null) return failure;
 
     // ── 6.4: Kullanıcı Hesabı ve Şifre ──
-    await ctx.runCmd('chroot', ['/mnt', 'sh', '-c', "echo '$user:$pass' | chpasswd"], ctx.log, isMock: ctx.isMock);
-    await ctx.runCmd('chroot', ['/mnt', 'sh', '-c', "echo 'root:root' | chpasswd"], ctx.log, isMock: ctx.isMock); // Opsiyonel
+    // 1. Kullanıcıyı oluştur (home dizini, bash shell, yöneticiyse wheel grubu)
+    final useraddArgs = <String>['/mnt', 'useradd', '-m', '-s', '/bin/bash'];
+    if (isAdministrator) {
+      useraddArgs.addAll(['-G', 'wheel']);
+    }
+    useraddArgs.add(user);
+    failure = await _requireCommand(
+      ctx,
+      'chroot',
+      useraddArgs,
+      'Kullanıcı hesabı oluşturulamadı: $user',
+    );
+    if (failure != null) return failure;
 
-    if (ctx.state['isAdministrator'] == true) {
-      await ctx.runCmd('chroot', ['/mnt', 'sh', '-c', 'echo "$user ALL=(ALL:ALL) ALL" > /etc/sudoers.d/$user'], ctx.log, isMock: ctx.isMock);
-      await ctx.runCmd('chroot', ['/mnt', 'chmod', '0440', '/etc/sudoers.d/$user'], ctx.log, isMock: ctx.isMock);
+    // 2. Parolasını belirle
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      "printf '%s\\n' ${_shellQuote('$user:$pass')} | chpasswd",
+    ], 'Kullanıcı parolası ayarlanamadı: $user');
+    if (failure != null) return failure;
+
+    // 3. Root hesabını kilitle (Güvenlik zafiyetini kapat)
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'passwd',
+      '-l',
+      'root',
+    ], 'Root hesabı kilitlenemedi.');
+    if (failure != null) return failure;
+
+    if (isAdministrator) {
+      failure = await _requireCommand(ctx, 'chroot', [
+        '/mnt',
+        'sh',
+        '-c',
+        "printf '%s\\n' ${_shellQuote('$user ALL=(ALL:ALL) ALL')} > /etc/sudoers.d/$user",
+      ], 'Sudoers kuralı yazılamadı: $user');
+      if (failure != null) return failure;
+      failure = await _requireCommand(ctx, 'chroot', [
+        '/mnt',
+        'chmod',
+        '0440',
+        '/etc/sudoers.d/$user',
+      ], 'Sudoers dosya izni ayarlanamadı: $user');
+      if (failure != null) return failure;
     }
 
     // ── 6.5: Eski Installer ve Live CD Kalıntıları Temizliği ──
-    ctx.onProgress(0.82, 'Live CD ve eski installer kalıntıları temizleniyor...');
+    ctx.onProgress(
+      0.82,
+      'Live CD ve eski installer kalıntıları temizleniyor...',
+    );
 
     // Eski installer paketlerini kaldır
-    await ctx.runCmd('chroot', ['/mnt', 'dnf', 'remove', '-y', 'calamares', 'anaconda*'], ctx.log, isMock: ctx.isMock, allowedExitCodes: [0, 1]);
+    await _runOptionalCommand(
+      ctx,
+      'chroot',
+      ['/mnt', 'dnf', 'remove', '-y', 'calamares', 'anaconda*'],
+      'Canlı ortam kurulum paketleri temizlenemedi; gereksiz paket kalıntıları kalabilir.',
+      allowedExitCodes: const [0, 1],
+    );
 
     // Live CD servis kalıntılarını devre dışı bırak ve kaldır
     // Bu servisler yalnızca Live ortamda gereklidir, kurulu sistemde çalışmamalıdır
-    await ctx.runCmd('chroot', ['/mnt', 'sh', '-c', '''
+    await _runOptionalCommand(
+      ctx,
+      'chroot',
+      [
+        '/mnt',
+        'sh',
+        '-c',
+        '''
       systemctl disable livesys.service 2>/dev/null || true
       systemctl disable livesys-late.service 2>/dev/null || true
       rm -f /etc/systemd/system/livesys.service 2>/dev/null || true
       rm -f /etc/systemd/system/livesys-late.service 2>/dev/null || true
       rm -f /usr/lib/systemd/system/livesys.service 2>/dev/null || true
       rm -f /usr/lib/systemd/system/livesys-late.service 2>/dev/null || true
-    '''], ctx.log, isMock: ctx.isMock, allowedExitCodes: [0, 1]);
+    ''',
+      ],
+      'Live servis kalıntıları tamamen temizlenemedi.',
+      allowedExitCodes: const [0, 1],
+    );
 
     // ro-Installer autostart dosyasını kurulu sistemden kaldır
     // (Kurulu sistemde artık yükleyiciye gerek yok)
-    await ctx.runCmd('chroot', ['/mnt', 'rm', '-f', '/etc/xdg/autostart/ro-Installer.desktop'], ctx.log, isMock: ctx.isMock, allowedExitCodes: [0, 1]);
+    await _runOptionalCommand(
+      ctx,
+      'chroot',
+      ['/mnt', 'rm', '-f', '/etc/xdg/autostart/ro-Installer.desktop'],
+      'Kurulu sistemden eski autostart girdisi temizlenemedi.',
+      allowedExitCodes: const [0, 1],
+    );
 
     // liveuser kalıntılarını temizle (kurulu sistemde bulunmamalı)
-    await ctx.runCmd('chroot', ['/mnt', 'sh', '-c', '''
+    await _runOptionalCommand(
+      ctx,
+      'chroot',
+      [
+        '/mnt',
+        'sh',
+        '-c',
+        '''
       userdel -r liveuser 2>/dev/null || true
       rm -f /etc/sudoers.d/ro-installer-live 2>/dev/null || true
-    '''], ctx.log, isMock: ctx.isMock, allowedExitCodes: [0, 1]);
+    ''',
+      ],
+      'liveuser kalıntıları tamamen temizlenemedi.',
+      allowedExitCodes: const [0, 1],
+    );
 
     // /var/lib/dbus/machine-id senkronizasyonu
-    await ctx.runCmd('chroot', ['/mnt', 'sh', '-c', 'ln -sf /etc/machine-id /var/lib/dbus/machine-id 2>/dev/null || true'], ctx.log, isMock: ctx.isMock);
+    await _runOptionalCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      'ln -sf /etc/machine-id /var/lib/dbus/machine-id 2>/dev/null || true',
+    ], '/var/lib/dbus/machine-id senkronizasyonu doğrulanamadı.');
 
     // ── 6.6: FSTAB Üretimi ──
-    // findmnt kullanarak güvenilir fstab üretimi:
-    // - Sanal FS'leri (tmpfs, devtmpfs, proc, sysfs, devpts) filtreler
-    // - Sadece gerçek blok cihazlarını (/dev/ ile başlayanları) yazar
-    // - BTRFS subvolume bilgisini mount seçeneklerinden doğru alır
+    // findmnt -R /mnt yaklaşımı /mnt/run altına bind edilen canlı ortam mountlarını
+    // hedef sisteme sızdırdığı için girdileri kurulum planından deterministik üret.
     ctx.onProgress(0.85, 'Fstab ve SELinux yapılandırılıyor...');
 
-    await ctx.runCmd('sh', ['-c', '''
-cat > /mnt/etc/fstab << 'FSTAB_HEADER'
-# /etc/fstab generated by ro-Installer
-# <device>  <mount>  <type>  <options>  <dump>  <pass>
-FSTAB_HEADER
+    final fstabEntries = await _buildFstabEntries(ctx);
+    if (fstabEntries.isEmpty) {
+      ctx.log('HATA: Kurulum planından fstab girdisi üretilemedi.');
+      return StageResult.fail('/etc/fstab üretilemedi.');
+    }
 
-# findmnt ile /mnt altındaki tüm gerçek mount noktalarını tara
-findmnt -rn -o SOURCE,TARGET,FSTYPE,OPTIONS -R /mnt | while read -r src target fstype options; do
-  # Sanal dosya sistemlerini atla
-  case "\$fstype" in
-    tmpfs|devtmpfs|proc|sysfs|devpts|cgroup|cgroup2|pstore|efivarfs|securityfs|debugfs|configfs|fusectl|hugetlbfs|mqueue|binfmt_misc)
-      continue
-      ;;
-  esac
-
-  # Sadece gerçek blok cihazlarını al (/dev/ ile başlayanlar)
-  case "\$src" in
-    /dev/*) ;;
-    *) continue ;;
-  esac
-
-  # UUID al
-  uuid=\$(blkid -s UUID -o value "\$src" 2>/dev/null)
-  if [ -z "\$uuid" ]; then continue; fi
-
-  # Mount noktasından /mnt prefix'ini kaldır
-  target_mp=\${target#/mnt}
-  [ -z "\$target_mp" ] && target_mp="/"
-
-  # Dosya sistemine göre mount opsiyonları belirle
-  opts="defaults"
-  if [ "\$fstype" = "btrfs" ]; then
-     # Mevcut mount seçeneklerinden subvol bilgisini al
-     actual_subvol=\$(echo "\$options" | grep -o 'subvol=[^,]*')
-     [ -z "\$actual_subvol" ] && actual_subvol="subvol=/"
-     opts="defaults,compress=zstd:1,\$actual_subvol"
-  elif [ "\$fstype" = "vfat" ]; then
-     opts="umask=0077,shortname=winnt"
-  fi
-
-  echo "UUID=\$uuid \$target_mp \$fstype \$opts 0 0" >> /mnt/etc/fstab
-done
-
-# Aktif swap bölümlerini fstab'a ekle
-swaps=\$(lsblk -rn -o NAME,FSTYPE | awk '\$2=="swap"{print \$1}')
-for sw in \$swaps; do
-   uuid=\$(blkid -s UUID -o value /dev/\$sw 2>/dev/null)
-   if [ -n "\$uuid" ]; then
-      echo "UUID=\$uuid none swap defaults 0 0" >> /mnt/etc/fstab
-   fi
-done
-      '''], ctx.log, isMock: ctx.isMock);
+    final fstabContent = _renderFstab(fstabEntries);
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      "cat > /mnt/etc/fstab << 'EOF'\n$fstabContent\nEOF",
+    ], '/etc/fstab üretilemedi.');
+    if (failure != null) return failure;
 
     // Üretilen fstab'ı doğrulama için logla
     ctx.log('Üretilen /etc/fstab içeriği kontrol ediliyor...');
-    await ctx.runCmd('cat', ['/mnt/etc/fstab'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'cat', [
+      '/mnt/etc/fstab',
+    ], 'Üretilen /etc/fstab okunamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'findmnt', [
+      '--verify',
+      '--tab-file',
+      '/mnt/etc/fstab',
+    ], 'Üretilen /etc/fstab doğrulanamadı.');
+    if (failure != null) return failure;
 
-    // ── 6.7: SELinux Autorelabel ──
+    // ── 6.7: VM Smoke Test Servisi (Opsiyonel) ──
+    if (ctx.state['vmTestMode'] == true) {
+      ctx.onProgress(0.86, 'VM test ilk acilis servisi hazirlaniyor...');
+      failure = await _requireCommand(ctx, 'sh', [
+        '-c',
+        '''
+cat > /mnt/etc/systemd/system/ro-installer-vm-smoke.service << 'EOF'
+[Unit]
+Description=Ro-Installer VM Smoke Test Marker
+After=local-fs.target systemd-user-sessions.service
+ConditionPathExists=!/var/lib/ro-installer-vm-smoke.done
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo RO_INSTALLER_VM_BOOT_OK > /dev/ttyS0; touch /var/lib/ro-installer-vm-smoke.done; systemctl --no-block poweroff'
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        ''',
+      ], 'VM smoke test servisi olusturulamadi.');
+      if (failure != null) return failure;
+      failure = await _requireCommand(ctx, 'chroot', [
+        '/mnt',
+        'systemctl',
+        'enable',
+        'ro-installer-vm-smoke.service',
+      ], 'VM smoke test servisi etkinlestirilemedi.');
+      if (failure != null) return failure;
+    }
+
+    // ── 6.8: SELinux Autorelabel ──
     // İlk açılışta dosyaların security context'lerinin düzeltilmesini sağlar
-    await ctx.runCmd('touch', ['/mnt/.autorelabel'], ctx.log, isMock: ctx.isMock);
+    failure = await _requireCommand(ctx, 'touch', [
+      '/mnt/.autorelabel',
+    ], 'SELinux autorelabel işaret dosyası oluşturulamadı.');
+    if (failure != null) return failure;
 
     ctx.log('[AŞAMA 6] Chroot yapılandırma tamamlandı.');
     return StageResult.ok('Chroot yapılandırma tamamlandı.');
   }
+
+  Future<StageResult?> _requireCommand(
+    StageContext ctx,
+    String cmd,
+    List<String> args,
+    String errorMessage, {
+    List<int> allowedExitCodes = const [0],
+  }) async {
+    final ok = await ctx.runCmd(
+      cmd,
+      args,
+      ctx.log,
+      isMock: ctx.isMock,
+      allowedExitCodes: allowedExitCodes,
+    );
+    if (ok) {
+      return null;
+    }
+
+    ctx.log('HATA: $errorMessage');
+    return StageResult.fail(errorMessage);
+  }
+
+  Future<void> _runOptionalCommand(
+    StageContext ctx,
+    String cmd,
+    List<String> args,
+    String warningMessage, {
+    List<int> allowedExitCodes = const [0],
+  }) async {
+    final ok = await ctx.runCmd(
+      cmd,
+      args,
+      ctx.log,
+      isMock: ctx.isMock,
+      allowedExitCodes: allowedExitCodes,
+    );
+    if (!ok) {
+      ctx.log('UYARI: $warningMessage');
+    }
+  }
+
+  String _shellQuote(String value) {
+    return "'${value.replaceAll("'", "'\"'\"'")}'";
+  }
+
+  Future<List<_FstabEntry>> _buildFstabEntries(StageContext ctx) async {
+    final partitionMethod = (ctx.state['partitionMethod'] ?? 'full').toString();
+    final rootFs = (ctx.state['fileSystem'] ?? 'btrfs').toString();
+    final entries = <_FstabEntry>[];
+
+    switch (partitionMethod) {
+      case 'full':
+        final selectedDisk = (ctx.state['selectedDisk'] ?? '/dev/sda')
+            .toString();
+        final efiPart = _partitionPath(selectedDisk, 1);
+        final rootPart = _partitionPath(selectedDisk, 2);
+
+        final rootEntry = await _makeFsEntry(
+          ctx,
+          device: rootPart,
+          mountPoint: '/',
+          fsType: rootFs,
+          options: _rootMountOptions(rootFs),
+        );
+        if (rootEntry == null) return const [];
+        entries.add(rootEntry);
+
+        if (rootFs == 'btrfs') {
+          final homeEntry = await _makeFsEntry(
+            ctx,
+            device: rootPart,
+            mountPoint: '/home',
+            fsType: 'btrfs',
+            options: 'defaults,compress=zstd:1,subvol=@home',
+          );
+          if (homeEntry == null) return const [];
+          entries.add(homeEntry);
+        }
+
+        final efiEntry = await _makeFsEntry(
+          ctx,
+          device: efiPart,
+          mountPoint: '/boot/efi',
+          fsType: 'vfat',
+          options: _defaultMountOptions('vfat'),
+        );
+        if (efiEntry == null) return const [];
+        entries.add(efiEntry);
+        return entries;
+
+      case 'alongside':
+        final rootPart = (ctx.state['_resolvedRootPart'] ?? '').toString();
+        if (rootPart.isEmpty && !ctx.isMock) {
+          ctx.log('HATA: Alongside kurulum için root bölümü çözümlenmemiş.');
+          return const [];
+        }
+
+        final resolvedRootPart = rootPart.isEmpty ? '/dev/sda2' : rootPart;
+        final rootEntry = await _makeFsEntry(
+          ctx,
+          device: resolvedRootPart,
+          mountPoint: '/',
+          fsType: rootFs,
+          options: _rootMountOptions(rootFs),
+        );
+        if (rootEntry == null) return const [];
+        entries.add(rootEntry);
+
+        if (rootFs == 'btrfs') {
+          final homeEntry = await _makeFsEntry(
+            ctx,
+            device: resolvedRootPart,
+            mountPoint: '/home',
+            fsType: 'btrfs',
+            options: 'defaults,compress=zstd:1,subvol=@home',
+          );
+          if (homeEntry == null) return const [];
+          entries.add(homeEntry);
+        }
+
+        final existingEfiPart = (ctx.state['existingEfiPartition'] ?? '')
+            .toString();
+        if (existingEfiPart.isNotEmpty) {
+          final efiEntry = await _makeFsEntry(
+            ctx,
+            device: existingEfiPart,
+            mountPoint: '/boot/efi',
+            fsType: 'vfat',
+            options: _defaultMountOptions('vfat'),
+          );
+          if (efiEntry == null) return const [];
+          entries.add(efiEntry);
+        }
+
+        final swapPart = (ctx.state['_resolvedSwapPart'] ?? '').toString();
+        if (swapPart.isNotEmpty) {
+          final swapEntry = await _makeSwapEntry(ctx, swapPart);
+          if (swapEntry == null) return const [];
+          entries.add(swapEntry);
+        }
+        return entries;
+
+      case 'manual':
+        final manualPartitions =
+            ctx.state['manualPartitions'] as List<dynamic>? ?? const [];
+        for (final raw in manualPartitions) {
+          final part = raw as Map<String, dynamic>;
+          if (part['isFreeSpace'] == true) continue;
+
+          final mountPoint = (part['mount'] ?? 'unmounted').toString();
+          final partName = (part['name'] ?? '').toString();
+          if (partName.isEmpty ||
+              mountPoint == 'unmounted' ||
+              mountPoint.isEmpty) {
+            continue;
+          }
+
+          if (mountPoint == '[SWAP]') {
+            final swapEntry = await _makeSwapEntry(ctx, partName);
+            if (swapEntry == null) return const [];
+            entries.add(swapEntry);
+            continue;
+          }
+
+          final fsType = _normalizeFsType((part['type'] ?? '').toString());
+          final fsEntry = await _makeFsEntry(
+            ctx,
+            device: partName,
+            mountPoint: mountPoint,
+            fsType: fsType,
+            options: _defaultMountOptions(fsType),
+          );
+          if (fsEntry == null) return const [];
+          entries.add(fsEntry);
+        }
+        return entries;
+
+      default:
+        ctx.log('HATA: Bilinmeyen bölümleme yöntemi: $partitionMethod');
+        return const [];
+    }
+  }
+
+  Future<_FstabEntry?> _makeFsEntry(
+    StageContext ctx, {
+    required String device,
+    required String mountPoint,
+    required String fsType,
+    required String options,
+  }) async {
+    final uuid = await _lookupUuid(ctx, device);
+    if (uuid == null) return null;
+    return _FstabEntry(
+      uuid: uuid,
+      mountPoint: mountPoint,
+      fsType: fsType,
+      options: options,
+      dump: 0,
+      pass: _fsckPass(fsType, mountPoint),
+    );
+  }
+
+  Future<_FstabEntry?> _makeSwapEntry(StageContext ctx, String device) async {
+    final uuid = await _lookupUuid(ctx, device);
+    if (uuid == null) return null;
+    return _FstabEntry(
+      uuid: uuid,
+      mountPoint: 'none',
+      fsType: 'swap',
+      options: 'defaults',
+      dump: 0,
+      pass: 0,
+    );
+  }
+
+  Future<String?> _lookupUuid(StageContext ctx, String device) async {
+    if (ctx.isMock) {
+      final deviceId = device
+          .split('/')
+          .last
+          .replaceAll(RegExp(r'[^A-Za-z0-9]'), '')
+          .toUpperCase();
+      return 'MOCK-$deviceId';
+    }
+
+    final result = await ctx.commandRunner.run('blkid', [
+      '-s',
+      'UUID',
+      '-o',
+      'value',
+      device,
+    ]);
+    final uuid = result.stdout.trim();
+    if (result.exitCode == 0 && uuid.isNotEmpty) {
+      return uuid;
+    }
+
+    ctx.log('HATA: UUID okunamadı: $device');
+    return null;
+  }
+
+  String _partitionPath(String disk, int partitionNumber) {
+    final needsP =
+        disk.contains('nvme') ||
+        disk.contains('loop') ||
+        disk.contains('mmcblk');
+    return needsP ? '${disk}p$partitionNumber' : '$disk$partitionNumber';
+  }
+
+  String _normalizeFsType(String fsType) {
+    switch (fsType) {
+      case 'fat32':
+      case 'vfat':
+        return 'vfat';
+      case 'linux-swap':
+      case 'swap':
+        return 'swap';
+      default:
+        return fsType;
+    }
+  }
+
+  String _rootMountOptions(String fsType) {
+    if (fsType == 'btrfs') {
+      return 'defaults,compress=zstd:1,subvol=@';
+    }
+    return _defaultMountOptions(fsType);
+  }
+
+  String _defaultMountOptions(String fsType) {
+    switch (fsType) {
+      case 'btrfs':
+        return 'defaults';
+      case 'vfat':
+        return 'umask=0077,shortname=winnt';
+      case 'swap':
+        return 'defaults';
+      default:
+        return 'defaults';
+    }
+  }
+
+  int _fsckPass(String fsType, String mountPoint) {
+    switch (fsType) {
+      case 'ext4':
+        return mountPoint == '/' ? 1 : 2;
+      case 'vfat':
+        return mountPoint == '/boot/efi' ? 2 : 0;
+      default:
+        return 0;
+    }
+  }
+
+  String _renderFstab(List<_FstabEntry> entries) {
+    final buffer = StringBuffer()
+      ..writeln('# /etc/fstab generated by ro-Installer')
+      ..writeln('# <device>  <mount>  <type>  <options>  <dump>  <pass>');
+
+    for (final entry in entries) {
+      buffer.writeln(
+        'UUID=${entry.uuid} ${entry.mountPoint} ${entry.fsType} ${entry.options} ${entry.dump} ${entry.pass}',
+      );
+    }
+
+    return buffer.toString().trimRight();
+  }
+}
+
+class _FstabEntry {
+  const _FstabEntry({
+    required this.uuid,
+    required this.mountPoint,
+    required this.fsType,
+    required this.options,
+    required this.dump,
+    required this.pass,
+  });
+
+  final String uuid;
+  final String mountPoint;
+  final String fsType;
+  final String options;
+  final int dump;
+  final int pass;
 }

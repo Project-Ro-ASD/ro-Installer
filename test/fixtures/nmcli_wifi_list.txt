@@ -1,0 +1,6 @@
+*:75:WPA2:HomeNetwork
+:50:WPA2:OfficeWifi
+:30:WPA2:Guest:Network
+:90:WPA2:StrongSignal
+:20:--:OpenNetwork
+*:60:WPA3:SecureNet

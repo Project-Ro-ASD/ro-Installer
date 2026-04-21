@@ -1,7 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'models/install_profile.dart';
 import 'services/command_runner.dart';
+import 'services/install_log_export_service.dart';
+import 'services/install_service.dart';
 import 'theme/app_theme.dart';
 import 'state/installer_state.dart';
 import 'widgets/installer_layout.dart';
@@ -18,6 +21,8 @@ import 'screens/installing_screen.dart';
 
 void main() async {
   final commandRunner = CommandRunner.instance;
+  final autoProfilePath = Platform.environment['RO_INSTALLER_AUTO_PROFILE']?.trim() ?? '';
+  final isAutoInstallMode = autoProfilePath.isNotEmpty;
   // ═══════════════════════════════════════════════════
   // ROOT YETKİ KONTROLÜ
   // Disk yazma, mount, mkfs, sgdisk gibi tüm komutlar
@@ -31,6 +36,12 @@ void main() async {
       idResult.stdout.trim()) ?? -1;
   
   if (uid != 0) {
+    if (isAutoInstallMode) {
+      debugPrint('[ro-Installer] Otomatik profil modu root yetkisiyle doğrudan çalıştırılmalıdır.');
+      debugPrint('[ro-Installer] Önerilen kullanım: sudo env RO_INSTALLER_AUTO_PROFILE=... /path/to/ro_installer');
+      exit(1);
+    }
+
     // Root değiliz — pkexec ile yeniden başlat
     debugPrint('[ro-Installer] Root yetkisi gerekiyor (UID: $uid). pkexec ile yükseltiliyor...');
     
@@ -49,6 +60,11 @@ void main() async {
   }
 
   debugPrint('[ro-Installer] Root yetkisi doğrulandı (UID: $uid). Başlatılıyor...');
+
+  if (isAutoInstallMode) {
+    final exitCode = await _runAutoInstall(autoProfilePath, commandRunner);
+    exit(exitCode);
+  }
 
   runApp(
     ChangeNotifierProvider(
@@ -126,4 +142,129 @@ class MainScreenWrapper extends StatelessWidget {
 
     return InstallerLayout(child: currentScreen);
   }
+}
+
+Future<int> _runAutoInstall(String profilePath, CommandRunner commandRunner) async {
+  final startedAt = DateTime.now();
+  final statusHistory = <String>[];
+  final technicalLogs = <String>[];
+
+  void pushStatus(String message) {
+    final line = '[DURUM] $message';
+    stdout.writeln(line);
+    statusHistory.add(message);
+  }
+
+  void pushLog(String message) {
+    final sanitized = _sanitizeAutoInstallLog(message);
+    stdout.writeln('[TEKNIK] $sanitized');
+    technicalLogs.add(sanitized);
+  }
+
+  try {
+    final profile = InstallProfile.fromJsonFile(profilePath);
+    final validationErrors = profile.validate();
+    if (validationErrors.isNotEmpty) {
+      pushStatus('Profil dogrulamasi basarisiz.');
+      for (final error in validationErrors) {
+        pushLog(error);
+      }
+      return 2;
+    }
+
+    final stateMap = profile.toStateMap();
+    stateMap['vmTestMode'] = _envFlag('RO_INSTALLER_VM_TEST_MODE');
+
+    final extraKernelArgs =
+        Platform.environment['RO_INSTALLER_EXTRA_KERNEL_ARGS']?.trim() ?? '';
+    if (extraKernelArgs.isNotEmpty) {
+      stateMap['extraKernelArgs'] = extraKernelArgs;
+    }
+
+    pushStatus('Otomatik kurulum profili yuklendi: $profilePath');
+    pushStatus(
+      'Disk=${profile.selectedDisk} Yontem=${profile.partitionMethod} DosyaSistemi=${profile.fileSystem}',
+    );
+
+    final success = await InstallService.instance.runInstall(
+      stateMap,
+      (progress, status) {
+        pushStatus('${(progress * 100).round()}% - $status');
+      },
+      pushLog,
+    );
+
+    final finishedAt = DateTime.now();
+    final exportResult = await InstallLogExportService.instance.exportSession(
+      startedAt: startedAt,
+      finishedAt: finishedAt,
+      success: success,
+      finalStatus: success ? 'Kurulum basarili.' : 'Kurulum basarisiz.',
+      statusHistory: statusHistory,
+      technicalLogs: technicalLogs,
+      installContext: {
+        ...profile.toJson(),
+        'autoInstallMode': true,
+        'vmTestMode': stateMap['vmTestMode'],
+      },
+    );
+
+    if (exportResult.success) {
+      pushLog('Oturum kaydi yazildi: ${exportResult.logPath}');
+      pushLog('Oturum ozeti yazildi: ${exportResult.summaryPath}');
+    } else {
+      pushLog('Oturum disa aktarimi basarisiz: ${exportResult.error}');
+    }
+
+    if (!success) {
+      pushStatus('Otomatik kurulum basarisiz tamamlandi.');
+      return 1;
+    }
+
+    if (_envFlag('RO_INSTALLER_AUTO_REBOOT')) {
+      pushStatus('Kurulum basarili. Sistem yeniden baslatiliyor...');
+      final rebootResult = await commandRunner.run('systemctl', ['reboot']);
+      if (!rebootResult.started) {
+        pushLog('systemctl reboot baslatilamadi: ${rebootResult.stderr}');
+        return 1;
+      }
+    } else {
+      pushStatus('Kurulum basarili. Otomatik yeniden baslatma kapali.');
+    }
+
+    return 0;
+  } catch (e, stack) {
+    pushLog('FATAL AUTO INSTALL: $e');
+    pushLog(stack.toString());
+    return 2;
+  }
+}
+
+bool _envFlag(String key) {
+  final raw = Platform.environment[key]?.trim().toLowerCase() ?? '';
+  return raw == '1' || raw == 'true' || raw == 'yes' || raw == 'on';
+}
+
+String _sanitizeAutoInstallLog(String raw) {
+  var line = raw;
+
+  line = line.replaceAllMapped(
+    RegExp(r'(password\s+)(\S+)', caseSensitive: false),
+    (m) => '${m.group(1)}***',
+  );
+
+  line = line.replaceAllMapped(
+    RegExp(
+      r"(printf '%s\\n' )'([^':\s]+):([^'\s]+)'(\s+\|\s+chpasswd)",
+      caseSensitive: false,
+    ),
+    (m) => "${m.group(1)}'***:***'${m.group(4)}",
+  );
+
+  line = line.replaceAllMapped(
+    RegExp('(root:)([^\\s\\\'"]+)', caseSensitive: false),
+    (m) => '${m.group(1)}***',
+  );
+
+  return line;
 }

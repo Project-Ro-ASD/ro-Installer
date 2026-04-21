@@ -3,16 +3,17 @@ import 'stage_result.dart';
 
 /// AŞAMA 7: Bootloader (Önyükleyici Kurulumu)
 ///
-/// GRUB2 bootloader'ı kurar ve yapılandırır:
+/// Fedora UEFI boot zincirini kurar ve yapılandırır:
 /// - /etc/default/grub dosyasını temiz bir şekilde yazar
 /// - dracut ile initramfs imajlarını yeniden oluşturur (grub'dan ÖNCE)
-/// - grub2-install ile UEFI bootloader'ı kurar
-/// - grub2-mkconfig ile grub.cfg üretir (initramfs'den SONRA)
+/// - kernel-install ile BLS girdilerini üretir
+/// - ESP üzerindeki grub.cfg stub dosyasını /boot/grub2/grub.cfg'ye yönlendirir
+/// - UEFI firmware kaydını shimx64.efi'ye yazar
+/// - grub2-mkconfig ile grub.cfg üretir
 ///
-/// ÖNEMLİ SIRALAMA (Faz 5 bulgusu):
-///   dracut → grub2-install → grub2-mkconfig
-///   Çünkü grub2-mkconfig initramfs dosyalarını tarar ve menü oluşturur.
-///   İnitramfs hazır değilse grub.cfg eksik/yanlış olur.
+/// Fedora'da UEFI/Secure Boot akışında grub2-install doğru araç değildir.
+/// İmzalı shim + grub EFI binary'leri paketlerden gelir; installer yalnızca
+/// doğru grub.cfg stub'unu ve firmware boot kaydını hazırlamalıdır.
 class BootloaderStage {
   const BootloaderStage();
 
@@ -22,22 +23,53 @@ class BootloaderStage {
     ctx.log('════════════════════════════════════════════');
 
     // ── 7.0: EFI Bağlama Doğrulaması ──
-    // Bootloader kurulumu öncesi EFI bölümünün gerçekten bağlı olduğunu doğrula
     ctx.onProgress(0.88, 'EFI bağlama noktası doğrulanıyor...');
 
-    final efiCheckResult = await ctx.commandRunner.run('findmnt', ['-rn', '-o', 'SOURCE', '/mnt/boot/efi']);
+    final efiCheckResult = await ctx.commandRunner.run('findmnt', [
+      '-rn',
+      '-o',
+      'SOURCE',
+      '/mnt/boot/efi',
+    ]);
     if (efiCheckResult.exitCode != 0 || efiCheckResult.stdout.trim().isEmpty) {
-      ctx.log('HATA: /mnt/boot/efi bağlı değil! Bootloader kurulamaz.');
-      ctx.log('Lütfen EFI bölümünün doğru oluşturulduğundan ve bağlandığından emin olun.');
-      return StageResult.fail('EFI bölümü /mnt/boot/efi\'ye bağlı değil.');
+      if (!ctx.isMock) {
+        ctx.log('HATA: /mnt/boot/efi bağlı değil! Bootloader kurulamaz.');
+        return StageResult.fail('EFI bölümü /mnt/boot/efi\'ye bağlı değil.');
+      }
     }
     ctx.log('EFI doğrulandı: ${efiCheckResult.stdout.trim()} → /mnt/boot/efi');
 
-    // ── 7.1: GRUB Yapılandırma Dosyası ──
-    ctx.onProgress(0.89, 'GRUB2 yapılandırılıyor...');
+    // ── 7.1: Root UUID Tespiti ve Kernel Cmdline ──
+    ctx.onProgress(0.89, 'Boot parametreleri hazırlanıyor...');
+    final uuidResult = await ctx.commandRunner.run('findmnt', [
+      '-rn',
+      '-o',
+      'UUID',
+      '/mnt',
+    ]);
+    final rootUuid = uuidResult.stdout.trim();
+    if (rootUuid.isEmpty && !ctx.isMock) {
+      return StageResult.fail('Root bölümü UUID tespiti başarısız.');
+    }
+    final cmdlineUuid = ctx.isMock ? '1234-abcd' : rootUuid;
+    final rootFs = (ctx.state['fileSystem'] ?? 'btrfs').toString();
+    final partitionMethod = (ctx.state['partitionMethod'] ?? 'full').toString();
+    final needsBtrfsRootflags =
+        rootFs == 'btrfs' && partitionMethod != 'manual';
+    final rootFlags = needsBtrfsRootflags ? ' rootflags=subvol=@' : '';
+    final cmdlineWrite = await _requireCommand(ctx, 'sh', [
+      '-c',
+      'echo "root=UUID=$cmdlineUuid ro$rootFlags rhgb quiet" > /mnt/etc/kernel/cmdline',
+    ], '/etc/kernel/cmdline yazılamadı.');
+    if (cmdlineWrite != null) return cmdlineWrite;
 
-    // /etc/default/grub dosyasını LiveCD label hatalarından temizleyerek yaz
-    await ctx.runCmd('sh', ['-c', '''
+    // ── 7.2: GRUB Yapılandırma Dosyası ──
+    ctx.onProgress(0.90, 'GRUB2 yapılandırılıyor...');
+
+    // LiveCD label hatalarından temizleyerek yaz
+    final grubDefaultsWrite = await _requireCommand(ctx, 'sh', [
+      '-c',
+      '''
 cat > /mnt/etc/default/grub << 'EOF'
 GRUB_TIMEOUT=5
 GRUB_DISTRIBUTOR="\$(sed 's, release .*\$,,g' /etc/system-release)"
@@ -49,53 +81,192 @@ GRUB_DISABLE_RECOVERY="true"
 GRUB_ENABLE_BLSCFG=true
 GRUB_DISABLE_OS_PROBER=false
 EOF
-      '''], ctx.log, isMock: ctx.isMock);
+      ''',
+    ], '/etc/default/grub yazılamadı.');
+    if (grubDefaultsWrite != null) return grubDefaultsWrite;
 
-    // ── 7.2: Initramfs Yeniden Oluşturma (Dracut) — GRUB'DAN ÖNCE ──
-    // dracut, initramfs imajlarını oluşturur. grub2-mkconfig bu imajları tarar.
-    // Bu yüzden dracut MUTLAKA grub2-mkconfig'den ÖNCE çalışmalıdır.
-    ctx.onProgress(0.90, 'Initramfs imajları güncelleniyor (Dracut)... (Bu işlem biraz sürebilir)');
+    // ── 7.3: Initramfs Yeniden Oluşturma (Dracut) — GRUB'DAN ÖNCE ──
+    ctx.onProgress(0.92, 'Initramfs imajları güncelleniyor (Dracut)...');
 
-    if (!await ctx.runCmd('chroot', ['/mnt', 'dracut', '-f', '--regenerate-all'], ctx.log, isMock: ctx.isMock)) {
-      ctx.log('HATA: Dracut işlemi başarısız oldu. Initramfs oluşturulamadı.');
-      ctx.log('Bu hata sistemi boot edemez hale getirebilir.');
-      return StageResult.fail('Dracut initramfs oluşturma başarısız.');
-    }
+    final dracutResult = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'dracut',
+      '-f',
+      '--regenerate-all',
+    ], 'Dracut initramfs oluşturma başarısız.');
+    if (dracutResult != null) return dracutResult;
     ctx.log('✓ Dracut initramfs başarıyla oluşturuldu.');
 
-    // ── 7.3: GRUB2 Kurulumu (UEFI) ──
-    ctx.onProgress(0.94, 'GRUB önyükleyici sisteme kuruluyor...');
+    // ── 7.4: BLS (Boot Loader Spec) Girişleri (kernel-install) ──
+    ctx.onProgress(0.93, 'Bootloader girişleri oluşturuluyor (BLS)...');
 
-    // Fedora'da grub2-install Secure Boot için --recheck ve --bootloader-id ile birlikte çalıştırılmalı
-    if (!await ctx.runCmd('chroot', [
-      '/mnt', 'grub2-install',
-      '--target=x86_64-efi',
-      '--efi-directory=/boot/efi',
-      '--bootloader-id=fedora',
-      '--recheck'
-    ], ctx.log, isMock: ctx.isMock)) {
-      ctx.log('HATA: grub2-install başarısız oldu. Bootloader kurulamadı.');
-      ctx.log('EFI bölümünü ve /boot/efi mount durumunu kontrol edin.');
-      return StageResult.fail('grub2-install başarısız oldu.');
+    // Yüklü kernel versiyonunu bul ve kernel-install ile BLS .conf dosyalarını oluştur
+    final kernelInstallResult = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      'kver=\$(ls /lib/modules | head -1) && kernel-install add \$kver /lib/modules/\$kver/vmlinuz',
+    ], 'kernel-install başarısız oldu.');
+    if (kernelInstallResult != null) return kernelInstallResult;
+
+    // ── 7.5: ESP stub ve EFI binary doğrulaması ──
+    ctx.onProgress(0.94, 'EFI önyükleme zinciri doğrulanıyor...');
+
+    StageResult? failure = await _requireCommand(ctx, 'test', [
+      '-f',
+      '/mnt/boot/efi/EFI/fedora/shimx64.efi',
+    ], 'shimx64.efi ESP üzerinde bulunamadı.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'test', [
+      '-f',
+      '/mnt/boot/efi/EFI/fedora/grubx64.efi',
+    ], 'grubx64.efi ESP üzerinde bulunamadı.');
+    if (failure != null) return failure;
+
+    final rootSourceResult = await ctx.commandRunner.run('findmnt', [
+      '-rn',
+      '-o',
+      'SOURCE',
+      '/mnt',
+    ]);
+    final bootSourceResult = await ctx.commandRunner.run('findmnt', [
+      '-rn',
+      '-o',
+      'SOURCE',
+      '/mnt/boot',
+    ]);
+    final bootUuidResult = await ctx.commandRunner.run('findmnt', [
+      '-rn',
+      '-o',
+      'UUID',
+      '/mnt/boot',
+    ]);
+
+    final rootSource = rootSourceResult.stdout.trim();
+    final bootSource = bootSourceResult.stdout.trim();
+    final bootUuid = bootUuidResult.stdout.trim();
+    final hasSeparateBoot =
+        bootSourceResult.exitCode == 0 &&
+        bootSource.isNotEmpty &&
+        bootSource != rootSource;
+
+    if (hasSeparateBoot && bootUuid.isEmpty && !ctx.isMock) {
+      return StageResult.fail('/boot için GRUB prefix UUID tespiti başarısız.');
     }
-    ctx.log('✓ GRUB2 UEFI bootloader başarıyla kuruldu.');
 
-    // ── 7.4: GRUB Konfigürasyon Dosyası Üretimi — DRACUT'DAN SONRA ──
+    final usesManagedBtrfsSubvolume =
+        !hasSeparateBoot && rootFs == 'btrfs' && partitionMethod != 'manual';
+    final prefixPath = hasSeparateBoot
+        ? '/grub2'
+        : (usesManagedBtrfsSubvolume ? '/@/boot/grub2' : '/boot/grub2');
+    final prefixUuid = ctx.isMock
+        ? '5678-efgh'
+        : (hasSeparateBoot ? bootUuid : rootUuid);
+
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      '''
+cat > /mnt/boot/efi/EFI/fedora/grub.cfg << 'EOF'
+search --no-floppy --fs-uuid --set=dev $prefixUuid
+set prefix=(\$dev)$prefixPath
+
+export \$prefix
+configfile \$prefix/grub.cfg
+EOF
+      ''',
+    ], 'ESP grub.cfg yönlendirme dosyası yazılamadı.');
+    if (failure != null) return failure;
+    ctx.log('✓ EFI grub.cfg yönlendirme stub dosyası yazıldı.');
+
+    // ── 7.6: GRUB Konfigürasyon Dosyası Üretimi — DRACUT'DAN SONRA ──
     ctx.onProgress(0.96, 'GRUB konfigürasyonu üretiliyor...');
 
-    if (!await ctx.runCmd('chroot', ['/mnt', 'grub2-mkconfig', '-o', '/boot/grub2/grub.cfg'], ctx.log, isMock: ctx.isMock)) {
-      ctx.log('UYARI: grub2-mkconfig başarısız oldu. Boot menüsü eksik olabilir.');
-      // grub.cfg olmadan sistem boot edemeyebilir ama BLS (Boot Loader Spec) aktifse
-      // Fedora'da /boot/loader/entries/ altındaki .conf dosyaları yeterli olabilir.
-    }
+    final grubMkconfigResult = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'grub2-mkconfig',
+      '-o',
+      '/boot/grub2/grub.cfg',
+    ], 'grub2-mkconfig başarısız oldu.');
+    if (grubMkconfigResult != null) return grubMkconfigResult;
     ctx.log('✓ GRUB konfigürasyonu üretildi.');
 
-    // ── 7.5: Bootloader Dosyalarını Doğrula ──
-    ctx.log('Bootloader dosya doğrulaması yapılıyor...');
-    await ctx.runCmd('ls', ['-la', '/mnt/boot/efi/EFI/fedora/'], ctx.log, isMock: ctx.isMock);
-    await ctx.runCmd('ls', ['-la', '/mnt/boot/grub2/grub.cfg'], ctx.log, isMock: ctx.isMock);
+    // ── 7.7: EFI firmware boot kaydı ──
+    ctx.onProgress(0.97, 'UEFI firmware boot girdisi yazılıyor...');
+    final efiDevice = _parseEfiPartition(efiCheckResult.stdout.trim());
+    if (efiDevice == null && !ctx.isMock) {
+      return StageResult.fail(
+        'EFI bölüm aygıtı ayrıştırılamadı: ${efiCheckResult.stdout.trim()}',
+      );
+    }
+
+    final efiDisk = ctx.isMock ? '/dev/vda' : efiDevice!.disk;
+    final efiPartNum = ctx.isMock ? '1' : efiDevice!.partition;
+    failure = await _requireCommand(ctx, 'efibootmgr', [
+      '-c',
+      '-d',
+      efiDisk,
+      '-p',
+      efiPartNum,
+      '-L',
+      'Fedora',
+      '-l',
+      r'\EFI\fedora\shimx64.efi',
+    ], 'EFI boot kaydı oluşturulamadı.');
+    if (failure != null) return failure;
+    ctx.log('✓ UEFI firmware kaydı shimx64.efi için oluşturuldu.');
 
     ctx.log('[AŞAMA 7] Bootloader kurulumu tamamlandı.');
     return StageResult.ok('Bootloader kurulumu tamamlandı.');
   }
+
+  Future<StageResult?> _requireCommand(
+    StageContext ctx,
+    String cmd,
+    List<String> args,
+    String errorMessage, {
+    List<int> allowedExitCodes = const [0],
+  }) async {
+    final ok = await ctx.runCmd(
+      cmd,
+      args,
+      ctx.log,
+      isMock: ctx.isMock,
+      allowedExitCodes: allowedExitCodes,
+    );
+    if (ok) {
+      return null;
+    }
+
+    ctx.log('HATA: $errorMessage');
+    return StageResult.fail(errorMessage);
+  }
+
+  _EfiPartition? _parseEfiPartition(String device) {
+    if (!device.startsWith('/dev/')) return null;
+
+    final nvmeOrMmc = RegExp(
+      r'^(/dev/(?:nvme\d+n\d+|mmcblk\d+|loop\d+))p(\d+)$',
+    );
+    final classic = RegExp(r'^(/dev/[a-zA-Z]+)(\d+)$');
+
+    final nvmeMatch = nvmeOrMmc.firstMatch(device);
+    if (nvmeMatch != null) {
+      return _EfiPartition(nvmeMatch.group(1)!, nvmeMatch.group(2)!);
+    }
+
+    final classicMatch = classic.firstMatch(device);
+    if (classicMatch != null) {
+      return _EfiPartition(classicMatch.group(1)!, classicMatch.group(2)!);
+    }
+
+    return null;
+  }
+}
+
+class _EfiPartition {
+  const _EfiPartition(this.disk, this.partition);
+
+  final String disk;
+  final String partition;
 }

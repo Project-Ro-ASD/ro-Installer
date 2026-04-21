@@ -3,7 +3,7 @@ Version:        1.0
 Release:        1%{?dist}
 Summary:        Ro-ASD İşletim Sistemi Yükleyicisi
 License:        MIT
-URL:            https://github.com/ASD-Team/ro-Installer
+URL:            https://github.com/Project-Ro-ASD/ro-Installer
 
 # Flutter build çıktısını source olarak alır
 # COPR için: kaynak kodu zip/tarball olarak sağlanır
@@ -31,6 +31,11 @@ Requires:       gdisk
 Requires:       parted
 Requires:       rsync
 Requires:       networkmanager
+Requires:       dracut
+Requires:       efibootmgr
+Requires:       grub2-common
+Requires:       grub2-efi-x64
+Requires:       shim-x64
 
 %description
 Ro-ASD işletim sistemi için geliştirilmiş resmi sistem yükleyicisi.

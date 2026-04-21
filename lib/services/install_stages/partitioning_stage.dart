@@ -26,10 +26,7 @@ class PartitioningStage {
       case 'alongside':
         return _alongsidePartition(ctx, selectedDisk);
       case 'manual':
-        // Manuel modda bölümleme UI'da kullanıcı tarafından zaten yapılmış
-        // Bu aşamada sadece doğrulama yapıyoruz
-        ctx.log('Manuel bölümleme: Kullanıcı planı kullanılacak.');
-        return StageResult.ok('Manuel bölümleme planı onaylandı.');
+        return _manualPartition(ctx, selectedDisk);
       default:
         return StageResult.fail('Bilinmeyen bölümleme yöntemi: $partitionMethod');
     }
@@ -102,6 +99,113 @@ class PartitioningStage {
 
     ctx.log('[AŞAMA 2] Yanına kurulum bölümleme tamamlandı.');
     return StageResult.ok('Yanına kurulum bölümleme tamamlandı: SWAP + Root');
+  }
+
+  /// UI üzerinden oluşturulmuş 'manualPartitions' listesini fiziksel diske uygular
+  Future<StageResult> _manualPartition(StageContext ctx, String selectedDisk) async {
+    final manualPartitions = ctx.state['manualPartitions'] as List<dynamic>? ?? [];
+    if (manualPartitions.isEmpty) {
+      return StageResult.fail('Manuel bölümleme planı boş.');
+    }
+    
+    ctx.onProgress(0.05, 'Manuel plan diske uygulanıyor...');
+
+    // 1. Mevcut bölümleri tespit et (Silinenleri bulmak için)
+    final currentPartsResult = await ctx.commandRunner.run('lsblk', ['-rn', '-o', 'NAME,TYPE', selectedDisk]);
+    final List<String> originalPartNames = [];
+    if (currentPartsResult.exitCode == 0) {
+      for (var line in currentPartsResult.stdout.trim().split('\n')) {
+        final parts = line.split(RegExp(r'\s+'));
+        if (parts.length >= 2 && parts[1] == 'part') {
+          originalPartNames.add('/dev/${parts[0]}');
+        }
+      }
+    }
+
+    // 2. Silinmesi gerekenleri bul ve SİL
+    final plannedNames = manualPartitions.map((p) => p['name'] as String).toList();
+    for (var currentName in originalPartNames) {
+      if (!plannedNames.contains(currentName)) {
+        // Bölüm numarasını bul (sda1 -> 1, nvme0n1p2 -> 2)
+        final match = RegExp(r'(\d+)$').firstMatch(currentName);
+        if (match != null) {
+          final partNum = match.group(1)!;
+          ctx.log('Bölüm siliniyor: $currentName (No: $partNum)');
+          if (!await ctx.runCmd('sgdisk', ['-d', partNum, selectedDisk], ctx.log, isMock: ctx.isMock)) {
+             return StageResult.fail('Bölüm silinemedi: $currentName');
+          }
+        }
+      }
+    }
+
+    // Disk tablosunu güncelle
+    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
+    if (!ctx.isMock) await Future.delayed(const Duration(seconds: 1));
+
+    // 3. YENİ Bölümleri oluştur
+    // Oluşturulmuş bölümleri takip etmek için (aktifler listesi)
+    final activePartNames = List<String>.from(originalPartNames)..removeWhere((n) => !plannedNames.contains(n));
+
+    for (var i = 0; i < manualPartitions.length; i++) {
+      final p = manualPartitions[i] as Map<String, dynamic>;
+      if (p['isFreeSpace'] == true) continue;
+      
+      final name = p['name'] as String;
+      
+      if (p['isResized'] == true) {
+         ctx.log('UYARI: Bölüm boyutlandırma (Resize) canlı kurulumda desteklenmez. Bölüm ($name) orijinal boyutunda kalacaktır.');
+      }
+      
+      // UI tarafından 'New Partition' olarak isimlendirilmiş yeni bölümler
+      if (name.startsWith('New Partition') || name == 'New Partition') {
+        final sizeBytes = p['sizeBytes'] as int;
+        final sizeMB = (sizeBytes / (1024 * 1024)).ceil();
+        
+        final fsType = p['type'] as String;
+        String typeCode = '8300'; // Linux filesystem
+        if (fsType == 'fat32') typeCode = 'ef00'; // EFI
+        if (fsType == 'linux-swap') typeCode = '8200'; // SWAP
+        
+        ctx.onProgress(0.1 + (i * 0.05), 'Yeni bölüm oluşturuluyor: ${sizeMB}MB ($fsType)');
+        
+        // Bölümü diske yaz
+        if (!await ctx.runCmd('sgdisk', ['-n', '0:0:+${sizeMB}M', '-t', '0:$typeCode', selectedDisk], ctx.log, isMock: ctx.isMock)) {
+           return StageResult.fail('Bölüm oluşturulamadı: ${sizeMB}MB');
+        }
+        
+        await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
+        if (!ctx.isMock) await Future.delayed(const Duration(seconds: 2));
+        
+        // Yeni oluşan bölümün gerçek (/dev/sdX) adını bul
+        final newPartsResult = await ctx.commandRunner.run('lsblk', ['-rn', '-o', 'NAME,TYPE', selectedDisk]);
+        String? newPartName;
+        if (newPartsResult.exitCode == 0) {
+          for (var line in newPartsResult.stdout.trim().split('\n')) {
+             final parts = line.split(RegExp(r'\s+'));
+             if (parts.length >= 2 && parts[1] == 'part') {
+                final cand = '/dev/${parts[0]}';
+                // Eğer mevcut aktif listede yoksa, bu bizim az önce oluşturduğumuz bölümdür
+                if (!activePartNames.contains(cand)) {
+                   newPartName = cand;
+                   activePartNames.add(cand);
+                   break;
+                }
+             }
+          }
+        }
+        
+        if (newPartName != null) {
+           ctx.log('Atanan bölüm adı: $newPartName');
+           p['name'] = newPartName; // Format aşamasının kullanabilmesi için ismi referanstan güncelliyoruz
+        } else {
+           if (!ctx.isMock) return StageResult.fail('Yeni bölüm oluşturuldu ancak adı tespit edilemedi.');
+           p['name'] = '${selectedDisk}X'; // Mock testi için sahte isim
+        }
+      }
+    }
+
+    ctx.log('[AŞAMA 2] Manuel bölümleme fiziksel diske uygulandı.');
+    return StageResult.ok('Manuel bölümleme planı diske uygulandı.');
   }
 
   /// Sistem RAM miktarını MB cinsinden okur (/proc/meminfo)

@@ -2,9 +2,13 @@ import 'dart:convert';
 import 'command_runner.dart';
 
 class DiskService {
-  DiskService._();
-  static final DiskService instance = DiskService._();
-  final CommandRunner _commandRunner = CommandRunner.instance;
+  DiskService({CommandRunner? commandRunner})
+      : _commandRunner = commandRunner ?? CommandRunner.instance;
+
+  /// Varsayılan singleton erişimi (geriye uyumluluk için)
+  static final DiskService instance = DiskService();
+
+  final CommandRunner _commandRunner;
 
   // EFI System Partition GPT Type UUID (Standart)
   static const String _efiPartTypeUUID = 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b';

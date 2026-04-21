@@ -1,0 +1,66 @@
+{
+  "blockdevices": [
+    {
+      "name": "sda",
+      "model": "Samsung SSD 870",
+      "size": 500107862016,
+      "type": "disk",
+      "rm": false,
+      "mountpoints": [null],
+      "children": [
+        {
+          "name": "sda1",
+          "model": null,
+          "size": 536870912,
+          "type": "part",
+          "rm": false,
+          "mountpoints": ["/boot/efi"]
+        },
+        {
+          "name": "sda2",
+          "model": null,
+          "size": 499570991104,
+          "type": "part",
+          "rm": false,
+          "mountpoints": ["/"]
+        }
+      ]
+    },
+    {
+      "name": "sdb",
+      "model": "WDC WD10EZEX",
+      "size": 1000204886016,
+      "type": "disk",
+      "rm": false,
+      "mountpoints": [null],
+      "children": [
+        {
+          "name": "sdb1",
+          "model": null,
+          "size": 1000204886016,
+          "type": "part",
+          "rm": false,
+          "mountpoints": ["/home"]
+        }
+      ]
+    },
+    {
+      "name": "sdc",
+      "model": "USB Flash Drive",
+      "size": 16106127360,
+      "type": "disk",
+      "rm": true,
+      "mountpoints": [null],
+      "children": [
+        {
+          "name": "sdc1",
+          "model": null,
+          "size": 16106127360,
+          "type": "part",
+          "rm": true,
+          "mountpoints": ["/run/initramfs/live"]
+        }
+      ]
+    }
+  ]
+}

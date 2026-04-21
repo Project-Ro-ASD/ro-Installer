@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'command_runner.dart';
 import 'install_stages/install_stages.dart';
+import 'install_artifact_collector.dart';
 
 /// Kurulum Orkestratörü (Install Service)
 ///
 /// Bu sınıf artık doğrudan kurulum mantığı içermez.
-/// Bunun yerine, kurulum akışını 8 bağımsız aşamaya (stage) böler
+/// Bunun yerine, kurulum akışını 9 bağımsız aşamaya (stage) böler
 /// ve her birini sırasıyla çalıştırır.
 ///
 /// Aşamalar:
@@ -16,11 +17,19 @@ import 'install_stages/install_stages.dart';
 ///   5. Dosya Kopyalama       [FileCopyStage]
 ///   6. Chroot Yapılandırma   [ChrootConfigStage]
 ///   7. Bootloader Kurulumu   [BootloaderStage]
-///   8. Temizlik              [CleanupStage]
+///   8. Kurulum Sonrası Doğrulama [PostInstallValidationStage]
+///   9. Temizlik              [CleanupStage]
 class InstallService {
-  InstallService._();
-  static final InstallService instance = InstallService._();
-  final CommandRunner _commandRunner = CommandRunner.instance;
+  final CommandRunner _commandRunner;
+  late final InstallArtifactCollector _artifactCollector;
+
+  InstallService({CommandRunner? commandRunner})
+      : _commandRunner = commandRunner ?? CommandRunner.instance {
+    _artifactCollector = InstallArtifactCollector(commandRunner: _commandRunner);
+  }
+
+  /// Varsayılan singleton erişimi (geriye uyumluluk için)
+  static final InstallService instance = InstallService();
 
   // ── Aşama Nesneleri ──
   final _diskPreparation = const DiskPreparationStage();
@@ -30,6 +39,7 @@ class InstallService {
   final _fileCopy = const FileCopyStage();
   final _chrootConfig = const ChrootConfigStage();
   final _bootloader = const BootloaderStage();
+  final _postInstallValidation = const PostInstallValidationStage();
   final _cleanup = const CleanupStage();
 
   /// Komut çalıştırma ve çıktıları canlı okuma.
@@ -93,10 +103,11 @@ class InstallService {
       //  AŞAMA 1: Disk Hazırlığı
       // ══════════════════════════════════════════════
       log('');
-      log('▶▶▶ AŞAMA 1/8: Disk Hazırlığı ◀◀◀');
+      log('▶▶▶ AŞAMA 1/9: Disk Hazırlığı ◀◀◀');
       final stage1 = await _diskPreparation.execute(ctx);
       if (!stage1.success) {
         log('[FATAL] Aşama 1 başarısız: ${stage1.message}');
+        await _artifactCollector.collectDiagnostics(log, isMock: isMock);
         return false;
       }
       log('✓ Aşama 1 tamamlandı: ${stage1.message}');
@@ -105,10 +116,11 @@ class InstallService {
       //  AŞAMA 2: Bölümleme
       // ══════════════════════════════════════════════
       log('');
-      log('▶▶▶ AŞAMA 2/8: Bölümleme ◀◀◀');
+      log('▶▶▶ AŞAMA 2/9: Bölümleme ◀◀◀');
       final stage2 = await _partitioning.execute(ctx);
       if (!stage2.success) {
         log('[FATAL] Aşama 2 başarısız: ${stage2.message}');
+        await _artifactCollector.collectDiagnostics(log, isMock: isMock);
         return false;
       }
       log('✓ Aşama 2 tamamlandı: ${stage2.message}');
@@ -117,10 +129,11 @@ class InstallService {
       //  AŞAMA 3: Biçimlendirme
       // ══════════════════════════════════════════════
       log('');
-      log('▶▶▶ AŞAMA 3/8: Biçimlendirme ◀◀◀');
+      log('▶▶▶ AŞAMA 3/9: Biçimlendirme ◀◀◀');
       final stage3 = await _formatting.execute(ctx);
       if (!stage3.success) {
         log('[FATAL] Aşama 3 başarısız: ${stage3.message}');
+        await _artifactCollector.collectDiagnostics(log, isMock: isMock);
         return false;
       }
       log('✓ Aşama 3 tamamlandı: ${stage3.message}');
@@ -129,10 +142,11 @@ class InstallService {
       //  AŞAMA 4: Bağlama
       // ══════════════════════════════════════════════
       log('');
-      log('▶▶▶ AŞAMA 4/8: Bağlama ◀◀◀');
+      log('▶▶▶ AŞAMA 4/9: Bağlama ◀◀◀');
       final stage4 = await _mounting.execute(ctx);
       if (!stage4.success) {
         log('[FATAL] Aşama 4 başarısız: ${stage4.message}');
+        await _artifactCollector.collectDiagnostics(log, isMock: isMock);
         return false;
       }
       log('✓ Aşama 4 tamamlandı: ${stage4.message}');
@@ -141,10 +155,11 @@ class InstallService {
       //  AŞAMA 5: Dosya Kopyalama
       // ══════════════════════════════════════════════
       log('');
-      log('▶▶▶ AŞAMA 5/8: Dosya Kopyalama ◀◀◀');
+      log('▶▶▶ AŞAMA 5/9: Dosya Kopyalama ◀◀◀');
       final stage5 = await _fileCopy.execute(ctx);
       if (!stage5.success) {
         log('[FATAL] Aşama 5 başarısız: ${stage5.message}');
+        await _artifactCollector.collectDiagnostics(log, isMock: isMock);
         return false;
       }
       log('✓ Aşama 5 tamamlandı: ${stage5.message}');
@@ -153,10 +168,11 @@ class InstallService {
       //  AŞAMA 6: Chroot Yapılandırma
       // ══════════════════════════════════════════════
       log('');
-      log('▶▶▶ AŞAMA 6/8: Chroot Yapılandırma ◀◀◀');
+      log('▶▶▶ AŞAMA 6/9: Chroot Yapılandırma ◀◀◀');
       final stage6 = await _chrootConfig.execute(ctx);
       if (!stage6.success) {
         log('[FATAL] Aşama 6 başarısız: ${stage6.message}');
+        await _artifactCollector.collectDiagnostics(log, isMock: isMock);
         return false;
       }
       log('✓ Aşama 6 tamamlandı: ${stage6.message}');
@@ -165,25 +181,40 @@ class InstallService {
       //  AŞAMA 7: Bootloader Kurulumu
       // ══════════════════════════════════════════════
       log('');
-      log('▶▶▶ AŞAMA 7/8: Bootloader Kurulumu ◀◀◀');
+      log('▶▶▶ AŞAMA 7/9: Bootloader Kurulumu ◀◀◀');
       final stage7 = await _bootloader.execute(ctx);
       if (!stage7.success) {
         log('[FATAL] Aşama 7 başarısız: ${stage7.message}');
+        await _artifactCollector.collectDiagnostics(log, isMock: isMock);
         return false;
       }
       log('✓ Aşama 7 tamamlandı: ${stage7.message}');
 
       // ══════════════════════════════════════════════
-      //  AŞAMA 8: Temizlik
+      //  AŞAMA 8: Kurulum Sonrası Doğrulama
       // ══════════════════════════════════════════════
       log('');
-      log('▶▶▶ AŞAMA 8/8: Temizlik ◀◀◀');
-      final stage8 = await _cleanup.execute(ctx);
+      log('▶▶▶ AŞAMA 8/9: Kurulum Sonrası Doğrulama ◀◀◀');
+      final stage8 = await _postInstallValidation.execute(ctx);
       if (!stage8.success) {
         log('[FATAL] Aşama 8 başarısız: ${stage8.message}');
+        await _artifactCollector.collectDiagnostics(log, isMock: isMock);
         return false;
       }
       log('✓ Aşama 8 tamamlandı: ${stage8.message}');
+
+      // ══════════════════════════════════════════════
+      //  AŞAMA 9: Temizlik
+      // ══════════════════════════════════════════════
+      log('');
+      log('▶▶▶ AŞAMA 9/9: Temizlik ◀◀◀');
+      final stage9 = await _cleanup.execute(ctx);
+      if (!stage9.success) {
+        log('[FATAL] Aşama 9 başarısız: ${stage9.message}');
+        await _artifactCollector.collectDiagnostics(log, isMock: isMock);
+        return false;
+      }
+      log('✓ Aşama 9 tamamlandı: ${stage9.message}');
 
       // ══════════════════════════════════════════════
       //  KURULUM BAŞARIYLA TAMAMLANDI
@@ -196,8 +227,10 @@ class InstallService {
       onProgress(1.0, 'Kurulum Hatasız Tamamlandı! Sistemi Yeniden Başlatabilirsiniz.');
       return true;
 
-    } catch (e) {
+    } catch (e, stack) {
       log('FATAL CATCH: $e');
+      log('STACKTRACE:\n$stack');
+      await _artifactCollector.collectDiagnostics(log, isMock: isMock);
       return false;
     }
   }

@@ -73,7 +73,10 @@ class FileCopyStage {
       '--exclude=/media/*',
       '--exclude=/lost+found',
       '--exclude=/etc/machine-id',
+      '--exclude=/etc/kernel/cmdline',
       '--exclude=/var/log/audit/*',
+      '--exclude=/boot/loader/entries/*',
+      '--exclude=/boot/grub2/grubenv',
       ...dynamicExcludes,
       '/',   // Kaynak: Çalışan Live Kök
       '/mnt/' // Hedef

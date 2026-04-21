@@ -1,104 +1,138 @@
 <div align="center">
-  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/Penguin_icon.svg/200px-Penguin_icon.svg.png" width="80" alt="Ro-ASD Logo">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/Penguin_icon.svg/200px-Penguin_icon.svg.png" width="72" alt="Ro-Installer">
   <h1>Ro-Installer</h1>
-  <p><b>The Official System Installer for Ro-ASD Operating System</b></p>
-  
-  [![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat-square&logo=flutter&logoColor=white)](https://flutter.dev)
-  [![Platform](https://img.shields.io/badge/Platform-Linux-yellow?style=flat-square&logo=linux)](#)
-  [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](#)
+  <p><b>Official graphical installer for Ro-ASD</b></p>
 </div>
 
-<br>
+Ro-Installer is a Linux desktop installer written in Flutter and Dart for the Ro-ASD operating system. It provides a graphical workflow on top of native Linux tools such as `sgdisk`, `mkfs.*`, `rsync`, `chroot`, `dracut`, `kernel-install`, `efibootmgr`, and Fedora's UEFI boot chain.
 
-*For the Turkish documentation, please scroll down. / Türkçe dokümantasyon için aşağı kaydırın.*
+This repository is the cleaned GitHub-ready project tree. Local experiment notes, ad-hoc markdown files, VM output logs, ISO images, and build artifacts are intentionally excluded.
 
----
+## Highlights
 
-## 🇬🇧 English Documentation
+- Flutter-based Linux desktop UI
+- Full disk, alongside, and manual partitioning flows
+- `btrfs`, `ext4`, and `xfs` root filesystem support
+- Fedora-compatible UEFI boot flow with `shimx64.efi`, GRUB, and `efibootmgr`
+- Installation logging and post-install validation
+- Unit tests for install stages and helper services
+- QEMU test scripts for both manual and automated VM validation
 
-### What is Ro-Installer?
-**Ro-Installer** is the official, fast, and feature-rich graphical installation wizard built from the ground up specifically for the **Ro-ASD Operating System**. Developed entirely in Flutter, this installer bridges the gap between complex Linux backend commands and a seamless, user-friendly frontend experience.
+## Repository Layout
 
-Unlike traditional installers (like Calamares or Anaconda), Ro-Installer does not rely on heavy Python backends or complex Qt dependencies. Instead, it directly communicates with core Linux binaries (`sgdisk`, `mkfs.*`, `nmcli`, `rsync`, and `chroot`) asynchronously, providing real-time feedback with zero overhead.
+```text
+lib/                  Flutter UI and installer logic
+lib/services/         System services and install orchestration
+lib/services/install_stages/
+                      Stage-based installation pipeline
+linux/                Linux runner, policy files, packaging references, VM helpers
+test/                 Unit tests and test fixtures
+assets/               UI assets
+test_qemu_vm.sh       QEMU launcher for manual/auto VM tests
+test_qemu_guest_runner.sh
+                      Guest-side helper for auto VM runs
+```
 
-### How it Works
-The architecture of Ro-Installer is built on two primary layers:
-1. **The UI Layer (Flutter):** Provides a reactive, state-driven (Provider) graphical interface supporting theming (Dark/Light mode) and dynamic routing based on user choices.
-2. **The System Backend Layer (Dart Process):** Operates under `root` privileges. It parses hardware components like disks (`lsblk`) and networks (`nmcli`) securely. 
+## Requirements
 
-When the user initiates the installation, the `InstallService`:
-- Translates the UI configuration into low-level shell commands.
-- Configures partition tables (`sgdisk` / Manual or Auto).
-- Formats volumes (optimized tightly for **BTRFS**, but supports `ext4`, `xfs`, and `fat32` for EFI).
-- Mirrors the Live environment cleanly into the host disk using `rsync` with massive speed improvements.
-- Handles user accounts, passwords, and installs the bootloader (`GRUB2`).
+- Linux host
+- Flutter SDK with Linux desktop support
+- `clang`, `cmake`, `ninja`, `pkg-config`
+- QEMU/KVM for VM-based testing
+- OVMF / `edk2-ovmf` for UEFI tests
 
-### How It Was Developed
-Ro-Installer was developed with **Simplicity and Safety** in mind. 
-- **Advanced Disk Validator:** During manual partitioning, if users miss crucial requirements (e.g., omitting the `/root` or `/boot/efi` directories, or having insufficient capacity), the system blocks the installation with clear, detailed explanations.
-- **Smart Routing:** Depending on user expertise ("Standard" vs "Advanced" mode), the UI automatically hides/shows complex options like Kernel Selection (Stable vs. Experimental).
-- **In-App Network Scanning:** Instead of relying on the host OS desktop environment, Ro-Installer manages network availability directly to download the latest Experimental Kernel features.
+For real installation runs inside Fedora-based live environments, these tools are expected on the target side:
 
-### Building & Running
-You need Flutter SDK for Linux and root privileges.
+- `util-linux`
+- `e2fsprogs`
+- `btrfs-progs`
+- `xfsprogs`
+- `dosfstools`
+- `gdisk`
+- `parted`
+- `rsync`
+- `dracut`
+- `efibootmgr`
+- `grub2-common`
+- `grub2-efi-x64`
+- `shim-x64`
+
+## Build
+
 ```bash
-# Clone the repository
-git clone https://github.com/your-repo/ro-Installer.git
+git clone https://github.com/Project-Ro-ASD/ro-Installer.git
 cd ro-Installer
 
-# Resolve dependencies
 flutter pub get
-
-# Run on debug mode
-flutter run -d linux
-
-# Build the release binary
 flutter build linux --release
 ```
-*(To write directly to the host disks and utilize network services securely in production, run the compiled binary strictly with `sudo` or Polkit).*
 
-<br>
-<hr>
-<br>
+## Run
 
-## 🇹🇷 Türkçe Dokümantasyon
+For desktop development:
 
-### Ro-Installer Nedir?
-**Ro-Installer**, doğrudan **Ro-ASD İşletim Sistemi** için sıfırdan inşa edilmiş resmi, hızlı ve bol özellikli grafiksel kurulum sihirbazıdır. Tamamen Flutter çerçevesinde geliştirilen bu yükleyici, karmaşık Linux çekirdek komutları ile kusursuz bir kullanıcı arayüzü (UI) arasındaki güçlü köprüyü oluşturur.
-
-Geleneksel yükleyicilerin (Calamares veya Anaconda gibi) aksine, Ro-Installer hantal Python altyapılarına veya ağır Qt kütüphanelerine dayanmaz. Bunun yerine doğrudan temel Linux araçlarıyla (`sgdisk`, `mkfs.*`, `nmcli`, `rsync` ve `chroot`) asenkronize şekilde haberleşir; bu sayede performanstan hiçbir taviz vermeden anlık olarak geri bildirim (progress bar/log) yansıtır.
-
-### Sistem Nasıl Çalışır?
-Ro-Installer mimarisi iki ana katman üzerine kuruludur:
-1. **Arayüz Katmanı (Flutter):** State Management (Provider) tarafından tetiklenen tepkisel bir deneyim sunar. Dark/Light mod temalarını ve kullanıcının adımlarına göre dinamik yapıyı oluşturur.
-2. **Sistem ve Arka Plan Katmanı (Dart Process İşlemleri):** `root` yetkileri altında çalışır. Diskleri (`lsblk`) ve Ağ donanımını (`nmcli`) güvenli bir şekilde tarar.
-
-Kullanıcı "Kurulumu Başlat" butonuna tıkladığında `InstallService` devreye girer:
-- Arayüzdeki planları en alt seviye BASH komutlarına çevirir.
-- Disk yapılarını ve bölümleri inşa eder (Otomatik veya Manuel Atama).
-- Diskleri biçimlendirir (**BTRFS** optimizasyonlu; `ext4`, `xfs`, EFI için `fat32` desteklenir).
-- Çalışan Canlı (Live OS) ortamınızı sisteminize inanılmaz bir hızda klonlamak için `rsync` teknolojisini kullanır.
-- Kullanıcı hesaplarını şifreler, zaman dilimini yazar ve sistem başlatıcıyı (`GRUB2`) yapılandırır.
-
-### Nasıl Geliştirildi?
-Yazılım, kurulum esnasında **Güvenlik ve Sadelik** felsefesi temel alınarak geliştirildi.
-- **İleri Düzey Disk Denetleyicisi (Validator):** Manuel disk bölümlemelerinde sistem yetenekleri en uç noktaya taşınmıştır. Kullanıcı yanlışlıkla EFI partisyonunu sildiğinde, kök dizine az boyut verdiğinde veya SWAP alanını unuttuğunda; yükleyici derhal devreye girer, işlemi iptal eder ve problemi anlatan net yönergeler sunar. Ayrıca mevcut Windows disklerinin veri kaybını önlemek adına sıkı uyarılara ve "Küçültme (Resize)" özelliklerine sahiptir.
-- **Akıllı Yönlendirme:** Kullanıcı türüne göre ("Standart" veya "Gelişmiş" kurulum) arayüz şekil değiştirir. Normal kullanıcılara Kararlı (Stable) kernel atanıp kernel ekranı gizlenirken; profesyonel geliştiricilere kendi Kernel testlerini yapabilmeleri için imkân tanınır.
-
-### Derleme ve Çalıştırma
-Sistemi koddan derlemek için Linux Flutter SDK'sına ihtiyacınız vardır.
 ```bash
-# Depoyu klonlayın
-git clone https://github.com/your-repo/ro-Installer.git
-cd ro-Installer
-
-# Gereksinimleri indirin
-flutter pub get
-
-# Uygulamayı Linux üzerinde test edin
 flutter run -d linux
-
-# Derlenmiş Nihai (Release) Sürümü Çıkartın
-flutter build linux --release
 ```
-*(Yükleyicinin sistem disklerine kalıcı müdahale edebilmesi ve ağ profillerine ulaşabilmesi için, uygulamanın mutlaka `sudo` yetkileriyle yani root olarak başlatılması gerekmektedir).*
+
+For the release bundle:
+
+```bash
+sudo -E build/linux/x64/release/bundle/ro_installer
+```
+
+Root privileges are required because the installer writes partition tables, formats filesystems, mounts target roots, enters `chroot`, and installs the boot chain.
+
+## VM Testing
+
+Manual QEMU session:
+
+```bash
+RO_INSTALLER_TEST_ISO=/path/to/Fedora-Live.iso ./test_qemu_vm.sh manual
+```
+
+Automated QEMU session:
+
+```bash
+RO_INSTALLER_TEST_ISO=/path/to/Fedora-Live.iso ./test_qemu_vm.sh auto
+```
+
+The automation path uses:
+
+- `linux/qmp_send_keys.py`
+- `test_qemu_vm.sh`
+- `test_qemu_guest_runner.sh`
+
+## Architecture Notes
+
+The installer is organized as a stage pipeline:
+
+1. Disk preparation
+2. Partitioning
+3. Formatting
+4. Mounting
+5. File copy
+6. Chroot configuration
+7. Bootloader setup
+8. Post-install validation
+9. Cleanup
+
+The bootloader stage is Fedora UEFI oriented. On Secure Boot capable systems it uses the signed `shim` and GRUB binaries already present in the target system, writes the ESP-side GRUB stub, and creates the firmware entry with `efibootmgr`.
+
+## Turkish Summary
+
+Ro-Installer, Ro-ASD icin gelistirilmis Flutter tabanli resmi Linux kurulum aracidir. Bu depo GitHub icin temizlenmis surumdur; yerel notlar, gecici markdown dosyalari, ISO dosyalari, build ciktilari ve VM loglari burada tutulmaz.
+
+Kisa baslangic:
+
+```bash
+flutter pub get
+flutter build linux --release
+sudo -E build/linux/x64/release/bundle/ro_installer
+```
+
+QEMU ile manuel test:
+
+```bash
+RO_INSTALLER_TEST_ISO=/path/to/Fedora-Live.iso ./test_qemu_vm.sh manual
+```
