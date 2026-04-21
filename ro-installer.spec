@@ -72,6 +72,6 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 systemctl reload polkit 2>/dev/null || true
 
 %changelog
-* Mon Apr 21 2026 Ro-ASD Team <contact@roasd.org> - 1.2.7-1
+* Tue Apr 21 2026 Ro-ASD Team <contact@roasd.org> - 1.2.7-1
 - Prepare SCM + make-srpm workflow for COPR builds
 - Package Fedora-compatible UEFI boot flow and runtime dependencies
