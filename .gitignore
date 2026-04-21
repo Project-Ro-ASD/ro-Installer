@@ -50,3 +50,4 @@ app.*.map.json
 /*.fd
 /*.iso
 /linux/__pycache__/
+/dist/

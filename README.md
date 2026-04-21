@@ -8,6 +8,8 @@ Ro-Installer is a Linux desktop installer written in Flutter and Dart for the Ro
 
 This repository is the cleaned GitHub-ready project tree. Local experiment notes, ad-hoc markdown files, VM output logs, ISO images, and build artifacts are intentionally excluded.
 
+For RPM/COPR packaging and webhook-based builds, see [COPR.md](COPR.md).
+
 ## Highlights
 
 - Flutter-based Linux desktop UI
@@ -28,6 +30,8 @@ lib/services/install_stages/
 linux/                Linux runner, policy files, packaging references, VM helpers
 test/                 Unit tests and test fixtures
 assets/               UI assets
+ro-installer.spec     RPM spec used by COPR and local SRPM generation
+.copr/Makefile        COPR make-srpm entrypoint
 test_qemu_vm.sh       QEMU launcher for manual/auto VM tests
 test_qemu_guest_runner.sh
                       Guest-side helper for auto VM runs
