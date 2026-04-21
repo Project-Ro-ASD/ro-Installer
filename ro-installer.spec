@@ -5,10 +5,15 @@ Summary:        Official graphical installer for Ro-ASD
 License:        MIT
 URL:            https://github.com/Project-Ro-ASD/ro-Installer
 Source0:        %{name}-%{version}.tar.gz
+%global flutter_version 3.41.7
+%global flutter_channel stable
+%global flutter_archive flutter_linux_%{flutter_version}-%{flutter_channel}.tar.xz
+%global flutter_url https://storage.googleapis.com/flutter_infra_release/releases/%{flutter_channel}/linux/%{flutter_archive}
+%global flutter_sha256 f344d5057db52abc2a63cd3a7c7370957b7685d1fca5e5fbe2ce4dfe74657a79
 
 BuildRequires:  clang
 BuildRequires:  cmake
-BuildRequires:  flutter
+BuildRequires:  curl
 BuildRequires:  gtk3-devel
 BuildRequires:  ninja-build
 BuildRequires:  pkg-config
@@ -40,6 +45,20 @@ native Fedora installation toolchain.
 %autosetup -n %{name}-%{version}
 
 %build
+export FLUTTER_ROOT="$PWD/.flutter-sdk"
+export PUB_CACHE="$PWD/.pub-cache"
+export CI=true
+export FLUTTER_SUPPRESS_ANALYTICS=true
+export PATH="$FLUTTER_ROOT/bin:$PATH"
+
+rm -rf "$FLUTTER_ROOT" "$PUB_CACHE"
+curl -L --retry 5 --fail --output "%{flutter_archive}" "%{flutter_url}"
+echo "%{flutter_sha256}  %{flutter_archive}" | sha256sum -c -
+tar -xf "%{flutter_archive}"
+mv flutter "$FLUTTER_ROOT"
+
+flutter config --no-analytics --enable-linux-desktop
+flutter precache --linux
 flutter pub get
 flutter build linux --release
 

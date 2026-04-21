@@ -71,6 +71,9 @@ flutter pub get
 flutter build linux --release
 ```
 
+For COPR builds, the RPM spec bootstraps a pinned Flutter SDK inside the build
+chroot because Fedora 43 COPR does not provide a `flutter` RPM package.
+
 ## Run
 
 For desktop development:
