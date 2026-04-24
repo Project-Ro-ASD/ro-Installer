@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../state/installer_state.dart';
+import '../theme/app_theme.dart';
+import '../widgets/nebula_ui.dart';
 
 class ThemeScreen extends StatelessWidget {
   const ThemeScreen({super.key});
@@ -9,173 +12,264 @@ class ThemeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = Provider.of<InstallerState>(context);
     final theme = Theme.of(context);
+    final visuals = context.installerVisuals;
 
-    return Column(
-      children: [
-        // Başlık
-        Padding(
-          padding: const EdgeInsets.only(top: 20, bottom: 40),
-          child: Column(
-            children: [
-              Text(
-                state.t('theme_title'),
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: theme.textTheme.bodyLarge?.color,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                state.t('theme_desc'),
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.textTheme.bodyLarge?.color?.withOpacity(0.6),
-                ),
-              ),
-            ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Column(
+        children: [
+          const SizedBox(height: 20),
+          Text(
+            state.t('theme_title'),
+            textAlign: TextAlign.center,
+            style: theme.textTheme.headlineLarge,
           ),
-        ),
-
-        // Kartlar
-        Expanded(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildThemeCard(
-                context,
-                title: state.t('light_theme'),
-                description: state.t('light_desc'),
-                mode: 'light',
-                isActive: state.themeMode == 'light',
-                onTap: () => state.updateTheme('light'),
-              ),
-              const SizedBox(width: 40),
-              _buildThemeCard(
-                context,
-                title: state.t('dark_theme'),
-                description: state.t('dark_desc'),
-                mode: 'dark',
-                isActive: state.themeMode == 'dark',
-                onTap: () => state.updateTheme('dark'),
-              ),
-            ],
-          ),
-        ),
-
-        // Alt Butonlar
-        Padding(
-          padding: const EdgeInsets.only(top: 20),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              TextButton.icon(
-                onPressed: () => state.previousStep(),
-                icon: const Icon(Icons.arrow_back),
-                label: Text(state.t('prev')),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  foregroundColor: theme.textTheme.bodyLarge?.color?.withOpacity(0.7),
-                ),
-              ),
-              ElevatedButton.icon(
-                onPressed: () => state.nextStep(),
-                icon: const Icon(Icons.arrow_forward),
-                label: Text(state.t('next')),
-                style: theme.elevatedButtonTheme.style?.copyWith(
-                  padding: const WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 32, vertical: 20),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildThemeCard(
-    BuildContext context, {
-    required String title,
-    required String description,
-    required String mode,
-    required bool isActive,
-    required VoidCallback onTap,
-  }) {
-    final theme = Theme.of(context);
-    final isDarkCard = mode == 'dark';
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        width: 320,
-        height: 380,
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: isActive 
-              ? (isDarkCard ? const Color(0xFF2B1A4A) : Colors.white)
-              : (isDarkCard ? const Color(0xFF1E1E2E) : const Color(0xFFF5F5F5)),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isActive ? theme.colorScheme.primary : Colors.grey.withOpacity(0.2),
-            width: isActive ? 2 : 1,
-          ),
-          boxShadow: [
-            if (isActive)
-              BoxShadow(
-                color: theme.colorScheme.primary.withOpacity(0.3),
-                blurRadius: 20,
-                spreadRadius: 2,
-              )
-          ],
-        ),
-        child: Column(
-          children: [
-            // Dummy Mini Ekran Görselleştirme
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isDarkCard ? const Color(0xFF151520) : const Color(0xFFF0F0F0),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Center(
-                  child: Icon(
-                    isDarkCard ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
-                    size: 64,
-                    color: isDarkCard ? const Color(0xFFA575FF) : const Color(0xFFFFA726),
-                  ),
-                ),
+          const SizedBox(height: 12),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: Text(
+              state.t('theme_desc'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: visuals.mutedForeground,
               ),
             ),
-            const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          ),
+          const SizedBox(height: 34),
+          Expanded(
+            child: Row(
               children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: isDarkCard ? Colors.white : Colors.black87,
+                Expanded(
+                  child: _ThemeOptionCard(
+                    title: state.t('theme_dark_title'),
+                    description: state.t('theme_dark_desc'),
+                    selected: state.themeMode == 'dark',
+                    onTap: () => state.updateTheme('dark'),
+                    preview: const _ThemePreview(isDark: true),
                   ),
                 ),
-                Icon(
-                  isActive ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                  color: isActive ? theme.colorScheme.primary : Colors.grey,
+                const SizedBox(width: 24),
+                Expanded(
+                  child: _ThemeOptionCard(
+                    title: state.t('theme_light_title'),
+                    description: state.t('theme_light_desc'),
+                    selected: state.themeMode == 'light',
+                    onTap: () => state.updateTheme('light'),
+                    preview: const _ThemePreview(isDark: false),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Text(
-              description,
-              style: TextStyle(
-                fontSize: 14,
-                color: isDarkCard ? Colors.white70 : Colors.black54,
-                height: 1.4,
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              NebulaSecondaryButton(
+                label: state.t('prev'),
+                icon: Icons.arrow_back_rounded,
+                onPressed: state.previousStep,
+              ),
+              const Spacer(),
+              NebulaPrimaryButton(
+                label: state.t('next'),
+                icon: Icons.arrow_forward_rounded,
+                onPressed: state.nextStep,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeOptionCard extends StatelessWidget {
+  const _ThemeOptionCard({
+    required this.title,
+    required this.description,
+    required this.selected,
+    required this.onTap,
+    required this.preview,
+  });
+
+  final String title;
+  final String description;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final motion = context.installerMotion;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: motion.medium,
+          curve: motion.enterCurve,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(
+              color: selected
+                  ? theme.colorScheme.primary.withValues(alpha: 0.78)
+                  : theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.18),
+                      blurRadius: 36,
+                      spreadRadius: -8,
+                    ),
+                  ]
+                : const [],
+          ),
+          child: NebulaPanel(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Align(
+                  alignment: Alignment.topRight,
+                  child: AnimatedContainer(
+                    duration: motion.fast,
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: selected
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.outlineVariant,
+                      ),
+                      color: selected
+                          ? theme.colorScheme.primary.withValues(alpha: 0.16)
+                          : Colors.transparent,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Expanded(child: preview),
+                const SizedBox(height: 24),
+                Text(title, style: theme.textTheme.headlineSmall),
+                const SizedBox(height: 12),
+                Text(
+                  description,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: context.installerVisuals.mutedForeground,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemePreview extends StatelessWidget {
+  const _ThemePreview({required this.isDark});
+
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = isDark ? const Color(0xFF2F2A3F) : const Color(0xFFD9D7E8);
+    final card = isDark ? const Color(0xFF17141F) : const Color(0xFFFAFAFD);
+    final chrome = isDark ? const Color(0xFF252130) : const Color(0xFFEAE7F4);
+    final line = isDark ? const Color(0xFF343041) : const Color(0xFFD6D2E3);
+    final button = isDark
+        ? const LinearGradient(colors: [Color(0xFFB77433), Color(0xFFE4A05D)])
+        : const LinearGradient(colors: [Color(0xFF9A7FFF), Color(0xFF6C63F8)]);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: card,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        children: [
+          Container(
+            height: 34,
+            decoration: BoxDecoration(
+              color: chrome,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
               ),
             ),
-          ],
-        ),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                ...[
+                  const Color(0xFFE8A2A2),
+                  const Color(0xFFD8C18A),
+                  const Color(0xFF8DA8FF),
+                ].map(
+                  (color) => Container(
+                    width: 8,
+                    height: 8,
+                    margin: const EdgeInsets.only(right: 6),
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 110,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: line,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: line.withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: line.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    width: 88,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      gradient: button,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -16,7 +16,10 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
-  gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  GtkWindow* window =
+      GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  gtk_window_fullscreen(window);
+  gtk_widget_show(GTK_WIDGET(window));
 }
 
 // Implements GApplication::activate.
@@ -53,6 +56,7 @@ static void my_application_activate(GApplication* application) {
   }
 
   gtk_window_set_default_size(window, 1280, 720);
+  gtk_window_fullscreen(window);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(

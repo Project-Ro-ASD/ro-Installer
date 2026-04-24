@@ -1,9 +1,7 @@
 import 'package:test/test.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
-import 'package:ro_installer/services/command_runner.dart';
 import 'package:ro_installer/services/install_stages/formatting_stage.dart';
 import 'package:ro_installer/services/install_stages/stage_context.dart';
-import 'package:ro_installer/services/install_stages/stage_result.dart';
 
 /// Test için StageContext oluşturur.
 StageContext makeContext(
@@ -16,10 +14,17 @@ StageContext makeContext(
     log: (msg) {},
     onProgress: (p, s) {},
     commandRunner: runner,
-    runCmd: (cmd, args, onLog, {bool isMock = false, List<int> allowedExitCodes = const [0]}) async {
-      final result = await runner.run(cmd, args);
-      return allowedExitCodes.contains(result.exitCode);
-    },
+    runCmd:
+        (
+          cmd,
+          args,
+          onLog, {
+          bool isMock = false,
+          List<int> allowedExitCodes = const [0],
+        }) async {
+          final result = await runner.run(cmd, args);
+          return allowedExitCodes.contains(result.exitCode);
+        },
     isMock: isMock,
   );
 }
@@ -98,8 +103,12 @@ void main() {
 
     test('mkfs.fat başarısız olursa stage durur', () async {
       final fake = FakeCommandRunner();
-      fake.addResponse('mkfs.fat', ['-F32', '/dev/sda1'],
-          exitCode: 1, stderr: 'Permission denied');
+      fake.addResponse(
+        'mkfs.fat',
+        ['-F32', '/dev/sda1'],
+        exitCode: 1,
+        stderr: 'Permission denied',
+      );
 
       final state = {
         'selectedDisk': '/dev/sda',
@@ -124,9 +133,30 @@ void main() {
         'partitionMethod': 'manual',
         'fileSystem': 'btrfs',
         'manualPartitions': [
-          {'name': '/dev/sda1', 'type': 'fat32', 'mount': '/boot/efi', 'isPlanned': true, 'isFreeSpace': false},
-          {'name': '/dev/sda2', 'type': 'ext4', 'mount': '/', 'isPlanned': true, 'isFreeSpace': false},
-          {'name': '/dev/sda3', 'type': 'linux-swap', 'mount': '[SWAP]', 'isPlanned': true, 'isFreeSpace': false},
+          {
+            'name': '/dev/sda1',
+            'type': 'fat32',
+            'mount': '/boot/efi',
+            'isPlanned': true,
+            'isFreeSpace': false,
+            'formatOnInstall': true,
+          },
+          {
+            'name': '/dev/sda2',
+            'type': 'ext4',
+            'mount': '/',
+            'isPlanned': true,
+            'isFreeSpace': false,
+            'formatOnInstall': true,
+          },
+          {
+            'name': '/dev/sda3',
+            'type': 'linux-swap',
+            'mount': '[SWAP]',
+            'isPlanned': true,
+            'isFreeSpace': false,
+            'formatOnInstall': true,
+          },
         ],
       };
       final ctx = makeContext(state, fake);
@@ -147,8 +177,22 @@ void main() {
         'partitionMethod': 'manual',
         'fileSystem': 'btrfs',
         'manualPartitions': [
-          {'name': '/dev/sda1', 'type': 'ntfs', 'mount': 'unmounted', 'isPlanned': false, 'isFreeSpace': false},
-          {'name': '/dev/sda2', 'type': 'ext4', 'mount': '/', 'isPlanned': true, 'isFreeSpace': false},
+          {
+            'name': '/dev/sda1',
+            'type': 'ntfs',
+            'mount': 'unmounted',
+            'isPlanned': false,
+            'isFreeSpace': false,
+            'formatOnInstall': false,
+          },
+          {
+            'name': '/dev/sda2',
+            'type': 'ext4',
+            'mount': '/',
+            'isPlanned': true,
+            'isFreeSpace': false,
+            'formatOnInstall': true,
+          },
         ],
       };
       final ctx = makeContext(state, fake);
@@ -161,6 +205,41 @@ void main() {
       expect(fake.wasCommandCalled('mkfs.ntfs'), false);
       // sda2 formatlanmalı
       expect(fake.wasCalledWith('mkfs.ext4', ['-F', '/dev/sda2']), true);
+    });
+
+    test('formatOnInstall=false olan atanmis bolumler korunur', () async {
+      final fake = FakeCommandRunner();
+      final state = {
+        'selectedDisk': '/dev/sda',
+        'partitionMethod': 'manual',
+        'fileSystem': 'btrfs',
+        'manualPartitions': [
+          {
+            'name': '/dev/sda1',
+            'type': 'fat32',
+            'mount': '/boot/efi',
+            'isPlanned': true,
+            'isFreeSpace': false,
+            'formatOnInstall': false,
+          },
+          {
+            'name': '/dev/sda2',
+            'type': 'btrfs',
+            'mount': '/',
+            'isPlanned': true,
+            'isFreeSpace': false,
+            'formatOnInstall': true,
+          },
+        ],
+      };
+      final ctx = makeContext(state, fake);
+
+      final stage = const FormattingStage();
+      final result = await stage.execute(ctx);
+
+      expect(result.success, true);
+      expect(fake.wasCalledWith('mkfs.fat', ['-F32', '/dev/sda1']), false);
+      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda2']), true);
     });
   });
 }

@@ -4,7 +4,7 @@
  "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
 <policyconfig>
   <vendor>Ro-ASD</vendor>
-  <vendor_url>https://github.com/Project-Ro-ASD/ro-Installer</vendor_url>
+  <vendor_url>https://github.com/ASD-Team/ro-Installer</vendor_url>
 
   <action id="org.roasd.installer.run">
     <description>Ro-ASD OS Installer needs root privileges to manage disks, partitions, and system configuration.</description>

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import '../utils/account_validation.dart';
 
 /// Kurulum yapılandırma profili.
 ///
@@ -33,7 +34,7 @@ class InstallProfile {
   /// Bölümleme yöntemi: 'full', 'alongside', 'manual'
   final String partitionMethod;
 
-  /// Dosya sistemi türü: 'btrfs', 'ext4', 'xfs'
+  /// Dosya sistemi türü: yalnizca 'btrfs'
   final String fileSystem;
 
   /// Kullanıcı adı
@@ -60,11 +61,26 @@ class InstallProfile {
   /// Mevcut EFI bölüm yolu (alongside modu, ör: '/dev/sda1')
   final String existingEfiPartition;
 
+  /// Alongside modunda küçültülecek mevcut bölüm yolu
+  final String shrinkCandidatePartition;
+
+  /// Alongside modunda küçültülecek mevcut bölüm dosya sistemi
+  final String shrinkCandidateFs;
+
+  /// Alongside modunda küçültülecek bölümün toplam boyutu
+  final int shrinkCandidateSizeBytes;
+
   /// Manuel modda kullanıcının oluşturduğu bölüm planı
   final List<Map<String, dynamic>> manualPartitions;
 
-  /// Seçilen bölge/dil (ör: 'Europe/Istanbul', 'tr_TR.UTF-8')
+  /// Seçilen ülke/bölge adı (ör: 'Türkiye', '日本')
   final String selectedRegion;
+
+  /// Kurulum arayüzü ve motoru için dil kodu (ör: 'tr', 'en', 'es')
+  final String selectedLanguage;
+
+  /// Kurulu sisteme yazılacak locale override değeri (ör: 'tr_TR.UTF-8')
+  final String selectedLocale;
 
   const InstallProfile({
     required this.selectedDisk,
@@ -78,8 +94,13 @@ class InstallProfile {
     this.linuxDiskSizeGB = 60.0,
     this.hasExistingEfi = false,
     this.existingEfiPartition = '',
+    this.shrinkCandidatePartition = '',
+    this.shrinkCandidateFs = '',
+    this.shrinkCandidateSizeBytes = 0,
     this.manualPartitions = const [],
-    this.selectedRegion = 'Europe/Istanbul',
+    this.selectedRegion = 'Türkiye',
+    this.selectedLanguage = 'tr',
+    this.selectedLocale = '',
   });
 
   /// JSON Map'ten oluşturur.
@@ -87,24 +108,37 @@ class InstallProfile {
     return InstallProfile(
       selectedDisk: json['selectedDisk'] as String? ?? '',
       partitionMethod: json['partitionMethod'] as String? ?? 'full',
-      fileSystem: json['fileSystem'] as String? ?? 'btrfs',
+      fileSystem: 'btrfs',
       username: json['username'] as String? ?? 'user',
       password: json['password'] as String? ?? '',
-      timezone: json['timezone'] as String? ??
+      timezone:
+          json['timezone'] as String? ??
           json['selectedTimezone'] as String? ??
           'Europe/Istanbul',
-      keyboard: json['keyboard'] as String? ??
+      keyboard:
+          json['keyboard'] as String? ??
           json['selectedKeyboard'] as String? ??
           'trq',
       isAdministrator: json['isAdministrator'] as bool? ?? true,
       linuxDiskSizeGB: (json['linuxDiskSizeGB'] as num?)?.toDouble() ?? 60.0,
       hasExistingEfi: json['hasExistingEfi'] as bool? ?? false,
       existingEfiPartition: json['existingEfiPartition'] as String? ?? '',
-      manualPartitions: (json['manualPartitions'] as List<dynamic>?)
+      shrinkCandidatePartition:
+          json['shrinkCandidatePartition'] as String? ?? '',
+      shrinkCandidateFs: json['shrinkCandidateFs'] as String? ?? '',
+      shrinkCandidateSizeBytes: json['shrinkCandidateSizeBytes'] as int? ?? 0,
+      manualPartitions:
+          (json['manualPartitions'] as List<dynamic>?)
               ?.map((e) => Map<String, dynamic>.from(e as Map))
               .toList() ??
           [],
-      selectedRegion: json['selectedRegion'] as String? ?? 'Europe/Istanbul',
+      selectedRegion: json['selectedRegion'] as String? ?? 'Türkiye',
+      selectedLanguage:
+          json['selectedLanguage'] as String? ??
+          json['language'] as String? ??
+          'tr',
+      selectedLocale:
+          json['selectedLocale'] as String? ?? json['locale'] as String? ?? '',
     );
   }
 
@@ -123,42 +157,52 @@ class InstallProfile {
 
   /// JSON Map'e dönüştürür.
   Map<String, dynamic> toJson() => {
-        'selectedDisk': selectedDisk,
-        'partitionMethod': partitionMethod,
-        'fileSystem': fileSystem,
-        'username': username,
-        'password': password,
-        'timezone': timezone,
-        'keyboard': keyboard,
-        'isAdministrator': isAdministrator,
-        'linuxDiskSizeGB': linuxDiskSizeGB,
-        'hasExistingEfi': hasExistingEfi,
-        'existingEfiPartition': existingEfiPartition,
-        'manualPartitions': manualPartitions,
-        'selectedRegion': selectedRegion,
-      };
+    'selectedDisk': selectedDisk,
+    'partitionMethod': partitionMethod,
+    'fileSystem': fileSystem,
+    'username': username,
+    'password': password,
+    'timezone': timezone,
+    'keyboard': keyboard,
+    'isAdministrator': isAdministrator,
+    'linuxDiskSizeGB': linuxDiskSizeGB,
+    'hasExistingEfi': hasExistingEfi,
+    'existingEfiPartition': existingEfiPartition,
+    'shrinkCandidatePartition': shrinkCandidatePartition,
+    'shrinkCandidateFs': shrinkCandidateFs,
+    'shrinkCandidateSizeBytes': shrinkCandidateSizeBytes,
+    'manualPartitions': manualPartitions,
+    'selectedRegion': selectedRegion,
+    'selectedLanguage': selectedLanguage,
+    'selectedLocale': selectedLocale,
+  };
 
   /// Stage'lerin beklediği state Map'ine dönüştürür.
-  /// 
+  ///
   /// Mevcut stage'ler `ctx.state['selectedDisk']` gibi anahtarlar kullanıyor.
   /// Bu metot, profildeki verileri bu anahtarlarla eşleştirir.
   /// İleride stage'ler doğrudan InstallProfile kullanmaya geçtiğinde
   /// bu metot kaldırılabilir.
   Map<String, dynamic> toStateMap() => {
-        'selectedDisk': selectedDisk,
-        'partitionMethod': partitionMethod,
-        'fileSystem': fileSystem,
-        'username': username,
-        'password': password,
-        'selectedTimezone': timezone,
-        'selectedKeyboard': keyboard,
-        'isAdministrator': isAdministrator,
-        'linuxDiskSizeGB': linuxDiskSizeGB,
-        'hasExistingEfi': hasExistingEfi,
-        'existingEfiPartition': existingEfiPartition,
-        'manualPartitions': manualPartitions,
-        'selectedRegion': selectedRegion,
-      };
+    'selectedDisk': selectedDisk,
+    'partitionMethod': partitionMethod,
+    'fileSystem': fileSystem,
+    'username': username,
+    'password': password,
+    'selectedTimezone': timezone,
+    'selectedKeyboard': keyboard,
+    'isAdministrator': isAdministrator,
+    'linuxDiskSizeGB': linuxDiskSizeGB,
+    'hasExistingEfi': hasExistingEfi,
+    'existingEfiPartition': existingEfiPartition,
+    'shrinkCandidatePartition': shrinkCandidatePartition,
+    'shrinkCandidateFs': shrinkCandidateFs,
+    'shrinkCandidateSizeBytes': shrinkCandidateSizeBytes,
+    'manualPartitions': manualPartitions,
+    'selectedRegion': selectedRegion,
+    'selectedLanguage': selectedLanguage,
+    'selectedLocale': selectedLocale,
+  };
 
   /// Profili doğrular ve hata listesi döndürür.
   /// Boş liste = geçerli profil.
@@ -171,14 +215,16 @@ class InstallProfile {
     if (!['full', 'alongside', 'manual'].contains(partitionMethod)) {
       errors.add('Geçersiz bölümleme yöntemi: $partitionMethod');
     }
-    if (!['btrfs', 'ext4', 'xfs'].contains(fileSystem)) {
-      errors.add('Geçersiz dosya sistemi: $fileSystem');
+    if (fileSystem != 'btrfs') {
+      errors.add('Geçersiz dosya sistemi: yalnizca btrfs desteklenir.');
     }
     if (username.isEmpty) {
       errors.add('Kullanıcı adı boş olamaz.');
     }
-    if (username.contains(' ') || username.contains(RegExp(r'[^a-z0-9_-]'))) {
-      errors.add('Kullanıcı adı geçersiz karakterler içeriyor: $username');
+    if (!isValidLinuxUsername(username)) {
+      errors.add(
+        'Kullanıcı adı Linux kurallarına uymuyor: $username (harf veya _ ile başlamalı, sadece kucuk harf/rakam/_/- içermeli)',
+      );
     }
     if (password.isEmpty) {
       errors.add('Parola boş olamaz.');
@@ -186,8 +232,11 @@ class InstallProfile {
     if (password.length < 4) {
       errors.add('Parola en az 4 karakter olmalıdır.');
     }
-    if (partitionMethod == 'alongside' && linuxDiskSizeGB < 20) {
-      errors.add('Alongside kurulumu için en az 20 GB gerekli.');
+    if (selectedLanguage.isEmpty) {
+      errors.add('Dil kodu boş olamaz.');
+    }
+    if (partitionMethod == 'alongside' && linuxDiskSizeGB < 40) {
+      errors.add('Alongside kurulumu için en az 40 GB gerekli.');
     }
     if (partitionMethod == 'manual' && manualPartitions.isEmpty) {
       errors.add('Manuel modda bölüm planı boş olamaz.');
@@ -211,6 +260,7 @@ class InstallProfile {
         'disk: $selectedDisk, '
         'method: $partitionMethod, '
         'fs: $fileSystem, '
+        'language: $selectedLanguage, '
         'user: $username)';
   }
 }

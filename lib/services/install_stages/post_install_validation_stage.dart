@@ -1,5 +1,6 @@
 import 'stage_context.dart';
 import 'stage_result.dart';
+import '../target_system_settings.dart';
 
 /// AŞAMA 8: Kurulum Sonrası Doğrulama
 ///
@@ -10,7 +11,7 @@ import 'stage_result.dart';
 /// - BLS girdileri mevcut mu
 /// - fstab sözdizimi doğrulanıyor mu
 /// - Live ISO parametreleri hedef sisteme sızmış mı
-/// - BTRFS tam kurulumlarında rootflags=subvol=@ mevcut mu
+/// - BTRFS kurulumlarında rootflags=subvol=@ mevcut mu
 class PostInstallValidationStage {
   const PostInstallValidationStage();
 
@@ -19,7 +20,21 @@ class PostInstallValidationStage {
     ctx.log('[AŞAMA 8] Kurulum Sonrası Doğrulama Başlatılıyor');
     ctx.log('════════════════════════════════════════════');
 
-    ctx.onProgress(0.97, 'Kurulu sistemin boot doğrulaması yapılıyor...');
+    ctx.progress(
+      0.97,
+      'stage_progress_post_validate_boot',
+      'Kurulu sistemin boot doğrulaması yapılıyor...',
+    );
+
+    final localeSettings = resolveTargetLocaleSettings(
+      selectedLanguage: (ctx.state['selectedLanguage'] ?? 'en').toString(),
+      selectedLocale: (ctx.state['selectedLocale'] ?? '').toString(),
+    );
+    final keyboardSettings = resolveTargetKeyboardSettings(
+      (ctx.state['selectedKeyboard'] ?? 'trq').toString(),
+    );
+    final timezone = (ctx.state['selectedTimezone'] ?? 'Europe/Istanbul')
+        .toString();
 
     StageResult? failure = await _requireCommand(ctx, 'test', [
       '-f',
@@ -31,6 +46,56 @@ class PostInstallValidationStage {
       '-f',
       '/mnt/etc/kernel/cmdline',
     ], '/mnt/etc/kernel/cmdline bulunamadı.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'test', [
+      '-f',
+      '/mnt/etc/locale.conf',
+    ], '/mnt/etc/locale.conf bulunamadı.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      'grep -q "^LANG=${localeSettings.locale}\$" /mnt/etc/locale.conf',
+    ], '/etc/locale.conf beklenen locale değerini içermiyor.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'test', [
+      '-f',
+      '/mnt/etc/vconsole.conf',
+    ], '/mnt/etc/vconsole.conf bulunamadı.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      'grep -q "^KEYMAP=${keyboardSettings.consoleKeymap}\$" /mnt/etc/vconsole.conf',
+    ], '/etc/vconsole.conf beklenen klavye düzenini içermiyor.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'test', [
+      '-f',
+      '/mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
+    ], '/mnt/etc/X11/xorg.conf.d/00-keyboard.conf bulunamadı.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      'grep -q \'Option "XkbLayout" "${keyboardSettings.x11Layout}"\' /mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
+    ], 'Grafik oturum klavye yerleşimi beklenen değeri içermiyor.');
+    if (failure != null) return failure;
+
+    if (keyboardSettings.hasVariant) {
+      failure = await _requireCommand(ctx, 'sh', [
+        '-c',
+        'grep -q \'Option "XkbVariant" "${keyboardSettings.x11Variant}"\' /mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
+      ], 'Grafik oturum klavye varyantı beklenen değeri içermiyor.');
+      if (failure != null) return failure;
+    }
+
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      '[ "\$(readlink /mnt/etc/localtime)" = "/usr/share/zoneinfo/$timezone" ]',
+    ], '/etc/localtime beklenen saat dilimine işaret etmiyor.');
     if (failure != null) return failure;
 
     failure = await _requireCommand(ctx, 'sh', [
@@ -48,6 +113,14 @@ class PostInstallValidationStage {
       'grub2-efi-x64',
       'shim-x64',
     ], 'Boot için gerekli paketler hedef sistemde doğrulanamadı.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'rpm',
+      '-q',
+      ...localeSettings.requiredPackages,
+    ], 'Secilen dil destek paketleri hedef sistemde doğrulanamadı.');
     if (failure != null) return failure;
 
     failure = await _requireCommand(ctx, 'sh', [
@@ -125,8 +198,7 @@ class PostInstallValidationStage {
     }
 
     final rootFs = (ctx.state['fileSystem'] ?? 'btrfs').toString();
-    final partitionMethod = (ctx.state['partitionMethod'] ?? 'full').toString();
-    if (rootFs == 'btrfs' && partitionMethod != 'manual') {
+    if (rootFs == 'btrfs') {
       failure = await _requireCommand(ctx, 'sh', [
         '-c',
         'grep -q "rootflags=subvol=@" /mnt/etc/kernel/cmdline',
@@ -135,7 +207,12 @@ class PostInstallValidationStage {
     }
 
     ctx.log('[AŞAMA 8] Kurulum sonrası doğrulama başarıyla tamamlandı.');
-    return StageResult.ok('Kurulum sonrası doğrulama tamamlandı.');
+    return StageResult.ok(
+      ctx.t(
+        'stage_result_post_validation_done',
+        'Kurulum sonrası doğrulama tamamlandı.',
+      ),
+    );
   }
 
   Future<StageResult?> _requireCommand(

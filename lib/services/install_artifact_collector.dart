@@ -1,4 +1,5 @@
 import 'command_runner.dart';
+import 'install_localizer.dart';
 
 /// Kurulum hata verdiğinde, hatanın nedenini teşhis edebilmek için
 /// sistem durumunun (disk, mount, boot dosyaları vb.) kaydını tutan servis.
@@ -12,58 +13,84 @@ class InstallArtifactCollector {
   Future<void> collectDiagnostics(
     void Function(String) onLog, {
     bool isMock = false,
+    InstallLocalizer localizer = const InstallLocalizer(),
   }) async {
+    String t(String key, String fallback) => localizer.t(key, fallback);
+
     onLog('');
     onLog('╔═══════════════════════════════════════════════════════════╗');
-    onLog('║ 🚨 KURULUM HATASI TEŞHİS RAPORU (ARTIFACT COLLECTION)    ║');
+    onLog(
+      t(
+        'artifact_header_title',
+        '║ 🚨 KURULUM HATASI TEŞHİS RAPORU (ARTIFACT COLLECTION)    ║',
+      ),
+    );
     onLog('╚═══════════════════════════════════════════════════════════╝');
 
     await _runDiagCmd(
       'lsblk -f',
-      'DİSK VE BÖLÜM YAPISI',
+      t('artifact_title_disk_layout', 'DİSK VE BÖLÜM YAPISI'),
       onLog,
       isMock: isMock,
+      localizer: localizer,
     );
-    await _runDiagCmd('blkid', 'BÖLÜM UUID BİLGİLERİ', onLog, isMock: isMock);
+    await _runDiagCmd(
+      'blkid',
+      t('artifact_title_partition_uuid', 'BÖLÜM UUID BİLGİLERİ'),
+      onLog,
+      isMock: isMock,
+      localizer: localizer,
+    );
     await _runDiagCmd(
       'findmnt',
-      'AKTİF MOUNT NOKTALARI',
+      t('artifact_title_active_mounts', 'AKTİF MOUNT NOKTALARI'),
       onLog,
       isMock: isMock,
+      localizer: localizer,
     );
     await _runDiagCmd(
       'cat /mnt/etc/fstab',
-      'FSTAB YAPILANDIRMASI',
+      t('artifact_title_fstab', 'FSTAB YAPILANDIRMASI'),
       onLog,
       isMock: isMock,
+      localizer: localizer,
     );
     await _runDiagCmd(
       'ls -la /mnt/boot/efi/EFI/fedora/',
-      'EFI DOSYALARI',
+      t('artifact_title_efi_files', 'EFI DOSYALARI'),
       onLog,
       isMock: isMock,
+      localizer: localizer,
     );
     await _runDiagCmd(
       'cat /mnt/boot/efi/EFI/fedora/grub.cfg',
-      'EFI GRUB STUB',
+      t('artifact_title_efi_grub_stub', 'EFI GRUB STUB'),
       onLog,
       isMock: isMock,
+      localizer: localizer,
     );
     await _runDiagCmd(
       'ls -la /mnt/boot/loader/entries/',
-      'BLS GİRİŞLERİ',
+      t('artifact_title_bls_entries', 'BLS GİRİŞLERİ'),
       onLog,
       isMock: isMock,
+      localizer: localizer,
     );
     await _runDiagCmd(
       'cat /mnt/etc/kernel/cmdline',
-      'KERNEL CMDLINE',
+      t('artifact_title_kernel_cmdline', 'KERNEL CMDLINE'),
       onLog,
       isMock: isMock,
+      localizer: localizer,
     );
 
     onLog('═════════════════════════════════════════════════════════════');
-    onLog('TEŞHİS RAPORU TAMAMLANDI. Lütfen yukarıdaki çıktıları inceleyin.');
+    onLog(
+      t(
+        'artifact_footer',
+        'TEŞHİS RAPORU TAMAMLANDI. Lütfen yukarıdaki çıktıları inceleyin.',
+      ),
+    );
     onLog('═════════════════════════════════════════════════════════════');
   }
 
@@ -72,6 +99,7 @@ class InstallArtifactCollector {
     String title,
     void Function(String) onLog, {
     bool isMock = false,
+    InstallLocalizer localizer = const InstallLocalizer(),
   }) async {
     onLog('\n--- $title ---');
     onLog('\$ $cmdLine');
@@ -83,7 +111,12 @@ class InstallArtifactCollector {
     final result = await _commandRunner.run(cmd, args, isMock: isMock);
 
     if (!result.started) {
-      onLog('[HATA] Komut çalıştırılamadı!');
+      onLog(
+        localizer.t(
+          'artifact_command_not_started',
+          '[HATA] Komut çalıştırılamadı!',
+        ),
+      );
       return;
     }
 
@@ -96,7 +129,7 @@ class InstallArtifactCollector {
     }
 
     if (result.stdout.isEmpty && result.stderr.isEmpty) {
-      onLog('(Çıktı boş)');
+      onLog(localizer.t('artifact_empty_output', '(Çıktı boş)'));
     }
   }
 }

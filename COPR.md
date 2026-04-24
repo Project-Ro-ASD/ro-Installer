@@ -1,92 +1,75 @@
-# COPR Packaging
+# COPR Guide
 
-This repository uses `make_srpm` for COPR. The source build creates the
-application source tarball from the checked-out Git tree, and the RPM build
-bootstraps a pinned Flutter SDK inside the build chroot.
+This repository is prepared for COPR builds with the `SCM` source type and the
+`make srpm` workflow.
 
-## Why This Setup Exists
+## Build Method
 
-Fedora 43 COPR chroots do not provide a `flutter` RPM package. Because of that,
-using:
+Use `make srpm` for this project.
 
-```spec
-BuildRequires: flutter
-```
+Why:
 
-causes the build to fail during `dnf5 builddep` with:
+1. This is the upstream application repository, not a DistGit-style packaging repository.
+2. The provided `.copr/Makefile` creates the source archive directly from the checked-out tree.
+3. The workflow stays explicit, reproducible, and compatible with GitHub-triggered COPR builds.
 
-```text
-No match for argument: flutter
-```
-
-The spec therefore downloads the official Flutter SDK archive during `%build`,
-verifies its SHA-256 checksum, enables Linux desktop support, precaches Linux
-artifacts, and then runs the normal Flutter build.
-
-## Required COPR Settings
-
-Keep **internet access enabled** for this package in COPR. The RPM build needs
-network access for:
-
-- downloading the pinned Flutter SDK archive
-- Flutter Linux artifact precache during the first build in a clean chroot
-
-If internet access is disabled, the build will fail even if the SRPM phase
-passes.
-
-## Files Used By COPR
+Files used by COPR:
 
 - `ro-installer.spec`
 - `.copr/Makefile`
+- `LICENSE`
 
-## How The Build Works
-
-1. COPR clones this repository from GitHub.
-2. COPR runs `.copr/Makefile` with `make_srpm`.
-3. `.copr/Makefile` creates `ro-installer-<version>.tar.gz` from the checked-out
-   tree.
-4. COPR builds the SRPM.
-5. During the RPM build, `ro-installer.spec` downloads the pinned Flutter SDK,
-   verifies it, runs `flutter pub get`, and builds the Linux release bundle.
-
-## Local Reproduction
-
-If COPR gives you a build task URL, reproduce it locally with:
+Command executed by COPR:
 
 ```bash
-sudo dnf install copr-rpmbuild
-/usr/bin/copr-rpmbuild --verbose --drop-resultdir \
-  --task-url https://copr.fedorainfracloud.org/backend/get-build-task/TASKID \
-  --chroot fedora-43-x86_64
+make -f .copr/Makefile srpm outdir="<outdir>" spec="ro-installer.spec"
 ```
 
-To test only SRPM generation from the repo checkout:
+## COPR Package Settings
+
+Configure the package with these values:
+
+1. `Source Type`: `SCM`
+2. `SCM Type`: `git`
+3. `Clone URL`: `https://github.com/Project-Ro-ASD/ro-Installer.git`
+4. `Committish`: `main`
+5. `Subdirectory`: leave empty
+6. `Spec File`: `ro-installer.spec`
+7. `SRPM Build Method`: `make srpm`
+8. `Auto-rebuild`: enabled
+
+## GitHub Webhook
+
+After creating the SCM package in COPR:
+
+1. Open the COPR project.
+2. Go to `Settings -> Integrations`.
+3. Copy the GitHub webhook URL.
+4. In GitHub open `Settings -> Webhooks -> Add webhook`.
+5. Paste the COPR URL into `Payload URL`.
+6. Set content type to `application/json`.
+7. Enable push events and save.
+
+## Local SRPM Test
 
 ```bash
 mkdir -p dist
-make -f .copr/Makefile srpm outdir="$PWD/dist" spec="$PWD/ro-installer.spec"
+make -f .copr/Makefile srpm outdir="$PWD/dist" spec="ro-installer.spec"
 ```
 
-## Updating Flutter
+Expected output for the current release:
 
-When updating Flutter for COPR:
+- `dist/ro-installer-3.0.0.tar.gz`
+- `dist/ro-installer-3.0.0-1*.src.rpm`
 
-1. Update `flutter_version`
-2. Update `flutter_channel` if needed
-3. Update `flutter_sha256`
-4. Push to GitHub and trigger a fresh COPR build
+Optional local rebuild with `mock`:
 
-The release metadata can be checked from the official Flutter release index:
+```bash
+mock -r fedora-rawhide-x86_64 --rebuild dist/*.src.rpm
+```
 
-- https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json
+## Note About Flutter
 
-## Recommended COPR Source Method
-
-Use:
-
-- Source Type: `git`
-- Spec file: `ro-installer.spec`
-- SRPM build method: `make_srpm`
-- Subdirectory: empty
-
-`rpkg` is not needed for this repository.
+The RPM build expects a Fedora-compatible environment with the required build
+dependencies available to the spec. Keep the build declarative and avoid adding
+ad-hoc downloads outside the packaging workflow.

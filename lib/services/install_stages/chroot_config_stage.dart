@@ -1,5 +1,7 @@
 import 'stage_context.dart';
 import 'stage_result.dart';
+import '../../utils/account_validation.dart';
+import '../target_system_settings.dart';
 
 /// AŞAMA 6: Chroot Yapılandırma
 ///
@@ -22,8 +24,9 @@ class ChrootConfigStage {
     ctx.log('════════════════════════════════════════════');
 
     // ── 6.1: Bind Mount'ları Oluştur ──
-    ctx.onProgress(
+    ctx.progress(
       0.7,
+      'stage_progress_chroot_bind_mounts',
       'Kök sistem bağlamaları yapılıyor (Chroot hazırlığı)...',
     );
 
@@ -95,17 +98,33 @@ class ChrootConfigStage {
     if (failure != null) return failure;
 
     // ── 6.2: Kullanıcı ve Sistem Ayarları ──
-    ctx.onProgress(
+    ctx.progress(
       0.8,
+      'stage_progress_chroot_user_timezone',
       'Zaman dilimi ve kullanıcı ayarları yapılandırılıyor...',
     );
 
     String user = ctx.state['username'] ?? 'user';
     String pass = ctx.state['password'] ?? 'user';
     String tz = ctx.state['selectedTimezone'] ?? 'Europe/Istanbul';
-    String kbd = ctx.state['selectedKeyboard'] ?? 'trq';
+    String languageCode = ctx.state['selectedLanguage'] ?? 'en';
+    String localeOverride = ctx.state['selectedLocale'] ?? '';
     String hostname = 'ro-asd';
     final isAdministrator = ctx.state['isAdministrator'] == true;
+    final localeSettings = resolveTargetLocaleSettings(
+      selectedLanguage: languageCode,
+      selectedLocale: localeOverride,
+    );
+    final keyboardSettings = resolveTargetKeyboardSettings(
+      (ctx.state['selectedKeyboard'] ?? 'trq').toString(),
+    );
+
+    user = normalizeLinuxUsername(user);
+    if (!isValidLinuxUsername(user)) {
+      return StageResult.fail(
+        'Gecersiz kullanici adi: $user. Kullanici adi harf veya _ ile baslamali ve sadece kucuk harf, rakam, _ veya - icermelidir.',
+      );
+    }
 
     // Zaman dilimi
     failure = await _requireCommand(ctx, 'chroot', [
@@ -133,13 +152,35 @@ class ChrootConfigStage {
     ], 'Hostname yazılamadı.');
     if (failure != null) return failure;
 
+    ctx.progress(
+      0.81,
+      'stage_progress_chroot_language_support',
+      'Seçilen dil destek paketleri kuruluyor...',
+    );
+
+    failure = await _installLocalizationSupport(ctx, localeSettings);
+    if (failure != null) return failure;
+
     // Vconsole (Klavye Düzeni)
     failure = await _requireCommand(ctx, 'chroot', [
       '/mnt',
       'sh',
       '-c',
-      'echo "KEYMAP=$kbd" > /etc/vconsole.conf',
+      'echo "KEYMAP=${keyboardSettings.consoleKeymap}" > /etc/vconsole.conf',
     ], 'Klavye düzeni yapılandırılamadı.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      '''
+mkdir -p /etc/X11/xorg.conf.d
+cat > /etc/X11/xorg.conf.d/00-keyboard.conf << 'EOF'
+${renderX11KeyboardConfig(keyboardSettings)}
+EOF
+      ''',
+    ], 'Grafik oturum klavye düzeni yapılandırılamadı.');
     if (failure != null) return failure;
 
     // Locale (Dil)
@@ -147,7 +188,7 @@ class ChrootConfigStage {
       '/mnt',
       'sh',
       '-c',
-      'echo "LANG=en_US.UTF-8" > /etc/locale.conf',
+      'echo "LANG=${localeSettings.locale}" > /etc/locale.conf',
     ], 'Locale yapılandırması yazılamadı.');
     if (failure != null) return failure;
 
@@ -213,8 +254,9 @@ class ChrootConfigStage {
     }
 
     // ── 6.5: Eski Installer ve Live CD Kalıntıları Temizliği ──
-    ctx.onProgress(
+    ctx.progress(
       0.82,
+      'stage_progress_chroot_cleanup_live',
       'Live CD ve eski installer kalıntıları temizleniyor...',
     );
 
@@ -287,7 +329,11 @@ class ChrootConfigStage {
     // ── 6.6: FSTAB Üretimi ──
     // findmnt -R /mnt yaklaşımı /mnt/run altına bind edilen canlı ortam mountlarını
     // hedef sisteme sızdırdığı için girdileri kurulum planından deterministik üret.
-    ctx.onProgress(0.85, 'Fstab ve SELinux yapılandırılıyor...');
+    ctx.progress(
+      0.85,
+      'stage_progress_chroot_fstab_selinux',
+      'Fstab ve SELinux yapılandırılıyor...',
+    );
 
     final fstabEntries = await _buildFstabEntries(ctx);
     if (fstabEntries.isEmpty) {
@@ -317,7 +363,11 @@ class ChrootConfigStage {
 
     // ── 6.7: VM Smoke Test Servisi (Opsiyonel) ──
     if (ctx.state['vmTestMode'] == true) {
-      ctx.onProgress(0.86, 'VM test ilk acilis servisi hazirlaniyor...');
+      ctx.progress(
+        0.86,
+        'stage_progress_chroot_vm_smoke',
+        'VM test ilk acilis servisi hazirlaniyor...',
+      );
       failure = await _requireCommand(ctx, 'sh', [
         '-c',
         '''
@@ -356,7 +406,30 @@ EOF
     if (failure != null) return failure;
 
     ctx.log('[AŞAMA 6] Chroot yapılandırma tamamlandı.');
-    return StageResult.ok('Chroot yapılandırma tamamlandı.');
+    return StageResult.ok(
+      ctx.t('stage_result_chroot_done', 'Chroot yapılandırma tamamlandı.'),
+    );
+  }
+
+  Future<StageResult?> _installLocalizationSupport(
+    StageContext ctx,
+    TargetLocaleSettings localeSettings,
+  ) async {
+    final packages = localeSettings.requiredPackages;
+    final ok = await ctx.runCmd(
+      'chroot',
+      ['/mnt', 'dnf', 'install', '-y', ...packages],
+      ctx.log,
+      isMock: ctx.isMock,
+    );
+    if (ok) {
+      return null;
+    }
+
+    final message =
+        'Secilen dil destek paketleri kurulamadı: ${packages.join(', ')}';
+    ctx.log('HATA: $message');
+    return StageResult.fail(message);
   }
 
   Future<StageResult?> _requireCommand(
@@ -504,18 +577,75 @@ EOF
       case 'manual':
         final manualPartitions =
             ctx.state['manualPartitions'] as List<dynamic>? ?? const [];
-        for (final raw in manualPartitions) {
-          final part = raw as Map<String, dynamic>;
-          if (part['isFreeSpace'] == true) continue;
+        final rootPart = manualPartitions
+            .cast<Map<String, dynamic>?>()
+            .firstWhere(
+              (part) =>
+                  part != null &&
+                  part['isFreeSpace'] != true &&
+                  part['mount'] == '/',
+              orElse: () => null,
+            );
+        if (rootPart == null) {
+          ctx.log('HATA: Manuel kurulum için root bölümü tanımlanmamış.');
+          return const [];
+        }
 
+        final rootName = (rootPart['name'] ?? '').toString();
+        final rootFs = _normalizeFsType((rootPart['type'] ?? '').toString());
+        final rootEntry = await _makeFsEntry(
+          ctx,
+          device: rootName,
+          mountPoint: '/',
+          fsType: rootFs,
+          options: _rootMountOptions(rootFs),
+        );
+        if (rootEntry == null) return const [];
+        entries.add(rootEntry);
+
+        final hasDedicatedHome = manualPartitions.any(
+          (part) => part['isFreeSpace'] != true && part['mount'] == '/home',
+        );
+        if (rootFs == 'btrfs' && !hasDedicatedHome) {
+          final homeEntry = await _makeFsEntry(
+            ctx,
+            device: rootName,
+            mountPoint: '/home',
+            fsType: 'btrfs',
+            options: 'defaults,compress=zstd:1,subvol=@home',
+          );
+          if (homeEntry == null) return const [];
+          entries.add(homeEntry);
+        }
+
+        final otherParts =
+            manualPartitions
+                .where(
+                  (part) =>
+                      part['isFreeSpace'] != true &&
+                      part['mount'] != '/' &&
+                      part['mount'] != 'unmounted' &&
+                      (part['name'] ?? '').toString().isNotEmpty,
+                )
+                .cast<Map<String, dynamic>>()
+                .toList()
+              ..sort((a, b) {
+                final mountA = (a['mount'] ?? '').toString();
+                final mountB = (b['mount'] ?? '').toString();
+                if (mountA == '[SWAP]') return 1;
+                if (mountB == '[SWAP]') return -1;
+                final depthCompare = _mountDepth(
+                  mountA,
+                ).compareTo(_mountDepth(mountB));
+                if (depthCompare != 0) {
+                  return depthCompare;
+                }
+                return mountA.compareTo(mountB);
+              });
+
+        for (final part in otherParts) {
           final mountPoint = (part['mount'] ?? 'unmounted').toString();
           final partName = (part['name'] ?? '').toString();
-          if (partName.isEmpty ||
-              mountPoint == 'unmounted' ||
-              mountPoint.isEmpty) {
-            continue;
-          }
-
           if (mountPoint == '[SWAP]') {
             final swapEntry = await _makeSwapEntry(ctx, partName);
             if (swapEntry == null) return const [];
@@ -650,6 +780,10 @@ EOF
       default:
         return 0;
     }
+  }
+
+  int _mountDepth(String mountPoint) {
+    return mountPoint.split('/').where((segment) => segment.isNotEmpty).length;
   }
 
   String _renderFstab(List<_FstabEntry> entries) {

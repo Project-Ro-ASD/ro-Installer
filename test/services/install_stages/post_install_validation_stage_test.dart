@@ -30,10 +30,44 @@ StageContext makeContext(
 
 void main() {
   group('PostInstallValidationStage', () {
+    void addLocalizationResponses(
+      FakeCommandRunner fake, {
+      String locale = 'en_US.UTF-8',
+      String keymap = 'trq',
+      String x11Layout = 'tr',
+      String timezone = 'Europe/Istanbul',
+      List<String> packages = const ['glibc-langpack-en', 'langpacks-en'],
+    }) {
+      fake.addResponse('test', ['-f', '/mnt/etc/locale.conf']);
+      fake.addResponse('sh', [
+        '-c',
+        'grep -q "^LANG=$locale\$" /mnt/etc/locale.conf',
+      ]);
+      fake.addResponse('test', ['-f', '/mnt/etc/vconsole.conf']);
+      fake.addResponse('sh', [
+        '-c',
+        'grep -q "^KEYMAP=$keymap\$" /mnt/etc/vconsole.conf',
+      ]);
+      fake.addResponse('test', [
+        '-f',
+        '/mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
+      ]);
+      fake.addResponse('sh', [
+        '-c',
+        'grep -q \'Option "XkbLayout" "$x11Layout"\' /mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
+      ]);
+      fake.addResponse('sh', [
+        '-c',
+        '[ "\$(readlink /mnt/etc/localtime)" = "/usr/share/zoneinfo/$timezone" ]',
+      ]);
+      fake.addResponse('chroot', ['/mnt', 'rpm', '-q', ...packages]);
+    }
+
     test('sağlıklı kurulumda doğrulama geçer', () async {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
+      addLocalizationResponses(fake);
       fake.addResponse('sh', [
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
@@ -88,6 +122,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
+      addLocalizationResponses(fake);
       fake.addResponse('sh', [
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
@@ -139,6 +174,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
+      addLocalizationResponses(fake);
       fake.addResponse('sh', [
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
@@ -166,6 +202,24 @@ void main() {
         result.message,
         'Boot için gerekli paketler hedef sistemde doğrulanamadı.',
       );
+    });
+
+    test('locale ayari eksikse stage düşer', () async {
+      final fake = FakeCommandRunner(defaultSuccess: false);
+      fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
+      fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
+      fake.addResponse('test', ['-f', '/mnt/etc/locale.conf'], exitCode: 1);
+
+      final ctx = makeContext(const {
+        'fileSystem': 'ext4',
+        'partitionMethod': 'full',
+      }, fake);
+
+      final stage = const PostInstallValidationStage();
+      final result = await stage.execute(ctx);
+
+      expect(result.success, false);
+      expect(result.message, '/mnt/etc/locale.conf bulunamadı.');
     });
   });
 }

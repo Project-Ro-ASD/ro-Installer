@@ -4,6 +4,7 @@
       "name": "sda",
       "model": "VBOX HARDDISK",
       "size": 107374182400,
+      "pttype": "gpt",
       "type": "disk",
       "rm": false,
       "mountpoints": [null],
@@ -12,20 +13,23 @@
           "name": "sda1",
           "fstype": "vfat",
           "size": 536870912,
+          "start": 0,
           "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
           "mountpoints": [null]
         },
         {
           "name": "sda2",
           "fstype": "ntfs",
-          "size": 53687091200,
+          "size": 85899345920,
+          "start": 1048576,
           "parttype": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
           "mountpoints": [null]
         },
         {
           "name": "sda3",
           "fstype": "ntfs",
-          "size": 53150220288,
+          "size": 20937965568,
+          "start": 168820736,
           "parttype": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
           "mountpoints": [null]
         }

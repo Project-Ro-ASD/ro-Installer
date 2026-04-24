@@ -23,7 +23,11 @@ class BootloaderStage {
     ctx.log('════════════════════════════════════════════');
 
     // ── 7.0: EFI Bağlama Doğrulaması ──
-    ctx.onProgress(0.88, 'EFI bağlama noktası doğrulanıyor...');
+    ctx.progress(
+      0.88,
+      'stage_progress_boot_verify_efi',
+      'EFI bağlama noktası doğrulanıyor...',
+    );
 
     final efiCheckResult = await ctx.commandRunner.run('findmnt', [
       '-rn',
@@ -40,7 +44,11 @@ class BootloaderStage {
     ctx.log('EFI doğrulandı: ${efiCheckResult.stdout.trim()} → /mnt/boot/efi');
 
     // ── 7.1: Root UUID Tespiti ve Kernel Cmdline ──
-    ctx.onProgress(0.89, 'Boot parametreleri hazırlanıyor...');
+    ctx.progress(
+      0.89,
+      'stage_progress_boot_prepare_args',
+      'Boot parametreleri hazırlanıyor...',
+    );
     final uuidResult = await ctx.commandRunner.run('findmnt', [
       '-rn',
       '-o',
@@ -53,9 +61,7 @@ class BootloaderStage {
     }
     final cmdlineUuid = ctx.isMock ? '1234-abcd' : rootUuid;
     final rootFs = (ctx.state['fileSystem'] ?? 'btrfs').toString();
-    final partitionMethod = (ctx.state['partitionMethod'] ?? 'full').toString();
-    final needsBtrfsRootflags =
-        rootFs == 'btrfs' && partitionMethod != 'manual';
+    final needsBtrfsRootflags = rootFs == 'btrfs';
     final rootFlags = needsBtrfsRootflags ? ' rootflags=subvol=@' : '';
     final cmdlineWrite = await _requireCommand(ctx, 'sh', [
       '-c',
@@ -64,7 +70,11 @@ class BootloaderStage {
     if (cmdlineWrite != null) return cmdlineWrite;
 
     // ── 7.2: GRUB Yapılandırma Dosyası ──
-    ctx.onProgress(0.90, 'GRUB2 yapılandırılıyor...');
+    ctx.progress(
+      0.90,
+      'stage_progress_boot_configure_grub',
+      'GRUB2 yapılandırılıyor...',
+    );
 
     // LiveCD label hatalarından temizleyerek yaz
     final grubDefaultsWrite = await _requireCommand(ctx, 'sh', [
@@ -86,7 +96,11 @@ EOF
     if (grubDefaultsWrite != null) return grubDefaultsWrite;
 
     // ── 7.3: Initramfs Yeniden Oluşturma (Dracut) — GRUB'DAN ÖNCE ──
-    ctx.onProgress(0.92, 'Initramfs imajları güncelleniyor (Dracut)...');
+    ctx.progress(
+      0.92,
+      'stage_progress_boot_update_initramfs',
+      'Initramfs imajları güncelleniyor (Dracut)...',
+    );
 
     final dracutResult = await _requireCommand(ctx, 'chroot', [
       '/mnt',
@@ -98,7 +112,11 @@ EOF
     ctx.log('✓ Dracut initramfs başarıyla oluşturuldu.');
 
     // ── 7.4: BLS (Boot Loader Spec) Girişleri (kernel-install) ──
-    ctx.onProgress(0.93, 'Bootloader girişleri oluşturuluyor (BLS)...');
+    ctx.progress(
+      0.93,
+      'stage_progress_boot_create_bls',
+      'Bootloader girişleri oluşturuluyor (BLS)...',
+    );
 
     // Yüklü kernel versiyonunu bul ve kernel-install ile BLS .conf dosyalarını oluştur
     final kernelInstallResult = await _requireCommand(ctx, 'chroot', [
@@ -110,7 +128,11 @@ EOF
     if (kernelInstallResult != null) return kernelInstallResult;
 
     // ── 7.5: ESP stub ve EFI binary doğrulaması ──
-    ctx.onProgress(0.94, 'EFI önyükleme zinciri doğrulanıyor...');
+    ctx.progress(
+      0.94,
+      'stage_progress_boot_validate_chain',
+      'EFI önyükleme zinciri doğrulanıyor...',
+    );
 
     StageResult? failure = await _requireCommand(ctx, 'test', [
       '-f',
@@ -155,8 +177,7 @@ EOF
       return StageResult.fail('/boot için GRUB prefix UUID tespiti başarısız.');
     }
 
-    final usesManagedBtrfsSubvolume =
-        !hasSeparateBoot && rootFs == 'btrfs' && partitionMethod != 'manual';
+    final usesManagedBtrfsSubvolume = !hasSeparateBoot && rootFs == 'btrfs';
     final prefixPath = hasSeparateBoot
         ? '/grub2'
         : (usesManagedBtrfsSubvolume ? '/@/boot/grub2' : '/boot/grub2');
@@ -171,7 +192,7 @@ cat > /mnt/boot/efi/EFI/fedora/grub.cfg << 'EOF'
 search --no-floppy --fs-uuid --set=dev $prefixUuid
 set prefix=(\$dev)$prefixPath
 
-export \$prefix
+export prefix
 configfile \$prefix/grub.cfg
 EOF
       ''',
@@ -180,7 +201,11 @@ EOF
     ctx.log('✓ EFI grub.cfg yönlendirme stub dosyası yazıldı.');
 
     // ── 7.6: GRUB Konfigürasyon Dosyası Üretimi — DRACUT'DAN SONRA ──
-    ctx.onProgress(0.96, 'GRUB konfigürasyonu üretiliyor...');
+    ctx.progress(
+      0.96,
+      'stage_progress_boot_generate_grub_config',
+      'GRUB konfigürasyonu üretiliyor...',
+    );
 
     final grubMkconfigResult = await _requireCommand(ctx, 'chroot', [
       '/mnt',
@@ -192,7 +217,11 @@ EOF
     ctx.log('✓ GRUB konfigürasyonu üretildi.');
 
     // ── 7.7: EFI firmware boot kaydı ──
-    ctx.onProgress(0.97, 'UEFI firmware boot girdisi yazılıyor...');
+    ctx.progress(
+      0.97,
+      'stage_progress_boot_write_firmware_entry',
+      'UEFI firmware boot girdisi yazılıyor...',
+    );
     final efiDevice = _parseEfiPartition(efiCheckResult.stdout.trim());
     if (efiDevice == null && !ctx.isMock) {
       return StageResult.fail(
@@ -217,7 +246,9 @@ EOF
     ctx.log('✓ UEFI firmware kaydı shimx64.efi için oluşturuldu.');
 
     ctx.log('[AŞAMA 7] Bootloader kurulumu tamamlandı.');
-    return StageResult.ok('Bootloader kurulumu tamamlandı.');
+    return StageResult.ok(
+      ctx.t('stage_result_bootloader_done', 'Bootloader kurulumu tamamlandı.'),
+    );
   }
 
   Future<StageResult?> _requireCommand(

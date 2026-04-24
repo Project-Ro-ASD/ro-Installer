@@ -18,7 +18,9 @@ class FormattingStage {
     final String rootFs = ctx.state['fileSystem'] ?? 'btrfs';
 
     ctx.log('════════════════════════════════════════════');
-    ctx.log('[AŞAMA 3] Biçimlendirme Başlatılıyor (Dosya Sistemi: ${rootFs.toUpperCase()})');
+    ctx.log(
+      '[AŞAMA 3] Biçimlendirme Başlatılıyor (Dosya Sistemi: ${rootFs.toUpperCase()})',
+    );
     ctx.log('════════════════════════════════════════════');
 
     switch (partitionMethod) {
@@ -29,13 +31,24 @@ class FormattingStage {
       case 'manual':
         return _formatManualPartitions(ctx);
       default:
-        return StageResult.fail('Bilinmeyen bölümleme yöntemi: $partitionMethod');
+        return StageResult.fail(
+          'Bilinmeyen bölümleme yöntemi: $partitionMethod',
+        );
     }
   }
 
   /// Tam disk modunda EFI ve Root bölümlerini biçimlendirir
-  Future<StageResult> _formatFullDisk(StageContext ctx, String selectedDisk, String rootFs) async {
-    ctx.onProgress(0.2, 'Bölümler biçimlendiriliyor... (${rootFs.toUpperCase()})');
+  Future<StageResult> _formatFullDisk(
+    StageContext ctx,
+    String selectedDisk,
+    String rootFs,
+  ) async {
+    ctx.progress(
+      0.2,
+      'stage_progress_format_full_disk',
+      'Bölümler biçimlendiriliyor... (${rootFs.toUpperCase()})',
+      {'fs': rootFs.toUpperCase()},
+    );
 
     String efiPart = '${selectedDisk}1';
     String rootPart = '${selectedDisk}2';
@@ -45,7 +58,12 @@ class FormattingStage {
     }
 
     // EFI bölümünü FAT32 olarak biçimlendir
-    if (!await ctx.runCmd('mkfs.fat', ['-F32', efiPart], ctx.log, isMock: ctx.isMock)) {
+    if (!await ctx.runCmd(
+      'mkfs.fat',
+      ['-F32', efiPart],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
       return StageResult.fail('EFI bölümü biçimlendirilemedi: $efiPart');
     }
 
@@ -55,19 +73,39 @@ class FormattingStage {
     }
 
     ctx.log('[AŞAMA 3] Tam disk biçimlendirme tamamlandı.');
-    return StageResult.ok('Tam disk biçimlendirme tamamlandı.');
+    return StageResult.ok(
+      ctx.t(
+        'stage_result_format_full_done',
+        'Tam disk biçimlendirme tamamlandı.',
+      ),
+    );
   }
 
   /// Alongside (yanına kurulum) modunda SWAP ve Root bölümlerini biçimlendirir
-  Future<StageResult> _formatAlongside(StageContext ctx, String selectedDisk, String rootFs) async {
-    ctx.onProgress(0.25, 'Yeni bölümler biçimlendiriliyor (${rootFs.toUpperCase()})...');
+  Future<StageResult> _formatAlongside(
+    StageContext ctx,
+    String selectedDisk,
+    String rootFs,
+  ) async {
+    ctx.progress(
+      0.25,
+      'stage_progress_format_alongside',
+      'Yeni bölümler biçimlendiriliyor (${rootFs.toUpperCase()})...',
+      {'fs': rootFs.toUpperCase()},
+    );
 
     // Alongside modunda oluşturulan bölümleri bul
     String swapPart = '';
     String rootPart = '';
 
     try {
-      final lsblkResult = await ctx.commandRunner.run('lsblk', ['-J', '-b', '-o', 'NAME,PARTLABEL', selectedDisk]);
+      final lsblkResult = await ctx.commandRunner.run('lsblk', [
+        '-J',
+        '-b',
+        '-o',
+        'NAME,PARTLABEL',
+        selectedDisk,
+      ]);
       if (lsblkResult.exitCode == 0) {
         final parsed = jsonDecode(lsblkResult.stdout);
         final devices = parsed['blockdevices'] as List<dynamic>;
@@ -88,13 +126,26 @@ class FormattingStage {
     // Etiket bazlı bulunamadıysa indeks bazlı dene
     if (swapPart.isEmpty || rootPart.isEmpty) {
       try {
-        final sgResult = await ctx.commandRunner.run('sgdisk', ['-p', selectedDisk]);
+        final sgResult = await ctx.commandRunner.run('sgdisk', [
+          '-p',
+          selectedDisk,
+        ]);
         if (sgResult.exitCode == 0) {
-          final lines = sgResult.stdout.split('\n').where((l) => RegExp(r'^\s+\d+').hasMatch(l)).toList();
+          final lines = sgResult.stdout
+              .split('\n')
+              .where((l) => RegExp(r'^\s+\d+').hasMatch(l))
+              .toList();
           if (lines.length >= 2) {
-            final swapNum = lines[lines.length - 2].trim().split(RegExp(r'\s+'))[0];
-            final rootNum = lines[lines.length - 1].trim().split(RegExp(r'\s+'))[0];
-            final suffix = (selectedDisk.contains('nvme') || selectedDisk.contains('loop')) ? 'p' : '';
+            final swapNum = lines[lines.length - 2].trim().split(
+              RegExp(r'\s+'),
+            )[0];
+            final rootNum = lines[lines.length - 1].trim().split(
+              RegExp(r'\s+'),
+            )[0];
+            final suffix =
+                (selectedDisk.contains('nvme') || selectedDisk.contains('loop'))
+                ? 'p'
+                : '';
             swapPart = '$selectedDisk$suffix$swapNum';
             rootPart = '$selectedDisk$suffix$rootNum';
           }
@@ -106,7 +157,9 @@ class FormattingStage {
     }
 
     if (swapPart.isEmpty || rootPart.isEmpty) {
-      return StageResult.fail('FATAL: Yeni oluşturulan SWAP ve ROOT bölümleri bulunamadı!');
+      return StageResult.fail(
+        'FATAL: Yeni oluşturulan SWAP ve ROOT bölümleri bulunamadı!',
+      );
     }
     ctx.log('Bulunan bölümler → SWAP: $swapPart, ROOT: $rootPart');
 
@@ -125,45 +178,113 @@ class FormattingStage {
     ctx.state['_resolvedRootPart'] = rootPart;
 
     ctx.log('[AŞAMA 3] Alongside biçimlendirme tamamlandı.');
-    return StageResult.ok('Alongside biçimlendirme tamamlandı.');
+    return StageResult.ok(
+      ctx.t(
+        'stage_result_format_alongside_done',
+        'Alongside biçimlendirme tamamlandı.',
+      ),
+    );
   }
 
   /// Manuel modda kullanıcının planladığı bölümleri biçimlendirir
   Future<StageResult> _formatManualPartitions(StageContext ctx) async {
     final manualPartitions = ctx.state['manualPartitions'] as List<dynamic>;
 
-    ctx.onProgress(0.1, 'Kullanıcının disk yapılandırma planı uygulanıyor...');
+    ctx.progress(
+      0.1,
+      'stage_progress_format_manual_plan',
+      'Kullanıcının disk yapılandırma planı uygulanıyor...',
+    );
 
     for (var p in manualPartitions) {
       if (p['isFreeSpace'] == true || p['isPlanned'] != true) continue;
-      String partName = p['name'];
-      String fsType = p['type'];
+
+      final partName = (p['name'] ?? '').toString();
+      if (partName.isEmpty) {
+        continue;
+      }
+
+      final formatOnInstall = p.containsKey('formatOnInstall')
+          ? p['formatOnInstall'] == true
+          : true;
+      if (!formatOnInstall) {
+        ctx.log('Mevcut bölüm korunuyor, biçimlendirme atlandı: $partName');
+        continue;
+      }
+
+      final fsType = _normalizeFsType((p['type'] ?? '').toString());
 
       if (!await _formatPartition(ctx, partName, fsType)) {
-        return StageResult.fail('Bölüm biçimlendirilemedi: $partName ($fsType)');
+        return StageResult.fail(
+          'Bölüm biçimlendirilemedi: $partName ($fsType)',
+        );
       }
     }
 
     ctx.log('[AŞAMA 3] Manuel bölüm biçimlendirme tamamlandı.');
-    return StageResult.ok('Manuel bölüm biçimlendirme tamamlandı.');
+    return StageResult.ok(
+      ctx.t(
+        'stage_result_format_manual_done',
+        'Manuel bölüm biçimlendirme tamamlandı.',
+      ),
+    );
   }
 
   /// Belirtilen bölümü verilen dosya sistemiyle biçimlendirir
-  Future<bool> _formatPartition(StageContext ctx, String partition, String fsType) async {
+  Future<bool> _formatPartition(
+    StageContext ctx,
+    String partition,
+    String fsType,
+  ) async {
     switch (fsType) {
       case 'fat32':
-        return ctx.runCmd('mkfs.fat', ['-F32', partition], ctx.log, isMock: ctx.isMock);
+      case 'vfat':
+        return ctx.runCmd(
+          'mkfs.fat',
+          ['-F32', partition],
+          ctx.log,
+          isMock: ctx.isMock,
+        );
       case 'btrfs':
-        return ctx.runCmd('mkfs.btrfs', ['-f', partition], ctx.log, isMock: ctx.isMock);
+        return ctx.runCmd(
+          'mkfs.btrfs',
+          ['-f', partition],
+          ctx.log,
+          isMock: ctx.isMock,
+        );
       case 'ext4':
-        return ctx.runCmd('mkfs.ext4', ['-F', partition], ctx.log, isMock: ctx.isMock);
+        return ctx.runCmd(
+          'mkfs.ext4',
+          ['-F', partition],
+          ctx.log,
+          isMock: ctx.isMock,
+        );
       case 'xfs':
-        return ctx.runCmd('mkfs.xfs', ['-f', partition], ctx.log, isMock: ctx.isMock);
+        return ctx.runCmd(
+          'mkfs.xfs',
+          ['-f', partition],
+          ctx.log,
+          isMock: ctx.isMock,
+        );
       case 'linux-swap':
+      case 'swap':
         return ctx.runCmd('mkswap', [partition], ctx.log, isMock: ctx.isMock);
       default:
-        ctx.log('UYARI: Bilinmeyen dosya sistemi türü: $fsType — biçimlendirme atlanıyor.');
+        ctx.log(
+          'UYARI: Bilinmeyen dosya sistemi türü: $fsType — biçimlendirme atlanıyor.',
+        );
         return true;
+    }
+  }
+
+  String _normalizeFsType(String fsType) {
+    switch (fsType) {
+      case 'vfat':
+        return 'fat32';
+      case 'swap':
+        return 'linux-swap';
+      default:
+        return fsType;
     }
   }
 }

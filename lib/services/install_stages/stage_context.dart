@@ -1,4 +1,5 @@
 import '../command_runner.dart';
+import '../install_localizer.dart';
 
 /// Tüm kurulum aşamalarının eriştiği ortak bağlam (context) nesnesi.
 ///
@@ -15,6 +16,7 @@ class StageContext {
     required this.onProgress,
     required this.commandRunner,
     required this.runCmd,
+    this.localizer = const InstallLocalizer(),
     this.isMock = false,
   });
 
@@ -37,8 +39,29 @@ class StageContext {
     void Function(String) onLog, {
     bool isMock,
     List<int> allowedExitCodes,
-  }) runCmd;
+  })
+  runCmd;
+
+  /// Kurulum motoru metinlerini seçilen dile çevirir.
+  final InstallLocalizer localizer;
 
   /// Simülasyon modu aktif mi
   final bool isMock;
+
+  String t(
+    String key,
+    String fallback, [
+    Map<String, String> placeholders = const {},
+  ]) {
+    return localizer.t(key, fallback, placeholders);
+  }
+
+  void progress(
+    double progress,
+    String key,
+    String fallback, [
+    Map<String, String> placeholders = const {},
+  ]) {
+    onProgress(progress, t(key, fallback, placeholders));
+  }
 }

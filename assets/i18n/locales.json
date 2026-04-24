@@ -1,0 +1,107 @@
+[
+  {
+    "code": "tr",
+    "locale": "tr_TR.UTF-8",
+    "nativeName": "Türkçe",
+    "englishName": "Turkish",
+    "textDirection": "ltr",
+    "enabled": true
+  },
+  {
+    "code": "en",
+    "locale": "en_US.UTF-8",
+    "nativeName": "English",
+    "englishName": "English",
+    "textDirection": "ltr",
+    "enabled": true
+  },
+  {
+    "code": "es",
+    "locale": "es_ES.UTF-8",
+    "nativeName": "Español",
+    "englishName": "Spanish",
+    "textDirection": "ltr",
+    "enabled": true
+  },
+  {
+    "code": "de",
+    "locale": "de_DE.UTF-8",
+    "nativeName": "Deutsch",
+    "englishName": "German",
+    "textDirection": "ltr",
+    "enabled": true,
+    "translationStatus": "machine"
+  },
+  {
+    "code": "fr",
+    "locale": "fr_FR.UTF-8",
+    "nativeName": "Français",
+    "englishName": "French",
+    "textDirection": "ltr",
+    "enabled": true,
+    "translationStatus": "machine"
+  },
+  {
+    "code": "pt_BR",
+    "locale": "pt_BR.UTF-8",
+    "nativeName": "Português do Brasil",
+    "englishName": "Portuguese (Brazil)",
+    "textDirection": "ltr",
+    "enabled": true,
+    "translationStatus": "machine"
+  },
+  {
+    "code": "it",
+    "locale": "it_IT.UTF-8",
+    "nativeName": "Italiano",
+    "englishName": "Italian",
+    "textDirection": "ltr",
+    "enabled": true,
+    "translationStatus": "machine"
+  },
+  {
+    "code": "ru",
+    "locale": "ru_RU.UTF-8",
+    "nativeName": "Русский",
+    "englishName": "Russian",
+    "textDirection": "ltr",
+    "enabled": true,
+    "translationStatus": "machine"
+  },
+  {
+    "code": "ar",
+    "locale": "ar_SA.UTF-8",
+    "nativeName": "العربية",
+    "englishName": "Arabic",
+    "textDirection": "rtl",
+    "enabled": true,
+    "translationStatus": "machine"
+  },
+  {
+    "code": "fa",
+    "locale": "fa_IR.UTF-8",
+    "nativeName": "فارسی",
+    "englishName": "Persian",
+    "textDirection": "rtl",
+    "enabled": true,
+    "translationStatus": "machine"
+  },
+  {
+    "code": "zh_CN",
+    "locale": "zh_CN.UTF-8",
+    "nativeName": "简体中文",
+    "englishName": "Chinese (Simplified)",
+    "textDirection": "ltr",
+    "enabled": true,
+    "translationStatus": "machine"
+  },
+  {
+    "code": "ja",
+    "locale": "ja_JP.UTF-8",
+    "nativeName": "日本語",
+    "englishName": "Japanese",
+    "textDirection": "ltr",
+    "enabled": true,
+    "translationStatus": "machine"
+  }
+]

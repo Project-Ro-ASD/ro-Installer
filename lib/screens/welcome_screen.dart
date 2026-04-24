@@ -1,100 +1,176 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../state/installer_state.dart';
+import '../theme/app_theme.dart';
+import '../widgets/nebula_ui.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
-
-  final Map<String, String> _languages = const {
-    'tr': 'Türkçe',
-    'en': 'English',
-    'es': 'Español',
-  };
 
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<InstallerState>(context);
     final theme = Theme.of(context);
+    final visuals = context.installerVisuals;
 
-    return Column(
-      children: [
-        // Hoş Geldiniz Metinleri
-        Expanded(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compactWarning = constraints.maxWidth < 560;
+        final warningWidth = compactWarning ? double.infinity : 292.0;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           child: Center(
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.handshake_rounded,
-                  size: 64,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(height: 20),
                 Text(
                   state.t('welcome_title'),
                   textAlign: TextAlign.center,
                   style: theme.textTheme.displaySmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: theme.textTheme.bodyLarge?.color,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
-                const SizedBox(height: 15),
-                Text(
-                  state.t('welcome_desc'),
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: theme.textTheme.bodyLarge?.color?.withOpacity(0.7),
+                const SizedBox(height: 14),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: Text(
+                    state.t('welcome_desc'),
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: visuals.mutedForeground,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 40),
-
-                // Dil Seçici Kutusu
-                Container(
-                  width: 300,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: theme.cardColor.withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.withOpacity(0.2)),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      isExpanded: true,
-                      value: state.selectedLanguage,
-                      icon: const Icon(Icons.language),
-                      items: _languages.entries.map((e) {
-                        return DropdownMenuItem(value: e.key, child: Text(e.value));
-                      }).toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          state.updateLanguage(val);
-                        }
-                      },
-                    ),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 460),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      NebulaPanel(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(26),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            NebulaSectionLabel(
+                              state.t('welcome_language_section'),
+                            ),
+                            const SizedBox(height: 18),
+                            NebulaDropdown<String>(
+                              value: state.selectedLanguage,
+                              leadingIcon: Icons.language_rounded,
+                              items: state.availableLocales
+                                  .map(
+                                    (locale) => NebulaDropdownItem<String>(
+                                      value: locale.code,
+                                      label: locale.nativeName,
+                                      icon: Icons.language_rounded,
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: state.updateLanguage,
+                            ),
+                            const SizedBox(height: 22),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: SizedBox(
+                                width: compactWarning
+                                    ? double.infinity
+                                    : warningWidth,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    NebulaPrimaryButton(
+                                      label: state.t('welcome_start'),
+                                      icon: Icons.arrow_forward_rounded,
+                                      onPressed: state.nextStep,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: _WelcomeWarningCard(
+                                        title: state.t('welcome_warning_title'),
+                                        body: state.t('welcome_warning_body'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-        ),
+        );
+      },
+    );
+  }
+}
 
-        // Alt Butonlar (Back / Next)
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            ElevatedButton.icon(
-              onPressed: () => state.nextStep(),
-              icon: const Icon(Icons.arrow_forward),
-              label: Text(state.t('next')),
-              style: theme.elevatedButtonTheme.style?.copyWith(
-                padding: const WidgetStatePropertyAll(
-                  EdgeInsets.symmetric(horizontal: 32, vertical: 20),
-                ),
-              ),
-            ),
-          ],
+class _WelcomeWarningCard extends StatelessWidget {
+  const _WelcomeWarningCard({required this.title, required this.body});
+
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final visuals = context.installerVisuals;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: const Color(0xFFFFB347).withValues(alpha: 0.12),
+        border: Border.all(
+          color: const Color(0xFFFFB347).withValues(alpha: 0.26),
         ),
-      ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icon(
+              Icons.warning_amber_rounded,
+              color: Color(0xFFFFB347),
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: const Color(0xFFFFB347),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  body,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: visuals.mutedForeground,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

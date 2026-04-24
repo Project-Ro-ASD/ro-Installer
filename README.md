@@ -1,145 +1,97 @@
 <div align="center">
-  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/Penguin_icon.svg/200px-Penguin_icon.svg.png" width="72" alt="Ro-Installer">
+  <img src="assets/branding/roasd-logo.png" width="88" alt="Ro-ASD Logo">
   <h1>Ro-Installer</h1>
   <p><b>Official graphical installer for Ro-ASD</b></p>
+
+  [![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat-square&logo=flutter&logoColor=white)](https://flutter.dev)
+  [![Platform](https://img.shields.io/badge/Platform-Linux-yellow?style=flat-square&logo=linux)](#)
+  [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 </div>
 
-Ro-Installer is a Linux desktop installer written in Flutter and Dart for the Ro-ASD operating system. It provides a graphical workflow on top of native Linux tools such as `sgdisk`, `mkfs.*`, `rsync`, `chroot`, `dracut`, `kernel-install`, `efibootmgr`, and Fedora's UEFI boot chain.
+Release line: `v3.0.0`
 
-This repository is the cleaned GitHub-ready project tree. Local experiment notes, ad-hoc markdown files, VM output logs, ISO images, and build artifacts are intentionally excluded.
+For Turkish notes, see the section below.
 
-For RPM/COPR packaging and webhook-based builds, see [COPR.md](COPR.md).
+## Overview
 
-## Highlights
+Ro-Installer is the official Linux desktop installer for the Ro-ASD operating system.
+It provides a Flutter-based interface on top of the Fedora installation toolchain and
+focuses on a clean guided flow, direct hardware configuration, and clear runtime feedback.
 
-- Flutter-based Linux desktop UI
-- Full disk, alongside, and manual partitioning flows
-- `btrfs`, `ext4`, and `xfs` root filesystem support
-- Fedora-compatible UEFI boot flow with `shimx64.efi`, GRUB, and `efibootmgr`
-- Installation logging and post-install validation
-- Unit tests for install stages and helper services
-- QEMU test scripts for both manual and automated VM validation
+Core capabilities:
 
-## Repository Layout
+- guided and advanced installation flows
+- automatic and manual partitioning
+- BTRFS-focused layout with `ext4`, `xfs`, `fat32`, and swap support
+- locale, timezone, keyboard, and post-install system configuration
+- multilingual installer UI with RTL support
+- live installation progress, diagnostics, and validation
 
-```text
-lib/                  Flutter UI and installer logic
-lib/services/         System services and install orchestration
-lib/services/install_stages/
-                      Stage-based installation pipeline
-linux/                Linux runner, policy files, packaging references, VM helpers
-test/                 Unit tests and test fixtures
-assets/               UI assets
-ro-installer.spec     RPM spec used by COPR and local SRPM generation
-.copr/Makefile        COPR make-srpm entrypoint
-test_qemu_vm.sh       QEMU launcher for manual/auto VM tests
-test_qemu_guest_runner.sh
-                      Guest-side helper for auto VM runs
-```
+## Architecture
 
-## Requirements
+The project is split into two main layers:
 
-- Linux host
-- Flutter SDK with Linux desktop support
-- `clang`, `cmake`, `ninja`, `pkg-config`
-- QEMU/KVM for VM-based testing
-- OVMF / `edk2-ovmf` for UEFI tests
+1. The Flutter UI layer for screens, flow control, translations, and state.
+2. The Linux execution layer for disk, network, filesystem, chroot, and bootloader operations.
 
-For real installation runs inside Fedora-based live environments, these tools are expected on the target side:
+The installer talks directly to native tools such as:
 
-- `util-linux`
-- `e2fsprogs`
-- `btrfs-progs`
-- `xfsprogs`
-- `dosfstools`
-- `gdisk`
-- `parted`
+- `lsblk`
+- `sgdisk`
+- `mkfs.*`
+- `nmcli`
+- `mount`
 - `rsync`
-- `dracut`
-- `efibootmgr`
-- `grub2-common`
-- `grub2-efi-x64`
-- `shim-x64`
+- `chroot`
+- `grub2`
 
 ## Build
+
+Requirements:
+
+- Flutter SDK for Linux
+- a Linux environment with desktop Flutter support enabled
+
+Development build:
 
 ```bash
 git clone https://github.com/Project-Ro-ASD/ro-Installer.git
 cd ro-Installer
-
 flutter pub get
-flutter build linux --release
-```
-
-For COPR builds, the RPM spec bootstraps a pinned Flutter SDK inside the build
-chroot because Fedora 43 COPR does not provide a `flutter` RPM package.
-
-## Run
-
-For desktop development:
-
-```bash
 flutter run -d linux
 ```
 
-For the release bundle:
+Release build:
 
 ```bash
-sudo -E build/linux/x64/release/bundle/ro_installer
+flutter build linux --release
 ```
 
-Root privileges are required because the installer writes partition tables, formats filesystems, mounts target roots, enters `chroot`, and installs the boot chain.
+## Runtime Notes
 
-## VM Testing
+Ro-Installer performs privileged installation operations. In production it should
+be started with root privileges or through the provided Polkit flow.
 
-Manual QEMU session:
+Important runtime areas:
 
-```bash
-RO_INSTALLER_TEST_ISO=/path/to/Fedora-Live.iso ./test_qemu_vm.sh manual
-```
+- target disk detection and validation
+- network and Wi-Fi scanning
+- partitioning and formatting
+- target system locale, keyboard, and timezone configuration
+- post-install validation and diagnostic export
 
-Automated QEMU session:
+## Repository Layout
 
-```bash
-RO_INSTALLER_TEST_ISO=/path/to/Fedora-Live.iso ./test_qemu_vm.sh auto
-```
-
-The automation path uses:
-
-- `linux/qmp_send_keys.py`
-- `test_qemu_vm.sh`
-- `test_qemu_guest_runner.sh`
-
-## Architecture Notes
-
-The installer is organized as a stage pipeline:
-
-1. Disk preparation
-2. Partitioning
-3. Formatting
-4. Mounting
-5. File copy
-6. Chroot configuration
-7. Bootloader setup
-8. Post-install validation
-9. Cleanup
-
-The bootloader stage is Fedora UEFI oriented. On Secure Boot capable systems it uses the signed `shim` and GRUB binaries already present in the target system, writes the ESP-side GRUB stub, and creates the firmware entry with `efibootmgr`.
+- `lib/`: Flutter application source
+- `assets/`: images, branding, and translation catalogs
+- `linux/`: Linux desktop runner, launcher, and policy files
+- `test/`: automated tests
+- `tool/`: translation and maintenance utilities
+- `.copr/` and `ro-installer.spec`: Fedora COPR packaging files
 
 ## Turkish Summary
 
-Ro-Installer, Ro-ASD icin gelistirilmis Flutter tabanli resmi Linux kurulum aracidir. Bu depo GitHub icin temizlenmis surumdur; yerel notlar, gecici markdown dosyalari, ISO dosyalari, build ciktilari ve VM loglari burada tutulmaz.
-
-Kisa baslangic:
-
-```bash
-flutter pub get
-flutter build linux --release
-sudo -E build/linux/x64/release/bundle/ro_installer
-```
-
-QEMU ile manuel test:
-
-```bash
-RO_INSTALLER_TEST_ISO=/path/to/Fedora-Live.iso ./test_qemu_vm.sh manual
-```
+Ro-Installer, Ro-ASD için geliştirilen resmi grafiksel kurulum uygulamasıdır.
+Flutter tabanlı arayüz ile Fedora kurulum araç zincirini birleştirir. Disk
+bölümleme, dil, klavye, saat dilimi, kullanıcı hesabı, bootloader ve kurulum
+sonrası doğrulama akışlarını tek bir masaüstü deneyiminde toplar.

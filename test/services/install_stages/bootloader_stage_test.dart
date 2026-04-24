@@ -169,7 +169,7 @@ void main() {
       },
     );
 
-    test('manuel mod btrfs olsa bile otomatik subvol rootflags yazmaz', () async {
+    test('manuel btrfs modunda subvol rootflags yazar', () async {
       final fake = FakeCommandRunner();
       addHappyPathResponses(fake);
 
@@ -186,11 +186,67 @@ void main() {
       expect(
         fake.wasCalledWith('sh', [
           '-c',
-          'echo "root=UUID=root-uuid-1234 ro rhgb quiet" > /mnt/etc/kernel/cmdline',
+          'echo "root=UUID=root-uuid-1234 ro rootflags=subvol=@ rhgb quiet" > /mnt/etc/kernel/cmdline',
         ]),
         true,
       );
     });
+
+    test(
+      'manuel btrfs kurulumda ayrı boot yoksa EFI stub /@/boot/grub2 yolunu kullanır',
+      () async {
+        final fake = FakeCommandRunner();
+        fake.addResponse('findmnt', [
+          '-rn',
+          '-o',
+          'SOURCE',
+          '/mnt/boot/efi',
+        ], stdout: '/dev/sda1');
+        fake.addResponse('findmnt', [
+          '-rn',
+          '-o',
+          'UUID',
+          '/mnt',
+        ], stdout: 'root-uuid-1234');
+        fake.addResponse('findmnt', [
+          '-rn',
+          '-o',
+          'SOURCE',
+          '/mnt',
+        ], stdout: '/dev/sda2');
+        fake.addResponse('findmnt', [
+          '-rn',
+          '-o',
+          'SOURCE',
+          '/mnt/boot',
+        ], exitCode: 1);
+        fake.addResponse('findmnt', [
+          '-rn',
+          '-o',
+          'UUID',
+          '/mnt/boot',
+        ], exitCode: 1);
+
+        final ctx = makeContext(<String, dynamic>{
+          'fileSystem': 'btrfs',
+          'partitionMethod': 'manual',
+        }, fake);
+        final stage = const BootloaderStage();
+        final result = await stage.execute(ctx);
+
+        expect(result.success, true);
+
+        final stubCommand = fake.commandLog.firstWhere(
+          (c) =>
+              c.command == 'sh' &&
+              c.args.join(' ').contains('/mnt/boot/efi/EFI/fedora/grub.cfg'),
+        );
+        expect(
+          stubCommand.args.join(' '),
+          contains(r'set prefix=($dev)/@/boot/grub2'),
+        );
+      },
+    );
 
     test('ayrı boot bölümü varsa EFI stub /grub2 yolunu kullanır', () async {
       final fake = FakeCommandRunner();

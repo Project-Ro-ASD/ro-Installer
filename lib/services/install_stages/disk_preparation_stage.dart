@@ -19,13 +19,19 @@ class DiskPreparationStage {
     ctx.log('[AŞAMA 1] Disk Hazırlığı Başlatılıyor: $selectedDisk');
     ctx.log('════════════════════════════════════════════');
 
-    ctx.onProgress(0.02, 'Disk bağlantıları kontrol ediliyor...');
+    ctx.progress(
+      0.02,
+      'stage_progress_disk_check_mounts',
+      'Disk bağlantıları kontrol ediliyor...',
+    );
 
     // 1. Diskteki tüm bölümleri ayır (umount)
     ctx.log('Diskteki mevcut bağlantılar kaldırılıyor...');
     await ctx.runCmd(
-      'sh', ['-c', 'umount -f $selectedDisk* 2>/dev/null || true'],
-      ctx.log, isMock: ctx.isMock,
+      'sh',
+      ['-c', 'umount -f $selectedDisk* 2>/dev/null || true'],
+      ctx.log,
+      isMock: ctx.isMock,
     );
 
     // 2. Takas alanlarını kapat
@@ -33,6 +39,10 @@ class DiskPreparationStage {
     await ctx.runCmd('swapoff', ['-a'], ctx.log, isMock: ctx.isMock);
 
     ctx.log('[AŞAMA 1] Disk hazırlığı tamamlandı.');
-    return StageResult.ok('Disk hazırlığı tamamlandı: $selectedDisk');
+    return StageResult.ok(
+      ctx.t('stage_result_disk_prepared', 'Disk hazırlığı tamamlandı: {disk}', {
+        'disk': selectedDisk,
+      }),
+    );
   }
 }

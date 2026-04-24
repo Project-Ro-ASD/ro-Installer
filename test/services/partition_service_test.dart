@@ -41,7 +41,10 @@ void main() {
 
       expect(partitions.length, 2);
       expect(partitions[0]['name'], '/dev/sda1');
-      expect(partitions[0]['type'], 'vfat');
+      expect(partitions[0]['type'], 'fat32');
+      expect(partitions[0]['mount'], 'unmounted');
+      expect(partitions[0]['currentMount'], 'unmounted');
+      expect(partitions[0]['formatOnInstall'], false);
       expect(partitions[1]['name'], '/dev/sda2');
       expect(partitions[1]['type'], 'btrfs');
     });
@@ -77,6 +80,8 @@ void main() {
       expect(partitions.length, 2);
       expect(partitions[1]['name'], 'Free Space');
       expect(partitions[1]['isFreeSpace'], true);
+      expect(partitions[1]['currentMount'], 'unmounted');
+      expect(partitions[1]['formatOnInstall'], false);
       // 107374182400 - 536870912 = 106837311488
       expect(partitions[1]['sizeBytes'], 106837311488);
     });
@@ -103,6 +108,7 @@ void main() {
       expect(partitions.length, 1);
       expect(partitions[0]['name'], 'Free Space');
       expect(partitions[0]['isFreeSpace'], true);
+      expect(partitions[0]['currentMount'], 'unmounted');
       expect(partitions[0]['sizeBytes'], 107374182400);
     });
 

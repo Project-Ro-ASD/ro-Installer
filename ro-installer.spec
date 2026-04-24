@@ -1,5 +1,5 @@
 Name:           ro-installer
-Version:        1.2.7
+Version:        3.0.0
 Release:        1%{?dist}
 Summary:        Official graphical installer for Ro-ASD
 License:        MIT
@@ -91,6 +91,7 @@ install -Dm644 LICENSE %{buildroot}%{_licensedir}/%{name}/LICENSE
 systemctl reload polkit 2>/dev/null || true
 
 %changelog
-* Tue Apr 21 2026 Ro-ASD Team <contact@roasd.org> - 1.2.7-1
-- Prepare SCM + make-srpm workflow for COPR builds
-- Package Fedora-compatible UEFI boot flow and runtime dependencies
+* Fri Apr 24 2026 Ro-ASD Team <contact@roasd.org> - 3.0.0-1
+- Prepare the v3.0.0 public release
+- Ship the refreshed multilingual installer experience
+- Align packaging with current Fedora and COPR workflow

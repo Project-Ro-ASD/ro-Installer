@@ -144,6 +144,96 @@ void main() {
       },
     );
 
+    test(
+      'secilen locale timezone ve grafik klavye ayarlari hedef sisteme yazilir',
+      () async {
+        final fake = FakeCommandRunner();
+        final state = {
+          'username': 'jpuser',
+          'password': '1234',
+          'isAdministrator': false,
+          'selectedLanguage': 'ja',
+          'selectedLocale': 'ja_JP.UTF-8',
+          'selectedTimezone': 'Asia/Tokyo',
+          'selectedKeyboard': 'uk',
+        };
+        final ctx = makeContext(state, fake);
+
+        final stage = const ChrootConfigStage();
+        final result = await stage.execute(ctx);
+
+        expect(result.success, true);
+        expect(
+          fake.wasCalledWith('chroot', [
+            '/mnt',
+            'dnf',
+            'install',
+            '-y',
+            'glibc-langpack-ja',
+            'langpacks-ja',
+          ]),
+          true,
+          reason: 'Seçilen dil için gerekli paketler kurulmadı',
+        );
+        expect(
+          fake.wasCalledWith('chroot', [
+            '/mnt',
+            'ln',
+            '-sf',
+            '/usr/share/zoneinfo/Asia/Tokyo',
+            '/etc/localtime',
+          ]),
+          true,
+          reason: 'Timezone ayarı hedef sisteme yazılmadı',
+        );
+        expect(
+          fake.wasCalledWith('chroot', [
+            '/mnt',
+            'sh',
+            '-c',
+            'echo "KEYMAP=uk" > /etc/vconsole.conf',
+          ]),
+          true,
+          reason: 'Console klavye düzeni yazılmadı',
+        );
+        expect(
+          fake.commandLog.any(
+            (cmd) =>
+                cmd.command == 'chroot' &&
+                cmd.args
+                    .join(' ')
+                    .contains('/etc/X11/xorg.conf.d/00-keyboard.conf') &&
+                cmd.args.join(' ').contains('Option "XkbLayout" "gb"'),
+          ),
+          true,
+          reason: 'Grafik oturum klavye düzeni yazılmadı',
+        );
+      },
+    );
+
+    test('dil destek paketleri kurulamazsa stage hata ile durur', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse(
+        'chroot',
+        ['/mnt', 'dnf', 'install', '-y', 'glibc-langpack-ja', 'langpacks-ja'],
+        exitCode: 1,
+        stderr: 'dnf failed',
+      );
+
+      final ctx = makeContext(const {
+        'selectedLanguage': 'ja',
+        'selectedLocale': 'ja_JP.UTF-8',
+      }, fake);
+      final stage = const ChrootConfigStage();
+      final result = await stage.execute(ctx);
+
+      expect(result.success, false);
+      expect(
+        result.message,
+        'Secilen dil destek paketleri kurulamadı: glibc-langpack-ja, langpacks-ja',
+      );
+    });
+
     test('bind mount başarısız olursa stage hata ile durur', () async {
       final fake = FakeCommandRunner();
       fake.addResponse(
@@ -239,6 +329,158 @@ void main() {
         expect(fstabScript, isNot(contains('/run/initramfs/live')));
         expect(fstabScript, isNot(contains('/dev/sr0')));
         expect(fstabScript, isNot(contains('zram')));
+      },
+    );
+
+    test(
+      'manuel btrfs root icin ayri /home yoksa @home fstab girdisi olusur',
+      () async {
+        final fake = FakeCommandRunner();
+        final ctx = makeContext({
+          'partitionMethod': 'manual',
+          'manualPartitions': [
+            {
+              'name': '/dev/vda2',
+              'type': 'btrfs',
+              'mount': '/',
+              'isFreeSpace': false,
+              'isPlanned': true,
+              'formatOnInstall': true,
+            },
+            {
+              'name': '/dev/vda1',
+              'type': 'fat32',
+              'mount': '/boot/efi',
+              'isFreeSpace': false,
+              'isPlanned': true,
+              'formatOnInstall': false,
+            },
+            {
+              'name': '/dev/vda3',
+              'type': 'linux-swap',
+              'mount': '[SWAP]',
+              'isFreeSpace': false,
+              'isPlanned': true,
+              'formatOnInstall': false,
+            },
+          ],
+        }, fake);
+
+        final stage = const ChrootConfigStage();
+        final result = await stage.execute(ctx);
+
+        expect(result.success, true);
+
+        final fstabWrite = fake.commandLog.firstWhere(
+          (cmd) =>
+              cmd.command == 'sh' &&
+              cmd.args.join(' ').contains("cat > /mnt/etc/fstab << 'EOF'"),
+        );
+        final fstabScript = fstabWrite.args.join(' ');
+
+        expect(
+          fstabScript,
+          contains(
+            'UUID=MOCK-VDA2 / btrfs defaults,compress=zstd:1,subvol=@ 0 0',
+          ),
+        );
+        expect(
+          fstabScript,
+          contains(
+            'UUID=MOCK-VDA2 /home btrfs defaults,compress=zstd:1,subvol=@home 0 0',
+          ),
+        );
+        expect(
+          fstabScript,
+          contains(
+            'UUID=MOCK-VDA1 /boot/efi vfat umask=0077,shortname=winnt 0 2',
+          ),
+        );
+        expect(fstabScript, contains('UUID=MOCK-VDA3 none swap defaults 0 0'));
+      },
+    );
+
+    test(
+      'manuel modda ayri /home varsa root altinda @home girdisi yazilmaz',
+      () async {
+        final fake = FakeCommandRunner();
+        final ctx = makeContext({
+          'partitionMethod': 'manual',
+          'manualPartitions': [
+            {
+              'name': '/dev/vda2',
+              'type': 'btrfs',
+              'mount': '/',
+              'isFreeSpace': false,
+              'isPlanned': true,
+              'formatOnInstall': true,
+            },
+            {
+              'name': '/dev/vda5',
+              'type': 'ext4',
+              'mount': '/home',
+              'isFreeSpace': false,
+              'isPlanned': true,
+              'formatOnInstall': true,
+            },
+            {
+              'name': '/dev/vda4',
+              'type': 'btrfs',
+              'mount': '/boot',
+              'isFreeSpace': false,
+              'isPlanned': true,
+              'formatOnInstall': true,
+            },
+            {
+              'name': '/dev/vda1',
+              'type': 'fat32',
+              'mount': '/boot/efi',
+              'isFreeSpace': false,
+              'isPlanned': true,
+              'formatOnInstall': false,
+            },
+            {
+              'name': '/dev/vda3',
+              'type': 'linux-swap',
+              'mount': '[SWAP]',
+              'isFreeSpace': false,
+              'isPlanned': true,
+              'formatOnInstall': false,
+            },
+          ],
+        }, fake);
+
+        final stage = const ChrootConfigStage();
+        final result = await stage.execute(ctx);
+
+        expect(result.success, true);
+
+        final fstabWrite = fake.commandLog.firstWhere(
+          (cmd) =>
+              cmd.command == 'sh' &&
+              cmd.args.join(' ').contains("cat > /mnt/etc/fstab << 'EOF'"),
+        );
+        final fstabScript = fstabWrite.args.join(' ');
+
+        expect(fstabScript, contains('UUID=MOCK-VDA5 /home ext4 defaults 0 2'));
+        expect(
+          fstabScript,
+          isNot(
+            contains(
+              'UUID=MOCK-VDA2 /home btrfs defaults,compress=zstd:1,subvol=@home 0 0',
+            ),
+          ),
+        );
+
+        final bootIndex = fstabScript.indexOf(
+          'UUID=MOCK-VDA4 /boot btrfs defaults 0 0',
+        );
+        final efiIndex = fstabScript.indexOf(
+          'UUID=MOCK-VDA1 /boot/efi vfat umask=0077,shortname=winnt 0 2',
+        );
+        expect(bootIndex, greaterThanOrEqualTo(0));
+        expect(efiIndex, greaterThanOrEqualTo(0));
+        expect(bootIndex, lessThan(efiIndex));
       },
     );
 

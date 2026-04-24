@@ -1,9 +1,7 @@
 import 'package:test/test.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
-import 'package:ro_installer/services/command_runner.dart';
 import 'package:ro_installer/services/install_stages/disk_preparation_stage.dart';
 import 'package:ro_installer/services/install_stages/stage_context.dart';
-import 'package:ro_installer/services/install_stages/stage_result.dart';
 
 /// Test için StageContext oluşturur.
 StageContext makeContext(
@@ -16,10 +14,17 @@ StageContext makeContext(
     log: (msg) {}, // Sessiz log
     onProgress: (p, s) {},
     commandRunner: runner,
-    runCmd: (cmd, args, onLog, {bool isMock = false, List<int> allowedExitCodes = const [0]}) async {
-      final result = await runner.run(cmd, args);
-      return allowedExitCodes.contains(result.exitCode);
-    },
+    runCmd:
+        (
+          cmd,
+          args,
+          onLog, {
+          bool isMock = false,
+          List<int> allowedExitCodes = const [0],
+        }) async {
+          final result = await runner.run(cmd, args);
+          return allowedExitCodes.contains(result.exitCode);
+        },
     isMock: isMock,
   );
 }

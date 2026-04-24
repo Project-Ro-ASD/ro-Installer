@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+
 import '../state/installer_state.dart';
+import '../theme/app_theme.dart';
+import '../utils/account_validation.dart';
+import '../widgets/nebula_ui.dart';
 
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
@@ -52,187 +57,387 @@ class _AccountScreenState extends State<AccountScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final state = Provider.of<InstallerState>(context);
-    final isDark = state.themeMode == 'dark';
-    final textColor = isDark ? Colors.white : Colors.black87;
+    final theme = Theme.of(context);
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 20, bottom: 20),
-          child: Column(
-            children: [
-              Text(
-                state.t('acc_title'),
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: textColor,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                state.t('acc_desc'),
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: textColor.withOpacity(0.6),
-                ),
-              ),
-            ],
-          ),
-        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 1080;
 
-        Expanded(
-          child: Center(
-            child: Container(
-              width: 500,
-              padding: const EdgeInsets.all(30),
-              decoration: BoxDecoration(
-                color: theme.cardColor.withOpacity(isDark ? 0.3 : 0.6),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withOpacity(0.1)),
-              ),
-              child: Form(
-                key: _formKey,
-                child: SingleChildScrollView(
-                  child: Column(
+        final profilePanel = NebulaPanel(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                NebulaSectionLabel(state.t('acc_identity_section')),
+                const SizedBox(height: 22),
+                if (compact) ...[
+                  _AccountField(
+                    controller: _nameController,
+                    label: state.t('acc_name_label'),
+                    icon: Icons.badge_rounded,
+                    validator: (value) => value == null || value.isEmpty
+                        ? state.t('acc_err_name_required')
+                        : null,
+                  ),
+                  const SizedBox(height: 16),
+                  _AccountField(
+                    controller: _usernameController,
+                    label: state.t('acc_username_label'),
+                    icon: Icons.person_rounded,
+                    helperText: state.t('acc_username_rule'),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'[A-Za-z0-9_-]'),
+                      ),
+                    ],
+                    validator: (value) {
+                      final username = normalizeLinuxUsername(value ?? '');
+                      if (username.isEmpty) {
+                        return state.t('acc_err_username_required');
+                      }
+                      if (!isValidLinuxUsername(username)) {
+                        return state.t('acc_err_username_invalid');
+                      }
+                      return null;
+                    },
+                  ),
+                ] else
+                  Row(
                     children: [
-                      _buildTextField(
-                        controller: _nameController,
-                        label: "Full Name",
-                        icon: Icons.badge,
-                        isDark: isDark,
-                        validator: (value) => 
-                            value == null || value.isEmpty ? "Please enter your full name" : null,
+                      Expanded(
+                        child: _AccountField(
+                          controller: _nameController,
+                          label: state.t('acc_name_label'),
+                          icon: Icons.badge_rounded,
+                          validator: (value) => value == null || value.isEmpty
+                              ? state.t('acc_err_name_required')
+                              : null,
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _usernameController,
-                        label: "Username",
-                        icon: Icons.person,
-                        isDark: isDark,
-                        validator: (value) => 
-                            value == null || value.isEmpty ? "Please enter a username" : null,
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _AccountField(
+                          controller: _usernameController,
+                          label: state.t('acc_username_label'),
+                          icon: Icons.person_rounded,
+                          helperText: state.t('acc_username_rule'),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'[A-Za-z0-9_-]'),
+                            ),
+                          ],
+                          validator: (value) {
+                            final username = normalizeLinuxUsername(
+                              value ?? '',
+                            );
+                            if (username.isEmpty) {
+                              return state.t('acc_err_username_required');
+                            }
+                            if (!isValidLinuxUsername(username)) {
+                              return state.t('acc_err_username_invalid');
+                            }
+                            return null;
+                          },
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _passwordController,
-                        label: "Password",
-                        icon: Icons.lock,
-                        isDark: isDark,
-                        isPassword: true,
-                        validator: (value) => 
-                            value == null || value.length < 4 ? "Password must be at least 4 characters" : null,
+                    ],
+                  ),
+                const SizedBox(height: 16),
+                if (compact) ...[
+                  _AccountField(
+                    controller: _passwordController,
+                    label: state.t('acc_password_label'),
+                    icon: Icons.lock_rounded,
+                    obscureText: true,
+                    validator: (value) => value == null || value.length < 4
+                        ? state.t('acc_err_password_short')
+                        : null,
+                  ),
+                  const SizedBox(height: 16),
+                  _AccountField(
+                    controller: _confirmPasswordController,
+                    label: state.t('acc_confirm_password_label'),
+                    icon: Icons.lock_reset_rounded,
+                    obscureText: true,
+                    validator: (value) => value != _passwordController.text
+                        ? state.t('acc_err_password_match')
+                        : null,
+                  ),
+                ] else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _AccountField(
+                          controller: _passwordController,
+                          label: state.t('acc_password_label'),
+                          icon: Icons.lock_rounded,
+                          obscureText: true,
+                          validator: (value) =>
+                              value == null || value.length < 4
+                              ? state.t('acc_err_password_short')
+                              : null,
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _confirmPasswordController,
-                        label: "Confirm Password",
-                        icon: Icons.lock_reset,
-                        isDark: isDark,
-                        isPassword: true,
-                        validator: (value) => 
-                            value != _passwordController.text ? "Passwords do not match" : null,
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _AccountField(
+                          controller: _confirmPasswordController,
+                          label: state.t('acc_confirm_password_label'),
+                          icon: Icons.lock_reset_rounded,
+                          obscureText: true,
+                          validator: (value) =>
+                              value != _passwordController.text
+                              ? state.t('acc_err_password_match')
+                              : null,
+                        ),
                       ),
-                      const SizedBox(height: 24),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                    ],
+                  ),
+                const SizedBox(height: 22),
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface.withValues(
+                      alpha: theme.brightness == Brightness.dark ? 0.24 : 0.62,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: theme.colorScheme.outlineVariant.withValues(
+                        alpha: 0.4,
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
                               children: [
-                                Row(
-                                  children: [
-                                    Icon(Icons.admin_panel_settings, color: theme.colorScheme.primary),
-                                    const SizedBox(width: 10),
-                                    Text(state.t('admin'), style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
-                                  ],
+                                Icon(
+                                  Icons.admin_panel_settings_rounded,
+                                  color: theme.colorScheme.primary,
+                                  size: 20,
                                 ),
-                                const SizedBox(height: 4),
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 34),
-                                  child: Text(
-                                    state.t('admin_sub'),
-                                    style: TextStyle(color: textColor.withOpacity(0.5), fontSize: 11),
-                                  ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  state.t('admin'),
+                                  style: theme.textTheme.titleMedium,
                                 ),
                               ],
                             ),
-                          ),
-                          Switch(
-                            value: _isAdmin,
-                            onChanged: (val) => setState(() => _isAdmin = val),
-                            activeColor: theme.colorScheme.primary,
-                          ),
-                        ],
+                            const SizedBox(height: 8),
+                            Text(
+                              state.t('admin_sub'),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: context.installerVisuals.mutedForeground,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Switch(
+                        value: _isAdmin,
+                        onChanged: (value) => setState(() => _isAdmin = value),
                       ),
                     ],
                   ),
                 ),
-              ),
+              ],
             ),
           ),
-        ),
+        );
 
-        Padding(
-          padding: const EdgeInsets.only(top: 20),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        final securityPanel = NebulaPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              TextButton.icon(
-                onPressed: () => state.previousStep(),
-                icon: const Icon(Icons.arrow_back),
-                label: Text(state.t('prev')),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  foregroundColor: textColor.withOpacity(0.7),
-                ),
-              ),
-              ElevatedButton.icon(
-                onPressed: _submit,
-                icon: const Icon(Icons.arrow_forward),
-                label: Text(state.t('next')),
-                style: theme.elevatedButtonTheme.style?.copyWith(
-                  padding: const WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+              NebulaSectionLabel(state.t('acc_privileges_section')),
+              const SizedBox(height: 22),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  NebulaStatusChip(
+                    label: _isAdmin
+                        ? state.t('acc_admin_enabled')
+                        : state.t('acc_standard_user'),
+                    color: _isAdmin
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.secondary,
+                    icon: _isAdmin
+                        ? Icons.verified_user_rounded
+                        : Icons.person_outline_rounded,
                   ),
-                ),
+                  NebulaStatusChip(
+                    label:
+                        normalizeLinuxUsername(_usernameController.text).isEmpty
+                        ? state.t('acc_pending_username')
+                        : normalizeLinuxUsername(
+                            _usernameController.text,
+                          ).toUpperCase(),
+                    color: theme.colorScheme.tertiary,
+                    icon: Icons.person_rounded,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _AccountSummaryItem(
+                icon: Icons.shield_moon_rounded,
+                title: state.t('acc_privilege_model'),
+                body: _isAdmin
+                    ? state.t('acc_privilege_model_admin')
+                    : state.t('acc_privilege_model_standard'),
+              ),
+              const SizedBox(height: 16),
+              _AccountSummaryItem(
+                icon: Icons.lock_clock_rounded,
+                title: state.t('acc_password_policy'),
+                body: state.t('acc_password_policy_body'),
               ),
             ],
           ),
-        ),
-      ],
+        );
+
+        return Column(
+          children: [
+            const SizedBox(height: 10),
+            NebulaScreenIntro(
+              badge: state.t('acc_badge'),
+              title: state.t('acc_title'),
+              description: state.t('acc_desc'),
+            ),
+            const SizedBox(height: 24),
+            Expanded(
+              child: compact
+                  ? SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          profilePanel,
+                          const SizedBox(height: 18),
+                          securityPanel,
+                        ],
+                      ),
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 6, child: profilePanel),
+                        const SizedBox(width: 22),
+                        Expanded(flex: 4, child: securityPanel),
+                      ],
+                    ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                NebulaSecondaryButton(
+                  label: state.t('prev'),
+                  icon: Icons.arrow_back_rounded,
+                  onPressed: state.previousStep,
+                ),
+                const Spacer(),
+                NebulaPrimaryButton(
+                  label: state.t('next'),
+                  icon: Icons.arrow_forward_rounded,
+                  onPressed: _submit,
+                ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
+}
 
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    required bool isDark,
-    bool isPassword = false,
-    String? Function(String?)? validator,
-  }) {
+class _AccountField extends StatelessWidget {
+  const _AccountField({
+    required this.controller,
+    required this.label,
+    required this.icon,
+    required this.validator,
+    this.obscureText = false,
+    this.helperText,
+    this.inputFormatters = const [],
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final String? Function(String?) validator;
+  final bool obscureText;
+  final String? helperText;
+  final List<TextInputFormatter> inputFormatters;
+
+  @override
+  Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
-      obscureText: isPassword,
-      style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+      obscureText: obscureText,
+      inputFormatters: inputFormatters,
+      validator: validator,
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: (isDark ? Colors.white : Colors.black87).withOpacity(0.5)),
-        prefixIcon: Icon(icon, color: Colors.grey.withOpacity(0.8)),
-        filled: true,
-        fillColor: isDark ? const Color(0xFF151520) : Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
+        helperText: helperText,
+        prefixIcon: Icon(icon),
+      ),
+    );
+  }
+}
+
+class _AccountSummaryItem extends StatelessWidget {
+  const _AccountSummaryItem({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(
+          alpha: theme.brightness == Brightness.dark ? 0.22 : 0.6,
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
         ),
       ),
-      validator: validator,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: theme.colorScheme.primary, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Text(
+                  body,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: context.installerVisuals.mutedForeground,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

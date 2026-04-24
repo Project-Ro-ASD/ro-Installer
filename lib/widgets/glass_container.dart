@@ -23,8 +23,8 @@ class GlassContainer extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final defaultGlassColor = isDark
-        ? Colors.white.withOpacity(0.05)
-        : Colors.white.withOpacity(0.2);
+        ? Colors.white.withValues(alpha: 0.05)
+        : Colors.white.withValues(alpha: 0.2);
 
     return RepaintBoundary(
       // Blur her frame'de yeniden hesaplanmasın diye GPU'da cache'lenir
@@ -40,12 +40,12 @@ class GlassContainer extends StatelessWidget {
               color: color ?? defaultGlassColor,
               borderRadius: borderRadius,
               border: Border.all(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withValues(alpha: 0.15),
                 width: 1.0, // 1px inner border hissiyatı
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 10,
                   spreadRadius: -5,
                 ),
