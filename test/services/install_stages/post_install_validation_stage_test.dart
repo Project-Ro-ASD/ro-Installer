@@ -227,6 +227,26 @@ void main() {
     void addInstallerRemovalResponses(FakeCommandRunner fake) {
       fake.addResponse('test', ['!', '-e', '/mnt/usr/bin/ro-installer']);
       fake.addResponse('test', ['!', '-e', '/mnt/usr/bin/ro_installer']);
+      fake.addResponse('test', [
+        '!',
+        '-e',
+        '/mnt/usr/libexec/ro-installer-launcher.sh',
+      ]);
+      fake.addResponse('test', [
+        '!',
+        '-e',
+        '/mnt/usr/share/polkit-1/actions/org.roasd.installer.policy',
+      ]);
+      fake.addResponse('test', [
+        '!',
+        '-e',
+        '/mnt/etc/polkit-1/rules.d/49-ro-installer-live.rules',
+      ]);
+      fake.addResponse('test', [
+        '!',
+        '-e',
+        '/mnt/etc/sudoers.d/ro-installer-live',
+      ]);
     }
 
     void addLiveUserCleanupResponses(
@@ -484,6 +504,50 @@ void main() {
         result.message,
         'SDDM liveuser kalıntısı hedef sisteme sızmış görünüyor.',
       );
+    });
+
+    test('canlı polkit kuralı sızmışsa doğrulama düşer', () async {
+      final fake = FakeCommandRunner(defaultSuccess: false);
+      fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
+      fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
+      addLocalizationResponses(fake);
+      addBrandingResponse(fake);
+      fake.addResponse('sh', [
+        '-c',
+        'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
+      ]);
+      addNoFedoraKernelResponse(fake);
+      addStableKernelResponse(fake);
+      addRoRepoResponses(fake);
+      addRoDesktopAppsResponses(fake);
+      addRoThemeResponses(fake);
+      fake.addResponse('test', ['!', '-e', '/mnt/usr/bin/ro-installer']);
+      fake.addResponse('test', ['!', '-e', '/mnt/usr/bin/ro_installer']);
+      fake.addResponse('test', [
+        '!',
+        '-e',
+        '/mnt/usr/libexec/ro-installer-launcher.sh',
+      ]);
+      fake.addResponse('test', [
+        '!',
+        '-e',
+        '/mnt/usr/share/polkit-1/actions/org.roasd.installer.policy',
+      ]);
+      fake.addResponse('test', [
+        '!',
+        '-e',
+        '/mnt/etc/polkit-1/rules.d/49-ro-installer-live.rules',
+      ], exitCode: 1);
+
+      final ctx = makeContext({
+        'fileSystem': 'ext4',
+        'partitionMethod': 'full',
+      }, fake);
+
+      final result = await const PostInstallValidationStage().execute(ctx);
+
+      expect(result.success, false);
+      expect(result.message, contains('Canlı oturum polkit kuralı'));
     });
 
     test('Fedora stock kernel kalırsa stage düşer', () async {

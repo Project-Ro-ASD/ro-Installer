@@ -7,9 +7,9 @@ Name[tr]=Ro-ASD Yükleyici
 Comment=Ro-ASD işletim sistemini bilgisayarınıza kurun
 Comment[en]=Install Ro-ASD Operating System to your computer
 Comment[tr]=Ro-ASD işletim sistemini bilgisayarınıza kurun
-# Exec: /usr/bin/ro-installer symlink'i paketleme asamasinda olusturulur.
-# Uygulama root degilse main.dart icinden pkexec ile kendini tekrar baslatir.
-Exec=/usr/bin/ro-installer
+# Launcher paketleme asamasinda /usr/libexec altina kurulur.
+# Uygulama root degilse launcher pkexec ile kendini tekrar baslatir.
+Exec=/usr/libexec/ro-installer-launcher.sh
 Icon=drive-harddisk
 Terminal=false
 Categories=System;

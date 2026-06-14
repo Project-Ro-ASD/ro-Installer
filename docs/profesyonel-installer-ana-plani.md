@@ -101,9 +101,10 @@ Hedef:
 
 Plan:
 
-- Repo GPG anahtari uretilecek ve paket imzalama akisi belgelenecek.
-- `.repo` dosyasi `gpgcheck=1` ve `repo_gpgcheck=1` hedefiyle guncellenecek.
-- Live ISO sudo/polkit politikasi `NOPASSWD: ALL` yerine yalniz installer komut seti veya pkexec policy ile sinirlanacak.
+- Ro `.repo` dosyalari `gpgcheck=1`, `repo_gpgcheck=1` ve `RPM-GPG-KEY-ro-asd` ile guncellendi.
+- COPR depolari RPM imzasi (`gpgcheck=1`) ile kaliyor; COPR metadata imzasi yayinlanmadigi icin `repo_gpgcheck=0` istisnasi belgelendi.
+- Live ISO `NOPASSWD: ALL` kullanmiyor; otomatik baslatma installer launcher + liveuser ile sinirli polkit kuralina tasindi.
+- Hala gereken dis is: 2026-06-15 kontrolunde Ro-Repo tarafinda `RPM-GPG-KEY-ro-asd` ve imzali `repodata/repomd.xml.asc` dosyalari 404 donuyor; bunlar yayinlanmali.
 
 ## Storage Plani
 

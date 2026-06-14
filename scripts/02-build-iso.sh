@@ -569,7 +569,9 @@ write_ro_repos() {
 name=Acik Kaynak Gelistirme Toplulugu Repo
 baseurl=https://project-ro-asd.github.io/Ro-Repo/$basearch/
 enabled=1
-gpgcheck=0
+gpgcheck=1
+gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd
+repo_gpgcheck=1
 EOF
 
   cat > /etc/yum.repos.d/ro-repo-noarch.repo <<'EOF'
@@ -577,7 +579,9 @@ EOF
 name=Acik Kaynak Gelistirme Toplulugu Repo - Noarch
 baseurl=https://project-ro-asd.github.io/Ro-Repo/noarch/
 enabled=1
-gpgcheck=0
+gpgcheck=1
+gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd
+repo_gpgcheck=1
 EOF
 
   cat > /etc/yum.repos.d/ro-kernel-stable-copr.repo <<'EOF'
@@ -1105,6 +1109,16 @@ test -f /etc/yum.repos.d/ro-repo.repo
 test -f /etc/yum.repos.d/ro-repo-noarch.repo
 test -f /etc/yum.repos.d/ro-kernel-stable-copr.repo
 test -f /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
+grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
+grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo.repo
+grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
+grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
+grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo-noarch.repo
+grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
+grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-kernel-stable/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
+grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-Kernel-Experimental/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
 install_pkgs=(
   "${installer_rpm}"
   gdisk
@@ -1187,7 +1201,7 @@ rm -f \
 
 log "Live ISO boot kernel/initrd replaced with ro-kernel-stable artifacts."
 
-log "Creating live autostart and passwordless sudo policy for installer..."
+log "Creating live autostart and polkit rule for installer..."
 install -d "${TARGET_ROOT_DIR}/etc/xdg/autostart"
 cat > "${TARGET_ROOT_DIR}/etc/xdg/autostart/ro-Installer.desktop" <<'EOF'
 [Desktop Entry]
@@ -1195,21 +1209,34 @@ Type=Application
 Version=1.0
 Name=Ro-ASD Installer Live AutoStart
 Comment=Starts Ro-ASD installer in the live session
-Exec=/usr/bin/env RO_INSTALLER_LIVE_SESSION=1 RO_INSTALLER_COMMAND_SUDO=1 /usr/bin/ro-installer
-TryExec=/usr/bin/ro-installer
+Exec=/usr/bin/env RO_INSTALLER_LIVE_SESSION=1 /usr/libexec/ro-installer-launcher.sh
+TryExec=/usr/libexec/ro-installer-launcher.sh
 Terminal=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
 X-KDE-autostart-after=panel
 EOF
 
-install -d "${TARGET_ROOT_DIR}/etc/sudoers.d"
-cat > "${TARGET_ROOT_DIR}/etc/sudoers.d/ro-installer-live" <<'EOF'
-Defaults:liveuser !requiretty
-liveuser ALL=(ALL) NOPASSWD: ALL
-%wheel ALL=(ALL) NOPASSWD: ALL
+install -d "${TARGET_ROOT_DIR}/etc/polkit-1/rules.d"
+cat > "${TARGET_ROOT_DIR}/etc/polkit-1/rules.d/49-ro-installer-live.rules" <<'EOF'
+polkit.addRule(function(action, subject) {
+  if (subject.user != "liveuser" || !subject.active) {
+    return polkit.Result.NOT_HANDLED;
+  }
+
+  if (action.id == "org.roasd.installer.run") {
+    return polkit.Result.YES;
+  }
+
+  if (action.id == "org.freedesktop.policykit.exec" &&
+      action.lookup("program") == "/usr/bin/ro-installer") {
+    return polkit.Result.YES;
+  }
+
+  return polkit.Result.NOT_HANDLED;
+});
 EOF
-chmod 0440 "${TARGET_ROOT_DIR}/etc/sudoers.d/ro-installer-live"
+chmod 0644 "${TARGET_ROOT_DIR}/etc/polkit-1/rules.d/49-ro-installer-live.rules"
 
 rewrite_os_release() {
   local file="$1"

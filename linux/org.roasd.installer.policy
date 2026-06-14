@@ -13,7 +13,6 @@
     <message xml:lang="tr">Ro-ASD Yükleyici yönetici izni gerektirmektedir.</message>
     <icon_name>drive-harddisk</icon_name>
     <defaults>
-      <!-- Live ISO ortamında şifresiz yetki yükseltme -->
       <allow_any>auth_admin_keep</allow_any>
       <allow_inactive>auth_admin_keep</allow_inactive>
       <allow_active>auth_admin_keep</allow_active>

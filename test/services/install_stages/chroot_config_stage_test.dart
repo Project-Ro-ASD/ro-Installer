@@ -264,12 +264,15 @@ void main() {
             (cmd) =>
                 cmd.command == 'chroot' &&
                 cmd.args.join(' ').contains('/etc/yum.repos.d/ro-repo.repo') &&
-                cmd.args
-                    .join(' ')
-                    .contains('https://project-ro-asd.github.io/Ro-Repo'),
+                cmd.args.join(' ').contains(
+                  'https://project-ro-asd.github.io/Ro-Repo',
+                ) &&
+                cmd.args.join(' ').contains('gpgcheck=1') &&
+                cmd.args.join(' ').contains('repo_gpgcheck=1') &&
+                cmd.args.join(' ').contains('RPM-GPG-KEY-ro-asd'),
           ),
           true,
-          reason: 'Ro GitHub repo dosyasi hedef sisteme yazilmadi',
+          reason: 'Ro GitHub repo dosyasi imza dogrulamayla yazilmadi',
         );
         expect(
           fake.commandLog.any(
@@ -599,6 +602,11 @@ void main() {
           cleanupScripts,
           contains('/var/lib/AccountsService/users/liveuser'),
         );
+        expect(
+          cleanupScripts,
+          contains('/etc/polkit-1/rules.d/49-ro-installer-live.rules'),
+        );
+        expect(cleanupScripts, contains('/etc/sudoers.d/ro-installer-live'));
         expect(cleanupScripts, contains('userdel -r liveuser'));
       },
     );

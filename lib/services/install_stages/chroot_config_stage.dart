@@ -24,7 +24,9 @@ cat > /etc/yum.repos.d/ro-repo.repo <<'EOF'
 name=Acik Kaynak Gelistirme Toplulugu Repo
 baseurl=https://project-ro-asd.github.io/Ro-Repo/$basearch/
 enabled=1
-gpgcheck=0
+gpgcheck=1
+gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd
+repo_gpgcheck=1
 EOF
 
 cat > /etc/yum.repos.d/ro-repo-noarch.repo <<'EOF'
@@ -32,7 +34,9 @@ cat > /etc/yum.repos.d/ro-repo-noarch.repo <<'EOF'
 name=Acik Kaynak Gelistirme Toplulugu Repo - Noarch
 baseurl=https://project-ro-asd.github.io/Ro-Repo/noarch/
 enabled=1
-gpgcheck=0
+gpgcheck=1
+gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd
+repo_gpgcheck=1
 EOF
 
 cat > /etc/yum.repos.d/ro-kernel-stable-copr.repo <<'EOF'
@@ -558,6 +562,7 @@ EOF
       rm -rf /usr/lib/ro-installer /usr/lib64/ro-installer 2>/dev/null || true
       rm -f /usr/libexec/ro-installer-launcher.sh 2>/dev/null || true
       rm -f /usr/share/polkit-1/actions/org.roasd.installer.policy 2>/dev/null || true
+      rm -f /etc/polkit-1/rules.d/49-ro-installer-live.rules 2>/dev/null || true
     ''',
       ],
       'Kurulu sistemden eski autostart girdisi temizlenemedi.',

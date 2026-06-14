@@ -86,9 +86,24 @@ forbid_pattern \
   lib scripts
 
 forbid_pattern \
-  "repo GPG kontrolleri kapali degil" \
-  '(^|[[:space:]])(gpgcheck=0|repo_gpgcheck=0)($|[[:space:]])' \
+  "RPM GPG kontrolleri kapali degil" \
+  '(^|[[:space:]])gpgcheck=0($|[[:space:]])' \
   lib scripts ro-installer.spec
+
+require_ro_repo_metadata_gpg() {
+  local file
+  local key_count
+  local metadata_count
+  for file in lib/services/install_stages/chroot_config_stage.dart scripts/02-build-iso.sh; do
+    rg -n 'project-ro-asd.github.io/Ro-Repo' "${file}" >/dev/null
+    metadata_count="$(rg -c '^repo_gpgcheck=1$' "${file}" || true)"
+    key_count="$(rg -c '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' "${file}" || true)"
+    [[ "${metadata_count}" -ge 2 ]]
+    [[ "${key_count}" -ge 2 ]]
+  done
+}
+
+run_check "Ro repo metadata GPG zorunlu" require_ro_repo_metadata_gpg
 
 forbid_pattern \
   "live sudo politikasi NOPASSWD ALL degil" \

@@ -37,8 +37,18 @@ test -f /etc/yum.repos.d/ro-kernel-stable-copr.repo
 test -f /etc/yum.repos.d/ro-kernel-experimental-copr.repo
 grep -q 'https://project-ro-asd.github.io/Ro-Repo/$basearch/' /etc/yum.repos.d/ro-repo.repo
 grep -q 'https://project-ro-asd.github.io/Ro-Repo/noarch/' /etc/yum.repos.d/ro-repo-noarch.repo
+grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
+grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
+grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo.repo
+grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
+grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
+grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q 'hynkzz/ro-kernel-stable' /etc/yum.repos.d/ro-kernel-stable-copr.repo
+grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
+grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-kernel-stable/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
 grep -q 'hynkzz/ro-Kernel-Experimental' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-Kernel-Experimental/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
 ''';
 
 const postInstallRoDesktopAppsValidationScript = r'''
@@ -352,6 +362,34 @@ class PostInstallValidationStage {
       '-e',
       '/mnt/usr/bin/ro_installer',
     ], 'ro_installer kurulu sistemde kalmış görünüyor.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'test', [
+      '!',
+      '-e',
+      '/mnt/usr/libexec/ro-installer-launcher.sh',
+    ], 'ro-installer launcher kurulu sistemde kalmış görünüyor.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'test', [
+      '!',
+      '-e',
+      '/mnt/usr/share/polkit-1/actions/org.roasd.installer.policy',
+    ], 'ro-installer polkit policy kurulu sistemde kalmış görünüyor.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'test', [
+      '!',
+      '-e',
+      '/mnt/etc/polkit-1/rules.d/49-ro-installer-live.rules',
+    ], 'Canlı oturum polkit kuralı hedef sisteme sızmış görünüyor.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'test', [
+      '!',
+      '-e',
+      '/mnt/etc/sudoers.d/ro-installer-live',
+    ], 'Canlı oturum sudoers kuralı hedef sisteme sızmış görünüyor.');
     if (failure != null) return failure;
 
     failure = await _requireCommand(ctx, 'chroot', [
