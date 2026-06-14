@@ -51,12 +51,14 @@ class FakeCommandRunner extends CommandRunner {
   }) {
     final key = _makeKey(command, args);
     _responses.putIfAbsent(key, () => []);
-    _responses[key]!.add(_FakeResponse(
-      stdout: stdout,
-      stderr: stderr,
-      exitCode: exitCode,
-      started: started,
-    ));
+    _responses[key]!.add(
+      _FakeResponse(
+        stdout: stdout,
+        stderr: stderr,
+        exitCode: exitCode,
+        started: started,
+      ),
+    );
   }
 
   /// Sadece komut adına göre yanıt tanımlar (argümanlara bakılmaz).
@@ -70,12 +72,14 @@ class FakeCommandRunner extends CommandRunner {
   }) {
     final key = 'CMD:$command';
     _responses.putIfAbsent(key, () => []);
-    _responses[key]!.add(_FakeResponse(
-      stdout: stdout,
-      stderr: stderr,
-      exitCode: exitCode,
-      started: started,
-    ));
+    _responses[key]!.add(
+      _FakeResponse(
+        stdout: stdout,
+        stderr: stderr,
+        exitCode: exitCode,
+        started: started,
+      ),
+    );
   }
 
   /// Dosyadan fixture yükleyerek yanıt tanımlar.
@@ -114,9 +118,17 @@ class FakeCommandRunner extends CommandRunner {
     List<String> args, {
     bool isMock = false,
     CommandLogCallback? onLog,
+    Duration? timeout,
+    String? stdinText,
   }) async {
     // Komutu kaydet
-    commandLog.add(RecordedCommand(command: command, args: List.unmodifiable(args)));
+    commandLog.add(
+      RecordedCommand(
+        command: command,
+        args: List.unmodifiable(args),
+        stdinTextProvided: stdinText != null,
+      ),
+    );
 
     // Log callback'i tetikle
     onLog?.call(
@@ -124,7 +136,7 @@ class FakeCommandRunner extends CommandRunner {
         type: CommandLogType.command,
         command: command,
         args: List.unmodifiable(args),
-        message: [command, ...args].join(' ').trim(),
+        message: SecretRedactor.redactCommandLine(command, args),
       ),
     );
 
@@ -143,7 +155,7 @@ class FakeCommandRunner extends CommandRunner {
               type: CommandLogType.stdout,
               command: command,
               args: List.unmodifiable(args),
-              message: line.trim(),
+              message: SecretRedactor.redactText(line.trim()),
             ),
           );
         }
@@ -158,7 +170,7 @@ class FakeCommandRunner extends CommandRunner {
               type: CommandLogType.stderr,
               command: command,
               args: List.unmodifiable(args),
-              message: line.trim(),
+              message: SecretRedactor.redactText(line.trim()),
             ),
           );
         }
@@ -230,8 +242,13 @@ class _FakeResponse {
 class RecordedCommand {
   final String command;
   final List<String> args;
+  final bool stdinTextProvided;
 
-  const RecordedCommand({required this.command, required this.args});
+  const RecordedCommand({
+    required this.command,
+    required this.args,
+    this.stdinTextProvided = false,
+  });
 
   String get commandLine => [command, ...args].join(' ').trim();
 

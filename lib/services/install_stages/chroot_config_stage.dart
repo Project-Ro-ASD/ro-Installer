@@ -1,7 +1,228 @@
 import 'stage_context.dart';
 import 'stage_result.dart';
 import '../../utils/account_validation.dart';
+import '../command_runner.dart';
 import '../target_system_settings.dart';
+
+const _stableKernelPackages = [
+  'ro-kernel-stable',
+  'ro-kernel-stable-core',
+  'ro-kernel-stable-modules',
+  'ro-kernel-stable-devel',
+];
+const _experimentalKernelPackages = [
+  'ro-kernel-experimental',
+  'ro-kernel-experimental-core',
+  'ro-kernel-experimental-modules',
+  'ro-kernel-experimental-devel',
+];
+const _roKernelRepoScript = r'''
+set -e
+mkdir -p /etc/yum.repos.d
+cat > /etc/yum.repos.d/ro-repo.repo <<'EOF'
+[ro-repo]
+name=Acik Kaynak Gelistirme Toplulugu Repo
+baseurl=https://project-ro-asd.github.io/Ro-Repo/$basearch/
+enabled=1
+gpgcheck=0
+EOF
+
+cat > /etc/yum.repos.d/ro-repo-noarch.repo <<'EOF'
+[ro-repo-noarch]
+name=Acik Kaynak Gelistirme Toplulugu Repo - Noarch
+baseurl=https://project-ro-asd.github.io/Ro-Repo/noarch/
+enabled=1
+gpgcheck=0
+EOF
+
+cat > /etc/yum.repos.d/ro-kernel-stable-copr.repo <<'EOF'
+[copr:copr.fedorainfracloud.org:hynkzz:ro-kernel-stable]
+name=Copr repo for ro-kernel-stable owned by hynkzz
+baseurl=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-kernel-stable/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=False
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-kernel-stable/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+EOF
+
+cat > /etc/yum.repos.d/ro-kernel-experimental-copr.repo <<'EOF'
+[copr:copr.fedorainfracloud.org:hynkzz:ro-Kernel-Experimental]
+name=Copr repo for ro-Kernel-Experimental owned by hynkzz
+baseurl=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-Kernel-Experimental/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-Kernel-Experimental/pubkey.gpg
+repo_gpgcheck=0
+enabled=0
+enabled_metadata=1
+EOF
+''';
+
+const _enableExperimentalKernelRepoScript = r'''
+set -e
+if [ -f /etc/yum.repos.d/ro-kernel-experimental-copr.repo ]; then
+  sed -i 's/^enabled=0$/enabled=1/' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+fi
+''';
+
+const _stockKernelRemovalScript = r'''
+set -e
+sed -i '/^# Ro-ASD stock kernel policy$/,/^# End Ro-ASD stock kernel policy$/d' /etc/dnf/dnf.conf 2>/dev/null || true
+installed_stock_kernels="$(rpm -qa | grep -E '^(kernel|kernel-core|kernel-modules|kernel-modules-core|kernel-modules-extra|kernel-devel|kernel-devel-matched|kernel-debug|kernel-debug-core|kernel-debug-modules|kernel-debug-modules-core|kernel-debug-modules-extra|kernel-debug-devel|kernel-uki|kernel-uki-core|kernel-uki-modules|kernel-uki-modules-core|kernel-uki-modules-extra)-[0-9]' || true)"
+if [ -n "$installed_stock_kernels" ]; then
+  printf '%s\n' "$installed_stock_kernels" | xargs dnf -y remove || true
+else
+  echo "No Fedora stock kernel packages found; skipping dnf remove."
+fi
+if rpm -qa | grep -Eq '^(kernel|kernel-core|kernel-modules|kernel-modules-core|kernel-modules-extra|kernel-devel|kernel-devel-matched|kernel-debug|kernel-debug-core|kernel-debug-modules|kernel-debug-modules-core|kernel-debug-modules-extra|kernel-debug-devel|kernel-uki|kernel-uki-core|kernel-uki-modules|kernel-uki-modules-core|kernel-uki-modules-extra)-[0-9]'; then
+  rpm -qa | grep -E '^(kernel|kernel-core|kernel-modules|kernel-modules-core|kernel-modules-extra|kernel-devel|kernel-devel-matched|kernel-debug|kernel-debug-core|kernel-debug-modules|kernel-debug-modules-core|kernel-debug-modules-extra|kernel-debug-devel|kernel-uki|kernel-uki-core|kernel-uki-modules|kernel-uki-modules-core|kernel-uki-modules-extra)-[0-9]' >&2 || true
+  exit 1
+fi
+''';
+
+const _stockKernelExcludeScript = r'''
+set -e
+mkdir -p /etc/dnf
+touch /etc/dnf/dnf.conf
+if ! grep -q '^\[main\]' /etc/dnf/dnf.conf; then
+  printf '\n[main]\n' >> /etc/dnf/dnf.conf
+fi
+sed -i '/^# Ro-ASD stock kernel policy$/,/^# End Ro-ASD stock kernel policy$/d' /etc/dnf/dnf.conf
+cat >> /etc/dnf/dnf.conf <<'EOF'
+# Ro-ASD stock kernel policy
+excludepkgs=kernel kernel-core kernel-modules kernel-modules-core kernel-modules-extra kernel-devel kernel-devel-matched kernel-debug kernel-debug-core kernel-debug-modules kernel-debug-modules-core kernel-debug-modules-extra kernel-debug-devel kernel-uki kernel-uki-core kernel-uki-modules kernel-uki-modules-core kernel-uki-modules-extra
+# End Ro-ASD stock kernel policy
+EOF
+''';
+
+const _targetBrandingScript = r'''
+set -e
+
+set_os_release_key() {
+  file="$1"
+  key="$2"
+  value="$3"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+rewrite_os_release() {
+  file="$1"
+  [ -e "$file" ] || return 0
+  if [ -L "$file" ]; then
+    file="$(readlink -f "$file")"
+  fi
+  [ -f "$file" ] || return 0
+
+  set_os_release_key "$file" NAME '"Ro-ASD"'
+  set_os_release_key "$file" PRETTY_NAME '"Ro-ASD"'
+  set_os_release_key "$file" VARIANT '"Ro-ASD"'
+  set_os_release_key "$file" VARIANT_ID roasd
+  set_os_release_key "$file" LOGO ro-asd
+  set_os_release_key "$file" ANSI_COLOR '"0;38;2;0;184;148"'
+}
+
+rewrite_os_release /usr/lib/os-release
+rewrite_os_release /etc/os-release
+
+version_id=""
+if [ -f /usr/lib/os-release ]; then
+  version_id="$(. /usr/lib/os-release && printf '%s' "${VERSION_ID:-}")"
+fi
+if [ -n "$version_id" ]; then
+  release_text="Ro-ASD Linux ${version_id}"
+else
+  release_text="Ro-ASD Linux"
+fi
+
+for release_file in /etc/fedora-release /etc/system-release /etc/redhat-release; do
+  if [ -e "$release_file" ] || [ -L "$release_file" ]; then
+    printf '%s\n' "$release_text" > "$release_file"
+  fi
+done
+
+printf '%s\n' "$release_text" > /etc/issue
+printf '%s\n' "$release_text" > /etc/issue.net
+''';
+
+const _plasmaLauncherCleanupScript = r'''
+set -e
+
+desktop_id_exists() {
+  local desktop_id="$1"
+  [ -f "/usr/share/applications/${desktop_id}" ] ||
+    [ -f "/usr/local/share/applications/${desktop_id}" ] ||
+    [ -f "/var/lib/flatpak/exports/share/applications/${desktop_id}" ]
+}
+
+append_launcher() {
+  local current="$1"
+  local item="$2"
+  if [ -z "$current" ]; then
+    printf '%s' "$item"
+  else
+    printf '%s,%s' "$current" "$item"
+  fi
+}
+
+sanitize_launcher_file() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  local tmp="${file}.ro-clean"
+  local changed=0
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" == launchers=* ]]; then
+      local raw="${line#launchers=}"
+      local cleaned=""
+      local item desktop_id
+      IFS=',' read -r -a launchers <<< "$raw"
+      for item in "${launchers[@]}"; do
+        [ -n "$item" ] || continue
+        if [[ "$item" == applications:* ]]; then
+          desktop_id="${item#applications:}"
+          if desktop_id_exists "$desktop_id"; then
+            cleaned="$(append_launcher "$cleaned" "$item")"
+          else
+            changed=1
+          fi
+        else
+          cleaned="$(append_launcher "$cleaned" "$item")"
+        fi
+      done
+      printf 'launchers=%s\n' "$cleaned"
+    else
+      printf '%s\n' "$line"
+    fi
+  done < "$file" > "$tmp"
+
+  if [ "$changed" -eq 1 ]; then
+    cat "$tmp" > "$file"
+  fi
+  rm -f "$tmp"
+}
+
+while IFS= read -r file; do
+  sanitize_launcher_file "$file"
+done < <(
+  find \
+    /etc/xdg \
+    /etc/skel \
+    /home \
+    /root \
+    -path '*/.config/plasma-org.kde.plasma.desktop-appletsrc' \
+    -type f 2>/dev/null || true
+)
+
+rm -f /home/*/.cache/icon-cache.kcache /home/*/.cache/ksycoca* 2>/dev/null || true
+''';
 
 /// AŞAMA 6: Chroot Yapılandırma
 ///
@@ -104,11 +325,11 @@ class ChrootConfigStage {
       'Zaman dilimi ve kullanıcı ayarları yapılandırılıyor...',
     );
 
-    String user = ctx.state['username'] ?? 'user';
-    String pass = ctx.state['password'] ?? 'user';
-    String tz = ctx.state['selectedTimezone'] ?? 'Europe/Istanbul';
-    String languageCode = ctx.state['selectedLanguage'] ?? 'en';
-    String localeOverride = ctx.state['selectedLocale'] ?? '';
+    String user = (ctx.state['username'] ?? '').toString();
+    String pass = (ctx.state['password'] ?? '').toString();
+    String tz = (ctx.state['selectedTimezone'] ?? 'Europe/Istanbul').toString();
+    String languageCode = (ctx.state['selectedLanguage'] ?? 'en').toString();
+    String localeOverride = (ctx.state['selectedLocale'] ?? '').toString();
     String hostname = 'ro-asd';
     final isAdministrator = ctx.state['isAdministrator'] == true;
     final localeSettings = resolveTargetLocaleSettings(
@@ -124,6 +345,9 @@ class ChrootConfigStage {
       return StageResult.fail(
         'Gecersiz kullanici adi: $user. Kullanici adi harf veya _ ile baslamali ve sadece kucuk harf, rakam, _ veya - icermelidir.',
       );
+    }
+    if (pass.isEmpty) {
+      return StageResult.fail('Kullanıcı parolası boş olamaz.');
     }
 
     // Zaman dilimi
@@ -161,6 +385,9 @@ class ChrootConfigStage {
     failure = await _installLocalizationSupport(ctx, localeSettings);
     if (failure != null) return failure;
 
+    failure = await _installSelectedKernelChannels(ctx);
+    if (failure != null) return failure;
+
     // Vconsole (Klavye Düzeni)
     failure = await _requireCommand(ctx, 'chroot', [
       '/mnt',
@@ -192,6 +419,14 @@ EOF
     ], 'Locale yapılandırması yazılamadı.');
     if (failure != null) return failure;
 
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'bash',
+      '-c',
+      _targetBrandingScript,
+    ], 'Ro-ASD sistem kimliği yazılamadı.');
+    if (failure != null) return failure;
+
     // ── 6.3: SELinux Context Düzeltmesi (chpasswd öncesi) ──
     failure = await _requireCommand(ctx, 'chroot', [
       '/mnt',
@@ -219,12 +454,7 @@ EOF
     if (failure != null) return failure;
 
     // 2. Parolasını belirle
-    failure = await _requireCommand(ctx, 'chroot', [
-      '/mnt',
-      'sh',
-      '-c',
-      "printf '%s\\n' ${_shellQuote('$user:$pass')} | chpasswd",
-    ], 'Kullanıcı parolası ayarlanamadı: $user');
+    failure = await _setUserPassword(ctx, user, pass);
     if (failure != null) return failure;
 
     // 3. Root hesabını kilitle (Güvenlik zafiyetini kapat)
@@ -264,7 +494,7 @@ EOF
     await _runOptionalCommand(
       ctx,
       'chroot',
-      ['/mnt', 'dnf', 'remove', '-y', 'calamares', 'anaconda*'],
+      ['/mnt', 'dnf', 'remove', '-y', 'ro-installer', 'calamares', 'anaconda*'],
       'Canlı ortam kurulum paketleri temizlenemedi; gereksiz paket kalıntıları kalabilir.',
       allowedExitCodes: const [0, 1],
     );
@@ -281,10 +511,31 @@ EOF
         '''
       systemctl disable livesys.service 2>/dev/null || true
       systemctl disable livesys-late.service 2>/dev/null || true
+      systemctl disable ro-live-session-compat.service 2>/dev/null || true
       rm -f /etc/systemd/system/livesys.service 2>/dev/null || true
       rm -f /etc/systemd/system/livesys-late.service 2>/dev/null || true
+      rm -f /etc/systemd/system/ro-live-session-compat.service 2>/dev/null || true
       rm -f /usr/lib/systemd/system/livesys.service 2>/dev/null || true
       rm -f /usr/lib/systemd/system/livesys-late.service 2>/dev/null || true
+      rm -f /usr/libexec/ro-live-session-compat.sh 2>/dev/null || true
+      rm -f /etc/sddm.conf.d/10-ro-live-graphics.conf 2>/dev/null || true
+      rm -f /etc/sddm.conf.d/10-ro-live-wayland.conf 2>/dev/null || true
+      rm -f /etc/sddm.conf.d/99-ro-theme.conf 2>/dev/null || true
+      rm -f /etc/xdg/plasma-workspace/env/10-ro-live-cursor.sh 2>/dev/null || true
+      rm -f /etc/environment.d/10-ro-live-cursor.conf 2>/dev/null || true
+      rm -f /etc/environment.d/20-ro-live-graphics.conf 2>/dev/null || true
+      if grep -q '^User=liveuser\$' /etc/sddm.conf 2>/dev/null; then
+        rm -f /etc/sddm.conf 2>/dev/null || true
+      fi
+      rm -f /var/lib/sddm/state.conf 2>/dev/null || true
+      rm -rf /var/lib/sddm/.cache /var/lib/sddm/.config /var/lib/sddm/.local 2>/dev/null || true
+      rm -f /etc/systemd/system/upower.service.d/10-ro-live-kernel-compat.conf 2>/dev/null || true
+      rm -f /etc/systemd/system/irqbalance.service.d/10-ro-live-kernel-compat.conf 2>/dev/null || true
+      rmdir /etc/xdg/plasma-workspace/env 2>/dev/null || true
+      rmdir /etc/xdg/plasma-workspace 2>/dev/null || true
+      rmdir /etc/environment.d 2>/dev/null || true
+      rmdir /etc/systemd/system/upower.service.d 2>/dev/null || true
+      rmdir /etc/systemd/system/irqbalance.service.d 2>/dev/null || true
     ''',
       ],
       'Live servis kalıntıları tamamen temizlenemedi.',
@@ -296,7 +547,19 @@ EOF
     await _runOptionalCommand(
       ctx,
       'chroot',
-      ['/mnt', 'rm', '-f', '/etc/xdg/autostart/ro-Installer.desktop'],
+      [
+        '/mnt',
+        'sh',
+        '-c',
+        '''
+      rm -f /etc/xdg/autostart/ro-Installer.desktop 2>/dev/null || true
+      rm -f /usr/share/applications/ro-installer.desktop 2>/dev/null || true
+      rm -f /usr/bin/ro-installer /usr/bin/ro_installer 2>/dev/null || true
+      rm -rf /usr/lib/ro-installer /usr/lib64/ro-installer 2>/dev/null || true
+      rm -f /usr/libexec/ro-installer-launcher.sh 2>/dev/null || true
+      rm -f /usr/share/polkit-1/actions/org.roasd.installer.policy 2>/dev/null || true
+    ''',
+      ],
       'Kurulu sistemden eski autostart girdisi temizlenemedi.',
       allowedExitCodes: const [0, 1],
     );
@@ -312,9 +575,19 @@ EOF
         '''
       userdel -r liveuser 2>/dev/null || true
       rm -f /etc/sudoers.d/ro-installer-live 2>/dev/null || true
+      rm -f /var/lib/AccountsService/users/liveuser 2>/dev/null || true
+      rm -f /var/lib/AccountsService/icons/liveuser 2>/dev/null || true
     ''',
       ],
       'liveuser kalıntıları tamamen temizlenemedi.',
+      allowedExitCodes: const [0, 1],
+    );
+
+    await _runOptionalCommand(
+      ctx,
+      'chroot',
+      ['/mnt', 'bash', '-c', _plasmaLauncherCleanupScript],
+      'Plasma panel launcher kalıntıları tamamen temizlenemedi.',
       allowedExitCodes: const [0, 1],
     );
 
@@ -416,6 +689,16 @@ EOF
     TargetLocaleSettings localeSettings,
   ) async {
     final packages = localeSettings.requiredPackages;
+    if (packages.isEmpty) {
+      return null;
+    }
+    if (!ctx.isMock && await _allPackagesInstalled(ctx, packages)) {
+      ctx.log(
+        'Secilen dil destek paketleri zaten kurulu: ${packages.join(', ')}',
+      );
+      return null;
+    }
+
     final ok = await ctx.runCmd(
       'chroot',
       ['/mnt', 'dnf', 'install', '-y', ...packages],
@@ -430,6 +713,180 @@ EOF
         'Secilen dil destek paketleri kurulamadı: ${packages.join(', ')}';
     ctx.log('HATA: $message');
     return StageResult.fail(message);
+  }
+
+  Future<StageResult?> _installSelectedKernelChannels(StageContext ctx) async {
+    final channels = _selectedKernelChannels(ctx.state);
+    final stableSelected = channels.contains('stable');
+    final experimentalSelected = channels.contains('experimental');
+
+    if (!stableSelected && !experimentalSelected) {
+      return StageResult.fail('En az bir Ro kernel kanali secilmelidir.');
+    }
+
+    ctx.progress(
+      0.815,
+      'stage_progress_chroot_kernel_policy',
+      'Ro depolari, kernel COPR depolari ve paket politikasi hazirlaniyor...',
+    );
+
+    var failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      _roKernelRepoScript,
+    ], 'Ro ve kernel depolari etkinlestirilemedi.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      _roKernelProtectionScript(channels),
+    ], 'Ro kernel paket korumasi yazilamadi.');
+    if (failure != null) return failure;
+
+    if (stableSelected) {
+      failure = await _verifyInstalledPackages(
+        ctx,
+        _stableKernelPackages,
+        'ro-kernel-stable paketleri hedef sistemde bulunamadi.',
+      );
+      if (failure != null) return failure;
+      ctx.log('ro-kernel-stable paketleri hedef sistemde dogrulandi.');
+    }
+
+    if (experimentalSelected) {
+      failure = await _requireCommand(ctx, 'chroot', [
+        '/mnt',
+        'sh',
+        '-c',
+        _enableExperimentalKernelRepoScript,
+      ], 'Experimental kernel COPR deposu etkinlestirilemedi.');
+      if (failure != null) return failure;
+
+      ctx.progress(
+        0.817,
+        'stage_progress_chroot_install_experimental_kernel',
+        'Experimental kernel paketleri COPR uzerinden kuruluyor...',
+      );
+
+      if (!ctx.isMock &&
+          await _allPackagesInstalled(ctx, _experimentalKernelPackages)) {
+        ctx.log(
+          'Experimental kernel paketleri zaten kurulu: ${_experimentalKernelPackages.join(', ')}',
+        );
+      } else {
+        final ok = await ctx.runCmd(
+          'chroot',
+          [
+            '/mnt',
+            'dnf',
+            '--refresh',
+            'install',
+            '-y',
+            ..._experimentalKernelPackages,
+          ],
+          ctx.log,
+          isMock: ctx.isMock,
+        );
+        if (!ok) {
+          final message =
+              'Experimental kernel paketleri COPR uzerinden kurulamadi: ${_experimentalKernelPackages.join(', ')}';
+          ctx.log('HATA: $message');
+          return StageResult.fail(message);
+        }
+        ctx.log(
+          'Experimental kernel paketleri kuruldu: ${_experimentalKernelPackages.join(', ')}',
+        );
+      }
+    }
+
+    if (!stableSelected) {
+      failure = await _requireCommand(
+        ctx,
+        'chroot',
+        ['/mnt', 'dnf', 'remove', '-y', ..._stableKernelPackages],
+        'Secilmedigi halde ro-kernel-stable paketleri kaldirilamadi.',
+      );
+      if (failure != null) return failure;
+      ctx.log(
+        'ro-kernel-stable secilmedi; stable paketleri hedef sistemden kaldirildi.',
+      );
+    }
+
+    ctx.progress(
+      0.818,
+      'stage_progress_chroot_kernel_policy',
+      'Fedora stock kernel kalintilari temizleniyor...',
+    );
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      _stockKernelRemovalScript,
+    ], 'Fedora stock kernel paketleri hedef sistemden temizlenemedi.');
+    if (failure != null) return failure;
+
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      _stockKernelExcludeScript,
+    ], 'Fedora stock kernel dnf engelleme politikasi yazilamadi.');
+    if (failure != null) return failure;
+
+    return null;
+  }
+
+  Future<StageResult?> _verifyInstalledPackages(
+    StageContext ctx,
+    List<String> packages,
+    String errorMessage,
+  ) {
+    return _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'rpm',
+      '-q',
+      ...packages,
+    ], errorMessage);
+  }
+
+  Future<bool> _allPackagesInstalled(
+    StageContext ctx,
+    List<String> packages,
+  ) async {
+    if (packages.isEmpty) {
+      return true;
+    }
+    final result = await ctx.commandRunner.run('chroot', [
+      '/mnt',
+      'rpm',
+      '-q',
+      ...packages,
+    ]);
+    return result.exitCode == 0;
+  }
+
+  String _roKernelProtectionScript(Set<String> channels) {
+    final packages = <String>[];
+    if (channels.contains('stable')) {
+      packages.addAll(_stableKernelPackages);
+    }
+    if (channels.contains('experimental')) {
+      packages.addAll(_experimentalKernelPackages);
+    }
+
+    final content = packages.toSet().toList()..sort();
+    final buffer = StringBuffer()
+      ..writeln('set -e')
+      ..writeln('mkdir -p /etc/dnf/protected.d')
+      ..writeln("cat > /etc/dnf/protected.d/ro-kernel.conf <<'EOF'");
+    for (final package in content) {
+      buffer.writeln(package);
+    }
+    buffer.writeln('EOF');
+    return buffer.toString();
   }
 
   Future<StageResult?> _requireCommand(
@@ -452,6 +909,32 @@ EOF
 
     ctx.log('HATA: $errorMessage');
     return StageResult.fail(errorMessage);
+  }
+
+  Future<StageResult?> _setUserPassword(
+    StageContext ctx,
+    String user,
+    String password,
+  ) async {
+    final result = await ctx.commandRunner.run(
+      'chroot',
+      ['/mnt', 'chpasswd'],
+      isMock: ctx.isMock,
+      onLog: (event) => ctx.log(event.displayMessage),
+      stdinText: '$user:$password\n',
+    );
+    if (result.started && result.exitCode == 0) {
+      return null;
+    }
+
+    final rawErrorDetail = result.stderr.isNotEmpty
+        ? result.stderr
+        : (result.stdout.isNotEmpty ? result.stdout : 'Ek bilgi yok');
+    final errorDetail = SecretRedactor.redactText(rawErrorDetail);
+    final message = 'Kullanıcı parolası ayarlanamadı: $user';
+    ctx.log('HATA: $message');
+    ctx.log('HATA: ${result.displayCommandLine} -> $errorDetail');
+    return StageResult.fail(message);
   }
 
   Future<void> _runOptionalCommand(
@@ -487,7 +970,8 @@ EOF
         final selectedDisk = (ctx.state['selectedDisk'] ?? '/dev/sda')
             .toString();
         final efiPart = _partitionPath(selectedDisk, 1);
-        final rootPart = _partitionPath(selectedDisk, 2);
+        final swapPart = _partitionPath(selectedDisk, 2);
+        final rootPart = _partitionPath(selectedDisk, 3);
 
         final rootEntry = await _makeFsEntry(
           ctx,
@@ -520,12 +1004,16 @@ EOF
         );
         if (efiEntry == null) return const [];
         entries.add(efiEntry);
+        final swapEntry = await _makeSwapEntry(ctx, swapPart);
+        if (swapEntry == null) return const [];
+        entries.add(swapEntry);
         return entries;
 
       case 'alongside':
+      case 'free_space':
         final rootPart = (ctx.state['_resolvedRootPart'] ?? '').toString();
         if (rootPart.isEmpty && !ctx.isMock) {
-          ctx.log('HATA: Alongside kurulum için root bölümü çözümlenmemiş.');
+          ctx.log('HATA: Dual boot kurulum için root bölümü çözümlenmemiş.');
           return const [];
         }
 
@@ -799,6 +1287,36 @@ EOF
 
     return buffer.toString().trimRight();
   }
+}
+
+Set<String> _selectedKernelChannels(Map<String, dynamic> state) {
+  final raw = state['selectedKernelChannels'];
+  if (raw is Iterable) {
+    final channels = raw
+        .map((entry) => entry.toString().trim().toLowerCase())
+        .where((entry) => entry.isNotEmpty)
+        .toSet();
+    return channels.isEmpty ? {'stable'} : channels;
+  }
+
+  if (raw is String && raw.trim().isNotEmpty) {
+    final channels = raw
+        .split(RegExp(r'[, ]+'))
+        .map((entry) => entry.trim().toLowerCase())
+        .where((entry) => entry.isNotEmpty)
+        .toSet();
+    return channels.isEmpty ? {'stable'} : channels;
+  }
+
+  final legacyKernel = (state['kernel'] ?? state['kernelType'] ?? '')
+      .toString()
+      .trim()
+      .toLowerCase();
+  if (legacyKernel == 'experimental') {
+    return {'stable', 'experimental'};
+  }
+
+  return {'stable'};
 }
 
 class _FstabEntry {

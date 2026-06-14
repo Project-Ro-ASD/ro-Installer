@@ -7,7 +7,7 @@ import 'stage_result.dart';
 /// AŞAMA 2: Bölümleme (Partitioning)
 ///
 /// Seçilen yönteme göre disk bölümlerini oluşturur:
-/// - 'full': Tüm diski silip EFI + Root oluşturur
+/// - 'full': Tüm diski silip EFI + SWAP + Root oluşturur
 /// - 'alongside': Mevcut sisteme zarar vermeden yanına SWAP + Root oluşturur
 /// - 'manual': Kullanıcının UI'da belirlediği planı uygular (format işlemi bir sonraki aşamada)
 ///
@@ -16,7 +16,9 @@ class PartitioningStage {
   const PartitioningStage();
 
   static const int _minAlongsideLinuxBytes = 40 * 1024 * 1024 * 1024;
+  static const int _minRootBytes = 40 * 1024 * 1024 * 1024;
   static const int _minSourcePartitionBytes = 40 * 1024 * 1024 * 1024;
+  static const int _sourcePartitionExtraMarginBytes = 10 * 1024 * 1024 * 1024;
   static const int _filesystemSafetyMarginBytes = 64 * 1024 * 1024;
   static const int _gptFirstUsableSector = 34;
 
@@ -47,6 +49,8 @@ class PartitioningStage {
         return _fullDiskPartition(ctx, selectedDisk);
       case 'alongside':
         return _alongsidePartition(ctx, selectedDisk);
+      case 'free_space':
+        return _freeSpacePartition(ctx, selectedDisk);
       case 'manual':
         return _manualPartition(ctx, selectedDisk);
       default:
@@ -56,7 +60,8 @@ class PartitioningStage {
     }
   }
 
-  /// Tüm diski silip yeniden bölümlendirir: EFI (512MB) + Root (kalan)
+  /// Tüm diski silip yeniden bölümlendirir:
+  /// EFI (512MB) + hibernate uyumlu SWAP + Root (kalan)
   Future<StageResult> _fullDiskPartition(
     StageContext ctx,
     String selectedDisk,
@@ -81,6 +86,21 @@ class PartitioningStage {
       'Tüm disk sıfırlanıyor ve yapılandırılıyor: $selectedDisk',
       {'disk': selectedDisk},
     );
+
+    final ramMB = await _getSystemRamMB(ctx);
+    final swapMB = _calculateSwapMB(ramMB);
+    final swapBytes = swapMB * 1024 * 1024;
+    final diskBytes = await _readDiskSizeBytes(ctx, selectedDisk);
+    if (diskBytes != null) {
+      final requiredBytes = 512 * 1024 * 1024 + swapBytes + _minRootBytes;
+      if (diskBytes < requiredBytes) {
+        return StageResult.fail(
+          'Disk hibernate uyumlu SWAP ve en az 40 GB root alanı için küçük. '
+          'Gereken minimum: ${_bytesToGiB(requiredBytes)} GB.',
+        );
+      }
+    }
+    ctx.log('Sistem RAM: ${ramMB}MB → Hibernate uyumlu SWAP: ${swapMB}MB');
 
     final hasSgdisk = await _hasCommand(ctx, 'sgdisk');
 
@@ -107,7 +127,24 @@ class PartitioningStage {
 
       if (!await ctx.runCmd(
         'sgdisk',
-        ['-n', '2:0:0', selectedDisk],
+        [
+          '-n',
+          '2:0:+${swapMB}M',
+          '-t',
+          '2:8200',
+          '-c',
+          '2:RoASD_Swap',
+          selectedDisk,
+        ],
+        ctx.log,
+        isMock: ctx.isMock,
+      )) {
+        return StageResult.fail('SWAP bölümü oluşturulamadı.');
+      }
+
+      if (!await ctx.runCmd(
+        'sgdisk',
+        ['-n', '3:0:0', '-t', '3:8300', '-c', '3:RoASD_Root', selectedDisk],
         ctx.log,
         isMock: ctx.isMock,
       )) {
@@ -154,7 +191,24 @@ class PartitioningStage {
 
       if (!await ctx.runCmd(
         'parted',
-        ['-s', selectedDisk, 'mkpart', 'ROOT', '513MiB', '100%'],
+        [
+          '-s',
+          selectedDisk,
+          'mkpart',
+          'SWAP',
+          'linux-swap',
+          '513MiB',
+          '${513 + swapMB}MiB',
+        ],
+        ctx.log,
+        isMock: ctx.isMock,
+      )) {
+        return StageResult.fail('SWAP bölümü parted ile oluşturulamadı.');
+      }
+
+      if (!await ctx.runCmd(
+        'parted',
+        ['-s', selectedDisk, 'mkpart', 'ROOT', '${513 + swapMB}MiB', '100%'],
         ctx.log,
         isMock: ctx.isMock,
       )) {
@@ -166,11 +220,13 @@ class PartitioningStage {
     await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
     await Future.delayed(Duration(seconds: ctx.isMock ? 0 : 3));
 
+    ctx.state['_resolvedSwapPart'] = _partitionPath(selectedDisk, 2);
+    ctx.state['_resolvedRootPart'] = _partitionPath(selectedDisk, 3);
     ctx.log('[AŞAMA 2] Tam disk bölümleme tamamlandı.');
     return StageResult.ok(
       ctx.t(
         'stage_result_partition_full_done',
-        'Tam disk bölümleme tamamlandı: EFI + Root',
+        'Tam disk bölümleme tamamlandı: EFI + SWAP + Root',
       ),
     );
   }
@@ -189,6 +245,14 @@ class PartitioningStage {
       return StageResult.fail(
         'parted bulunamadi. Yanina kurulum icin parted paketi kurulu olmali.',
       );
+    }
+
+    final preflightFailure = await _preflightAlongsideInstall(
+      ctx,
+      selectedDisk,
+    );
+    if (preflightFailure != null) {
+      return preflightFailure;
     }
 
     final double linuxGB =
@@ -224,10 +288,12 @@ class PartitioningStage {
     final int ramMB = await _getSystemRamMB(ctx);
     final int swapMB = _calculateSwapMB(ramMB);
     final int swapBytes = swapMB * 1024 * 1024;
-    ctx.log('Sistem RAM: ${ramMB}MB → Hesaplanan SWAP: ${swapMB}MB');
-    if (targetLinuxBytes <= swapBytes) {
+    final requiredLinuxBytes = swapBytes + _minRootBytes;
+    ctx.log('Sistem RAM: ${ramMB}MB → Hibernate uyumlu SWAP: ${swapMB}MB');
+    if (targetLinuxBytes < requiredLinuxBytes) {
       return StageResult.fail(
-        'Secilen yanina kurulum alani SWAP icin bile yeterli degil. En az 40 GB ayirmaniz gerekiyor.',
+        'Secilen yanina kurulum alani hibernate uyumlu SWAP ve en az 40 GB root icin yeterli degil. '
+        'En az ${_bytesToGiB(requiredLinuxBytes)} GB ayirmaniz gerekiyor.',
       );
     }
 
@@ -327,9 +393,12 @@ class PartitioningStage {
         final newCandidateEnd = desiredLayout.swapStartSector - 1;
         final newCandidateSizeBytes =
             (newCandidateEnd - candidateStart + 1) * sectorSize;
-        if (newCandidateSizeBytes < _minSourcePartitionBytes) {
+        final minimumSourceBytes = _minimumSourcePartitionBytes(
+          candidateSizeBytes,
+        );
+        if (newCandidateSizeBytes < minimumSourceBytes) {
           return StageResult.fail(
-            'Kaynak bolumde en az 40 GB birakilamiyor. Daha kucuk bir Linux alani secin.',
+            'Kaynak bolumde guvenli tampon alan birakilamiyor. Daha kucuk bir Linux alani secin.',
           );
         }
 
@@ -405,17 +474,273 @@ class PartitioningStage {
     }
 
     // Kernel'ın yeni bölüm tablosunu okuması için bekle
-    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
-    await Future.delayed(Duration(seconds: ctx.isMock ? 0 : 3));
+    await _rescanDisk(ctx, selectedDisk);
 
     ctx.log(
       'Alongside yerlesimi → SWAP: ${resolvedLayout.swapStartSector}-${resolvedLayout.swapEndSector}, ROOT: ${resolvedLayout.rootStartSector}-${resolvedLayout.rootEndSector}',
     );
+    ctx.state['_resolvedSwapStartSector'] = resolvedLayout.swapStartSector;
+    ctx.state['_resolvedRootStartSector'] = resolvedLayout.rootStartSector;
     ctx.log('[AŞAMA 2] Yanına kurulum bölümleme tamamlandı.');
     return StageResult.ok(
       ctx.t(
         'stage_result_partition_alongside_done',
         'Yanına kurulum bölümleme tamamlandı: SWAP + Root',
+      ),
+    );
+  }
+
+  Future<StageResult?> _preflightAlongsideInstall(
+    StageContext ctx,
+    String selectedDisk,
+  ) async {
+    ctx.progress(
+      0.03,
+      'stage_progress_partition_preflight',
+      'Yanına kurulum güvenlik ön kontrolü yapılıyor...',
+    );
+
+    final blockers = _readStringSet(ctx.state['alongsideBlockers']);
+    const hardBlockers = {
+      'boot_mode_not_uefi',
+      'partition_table_not_gpt',
+      'missing_efi',
+      'bitlocker_enabled',
+      'ntfs_hibernated_or_fast_startup',
+      'ntfs_check_failed',
+      'ntfs_resize_tool_missing',
+    };
+    for (final blocker in hardBlockers) {
+      if (blockers.contains(blocker)) {
+        return StageResult.fail(_alongsideBlockerMessage(blocker));
+      }
+    }
+
+    final bootMode = (ctx.state['diskBootMode'] ?? '').toString();
+    if (bootMode.isNotEmpty && bootMode != 'unknown' && bootMode != 'uefi') {
+      return StageResult.fail(_alongsideBlockerMessage('boot_mode_not_uefi'));
+    }
+    if (!ctx.isMock && (bootMode.isEmpty || bootMode == 'unknown')) {
+      final uefiResult = await ctx.commandRunner.run('test', [
+        '-d',
+        '/sys/firmware/efi',
+      ]);
+      if (uefiResult.exitCode != 0) {
+        return StageResult.fail(_alongsideBlockerMessage('boot_mode_not_uefi'));
+      }
+    }
+
+    var partitionTable = (ctx.state['diskPartitionTable'] ?? '')
+        .toString()
+        .toLowerCase();
+    if (!ctx.isMock &&
+        (partitionTable.isEmpty || partitionTable == 'unknown')) {
+      final pttypeResult = await ctx.commandRunner.run('lsblk', [
+        '-dn',
+        '-o',
+        'PTTYPE',
+        selectedDisk,
+      ]);
+      if (pttypeResult.exitCode == 0) {
+        partitionTable = pttypeResult.stdout.trim().toLowerCase();
+      }
+    }
+    if (partitionTable.isNotEmpty &&
+        partitionTable != 'unknown' &&
+        partitionTable != 'gpt') {
+      return StageResult.fail(
+        _alongsideBlockerMessage('partition_table_not_gpt'),
+      );
+    }
+    if (!ctx.isMock &&
+        (partitionTable.isEmpty || partitionTable == 'unknown')) {
+      return StageResult.fail(
+        _alongsideBlockerMessage('partition_table_not_gpt'),
+      );
+    }
+
+    final hasExistingEfiValue = ctx.state['hasExistingEfi'];
+    final existingEfiPartition = (ctx.state['existingEfiPartition'] ?? '')
+        .toString();
+    if (hasExistingEfiValue == false ||
+        (!ctx.isMock &&
+            hasExistingEfiValue != true &&
+            existingEfiPartition.isEmpty)) {
+      return StageResult.fail(_alongsideBlockerMessage('missing_efi'));
+    }
+
+    return null;
+  }
+
+  /// Onceden ayrilmis bos alana SWAP + Root bolumleri olusturur.
+  ///
+  /// Bu akista mevcut bolum kucultme veya tasima yapilmaz. UI tarafinda
+  /// secilen `selectedFreeSpace` segmentinin sector araligi kullanilir.
+  Future<StageResult> _freeSpacePartition(
+    StageContext ctx,
+    String selectedDisk,
+  ) async {
+    if (!await _hasCommand(ctx, 'sgdisk')) {
+      return StageResult.fail(
+        'sgdisk bulunamadi. Ayrilmis alana kurulum icin gdisk/sgdisk paketi kurulu olmali.',
+      );
+    }
+
+    final hasExistingEfi = ctx.state['hasExistingEfi'] == true;
+    final existingEfiPart = (ctx.state['existingEfiPartition'] ?? '')
+        .toString();
+    if (!hasExistingEfi || existingEfiPart.isEmpty) {
+      return StageResult.fail(
+        'Ayrilmis alana kurulum icin mevcut ve kullanilabilir bir EFI bolumu gerekli.',
+      );
+    }
+    final partitionTable = (ctx.state['diskPartitionTable'] ?? '').toString();
+    if (partitionTable.isNotEmpty &&
+        partitionTable != 'unknown' &&
+        partitionTable != 'gpt') {
+      return StageResult.fail(
+        'Ayrilmis alana kurulum yalnizca GPT disklerde desteklenir.',
+      );
+    }
+
+    if (!ctx.isMock) {
+      final uefiResult = await ctx.commandRunner.run('test', [
+        '-d',
+        '/sys/firmware/efi',
+      ]);
+      if (uefiResult.exitCode != 0) {
+        return StageResult.fail(
+          'Ayrilmis alana kurulum yalnizca UEFI modunda desteklenir.',
+        );
+      }
+    }
+
+    final selectedFreeSpace =
+        ctx.state['selectedFreeSpace'] as Map<String, dynamic>? ?? const {};
+    final freeStart = selectedFreeSpace['startSector'] as int?;
+    final freeEnd = selectedFreeSpace['endSector'] as int?;
+    if (freeStart == null || freeEnd == null || freeEnd <= freeStart) {
+      return StageResult.fail(
+        'Ayrilmis alana kurulum icin gecerli bir bos alan secilmedi.',
+      );
+    }
+
+    ctx.progress(
+      0.05,
+      'stage_progress_partition_backup_table',
+      'Güvenlik: Mevcut bölüm tablosu yedekleniyor...',
+    );
+    const backupPath = '/tmp/gpt_backup_free_space.bin';
+    if (!await ctx.runCmd(
+      'sgdisk',
+      ['--backup=$backupPath', selectedDisk],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      return StageResult.fail(
+        'GPT yedegi alinamadi. Ayrilmis alana kurulum baslatilamiyor.',
+      );
+    }
+
+    final int ramMB = await _getSystemRamMB(ctx);
+    final int swapMB = _calculateSwapMB(ramMB);
+    final int swapBytes = swapMB * 1024 * 1024;
+    final int sectorSize = await _readSectorSize(ctx, selectedDisk);
+    final int freeBytes = _sectorsToBytes(freeEnd - freeStart + 1, sectorSize);
+    final int requiredBytes = swapBytes + _minRootBytes;
+    ctx.log(
+      'Ayrilmis alan: ${_bytesToGiB(freeBytes)} GB, RAM: ${ramMB}MB → SWAP: ${swapMB}MB',
+    );
+    if (freeBytes < requiredBytes) {
+      return StageResult.fail(
+        'Secilen bos alan hibernate uyumlu SWAP ve en az 40 GB root icin yeterli degil. '
+        'Gereken minimum: ${_bytesToGiB(requiredBytes)} GB.',
+      );
+    }
+
+    final alignSectors = ((1024 * 1024) / sectorSize).ceil();
+    final swapSectors = _bytesToSectors(swapBytes, sectorSize);
+    final swapStart = _alignUp(freeStart, alignSectors);
+    final swapEnd = swapStart + swapSectors - 1;
+    final rootStart = _alignUp(swapEnd + 1, alignSectors);
+    final rootEnd = freeEnd;
+    final rootBytes = _sectorsToBytes(rootEnd - rootStart + 1, sectorSize);
+    final layout = rootStart <= rootEnd && rootBytes >= _minRootBytes
+        ? _AlongsideLayout(
+            swapStartSector: swapStart,
+            swapEndSector: swapEnd,
+            rootStartSector: rootStart,
+            rootEndSector: rootEnd,
+          )
+        : null;
+    if (layout == null) {
+      return StageResult.fail(
+        'Secilen bos alanda hizalama sonrasi SWAP + Root yerlesimi hesaplanamadi.',
+      );
+    }
+
+    ctx.progress(
+      0.12,
+      'stage_progress_partition_create_swap',
+      'Ayrılmış alanda yeni SWAP bölümü oluşturuluyor...',
+    );
+    if (!await ctx.runCmd(
+      'sgdisk',
+      [
+        '-n',
+        '0:${layout.swapStartSector}:${layout.swapEndSector}',
+        '-t',
+        '0:8200',
+        '-c',
+        '0:RoASD_Swap',
+        selectedDisk,
+      ],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      await _restoreAlongsideBackup(ctx, selectedDisk, backupPath: backupPath);
+      return StageResult.fail('SWAP bolumu olusturulamadi.');
+    }
+
+    ctx.progress(
+      0.18,
+      'stage_progress_partition_create_root',
+      'Ayrılmış alanda yeni kök dizin bölümü oluşturuluyor...',
+    );
+    if (!await ctx.runCmd(
+      'sgdisk',
+      [
+        '-n',
+        '0:${layout.rootStartSector}:${layout.rootEndSector}',
+        '-t',
+        '0:8300',
+        '-c',
+        '0:RoASD_Root',
+        selectedDisk,
+      ],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      await _restoreAlongsideBackup(ctx, selectedDisk, backupPath: backupPath);
+      return StageResult.fail('Root bölümü oluşturulamadı.');
+    }
+
+    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
+    if (!ctx.isMock) {
+      await ctx.runCmd('udevadm', ['settle'], ctx.log, isMock: ctx.isMock);
+      await Future.delayed(const Duration(seconds: 2));
+    }
+
+    ctx.state['_resolvedSwapStartSector'] = layout.swapStartSector;
+    ctx.state['_resolvedRootStartSector'] = layout.rootStartSector;
+    ctx.log(
+      'Ayrilmis alan yerlesimi → SWAP: ${layout.swapStartSector}-${layout.swapEndSector}, ROOT: ${layout.rootStartSector}-${layout.rootEndSector}',
+    );
+    ctx.log('[AŞAMA 2] Ayrılmış alana kurulum bölümleme tamamlandı.');
+    return StageResult.ok(
+      ctx.t(
+        'stage_result_partition_free_space_done',
+        'Ayrılmış alana kurulum bölümleme tamamlandı: SWAP + Root',
       ),
     );
   }
@@ -442,6 +767,18 @@ class PartitioningStage {
       'stage_progress_partition_apply_manual_plan',
       'Manuel plan diske uygulanıyor...',
     );
+
+    const manualBackupPath = '/tmp/gpt_backup_manual.bin';
+    if (!await ctx.runCmd(
+      'sgdisk',
+      ['--backup=$manualBackupPath', selectedDisk],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      return StageResult.fail(
+        'GPT yedegi alinamadi. Manuel bolumleme guvenli sekilde baslatilamiyor.',
+      );
+    }
 
     // 1. Mevcut bölümleri tespit et (Silinenleri bulmak için)
     final currentPartsResult = await ctx.commandRunner.run('lsblk', [
@@ -490,7 +827,72 @@ class PartitioningStage {
     final sectorSize = await _readSectorSize(ctx, selectedDisk);
     final alignSectors = (kManualPartitionAlignmentBytes / sectorSize).ceil();
 
-    // 3. YENİ Bölümleri oluştur
+    // 3. Mevcut bölümlerde planlanmış küçültmeleri uygula
+    for (final rawPart in manualPartitions) {
+      final p = rawPart as Map<String, dynamic>;
+      if (p['isFreeSpace'] == true || p['isResized'] != true) {
+        continue;
+      }
+
+      final name = (p['name'] ?? '').toString();
+      if (name.isEmpty || name.startsWith('New Partition')) {
+        return StageResult.fail('Manuel resize icin gecersiz bolum adi: $name');
+      }
+
+      final diskLayout = await _readDiskLayout(ctx, selectedDisk, sectorSize);
+      if (diskLayout == null) {
+        return StageResult.fail(
+          'Disk yerlesimi okunamadi. Manuel resize durduruldu.',
+        );
+      }
+
+      final candidate = diskLayout.partitions
+          .cast<Map<String, dynamic>?>()
+          .firstWhere(
+            (part) => part != null && part['path'] == name,
+            orElse: () => null,
+          );
+      if (candidate == null) {
+        return StageResult.fail('Resize bolumu bulunamadi: $name');
+      }
+
+      final newSizeBytes = p['sizeBytes'] as int;
+      final candidateStart = candidate['startSector'] as int;
+      final candidateSizeBytes = candidate['sizeBytes'] as int;
+      final candidateNumber = candidate['number'] as int;
+      final newEndSector =
+          p['endSector'] as int? ??
+          candidateStart + _bytesToSectors(newSizeBytes, sectorSize) - 1;
+
+      if (newSizeBytes >= candidateSizeBytes) {
+        continue;
+      }
+      if (candidateNumber <= 0) {
+        return StageResult.fail('Resize bolum numarasi cozumlenemedi: $name');
+      }
+
+      ctx.progress(
+        0.08,
+        'stage_progress_partition_shrink_source',
+        'Kaynak bolum guvenli sekilde kucultuluyor...',
+      );
+      final resizeResult = await _shrinkAlongsideCandidate(
+        ctx,
+        selectedDisk: selectedDisk,
+        partitionPath: name,
+        partitionFs: _normalizeManualFsType((p['type'] ?? '').toString()),
+        partitionNumber: candidateNumber,
+        currentSizeBytes: candidateSizeBytes,
+        newPartitionSizeBytes: newSizeBytes,
+        newPartitionEndSector: newEndSector,
+        backupPath: manualBackupPath,
+      );
+      if (!resizeResult.success) {
+        return resizeResult;
+      }
+    }
+
+    // 4. YENİ Bölümleri oluştur
     // Oluşturulmuş bölümleri takip etmek için (aktifler listesi)
     final activePartNames = List<String>.from(originalPartNames)
       ..removeWhere((n) => !plannedNames.contains(n));
@@ -500,12 +902,6 @@ class PartitioningStage {
       if (p['isFreeSpace'] == true) continue;
 
       final name = p['name'] as String;
-
-      if (p['isResized'] == true) {
-        ctx.log(
-          'UYARI: Bölüm boyutlandırma (Resize) canlı kurulumda desteklenmez. Bölüm ($name) orijinal boyutunda kalacaktır.',
-        );
-      }
 
       // UI tarafından 'New Partition' olarak isimlendirilmiş yeni bölümler
       if (name.startsWith('New Partition') || name == 'New Partition') {
@@ -519,10 +915,25 @@ class PartitioningStage {
           );
         }
 
-        final largestFreeRange = _findLargestAlignedFreeRange(
-          diskLayout,
-          alignSectors,
+        final requestedSectors = _bytesToSectors(
+          requestedSizeBytes,
+          sectorSize,
         );
+        final plannedStartSector = p['startSector'] as int?;
+        final plannedEndSector =
+            p['endSector'] as int? ??
+            (plannedStartSector == null
+                ? null
+                : plannedStartSector + requestedSectors - 1);
+        final largestFreeRange =
+            plannedStartSector != null && plannedEndSector != null
+            ? _findAlignedFreeRangeForPlannedPartition(
+                diskLayout,
+                plannedStartSector: plannedStartSector,
+                plannedEndSector: plannedEndSector,
+                alignSectors: alignSectors,
+              )
+            : _findLargestAlignedFreeRange(diskLayout, alignSectors);
         if (largestFreeRange == null) {
           return StageResult.fail('Yeni bolum icin uygun bos alan bulunamadi.');
         }
@@ -771,6 +1182,39 @@ class PartitioningStage {
     return bestRange;
   }
 
+  _FreeRange? _findAlignedFreeRangeForPlannedPartition(
+    _DiskLayout layout, {
+    required int plannedStartSector,
+    required int plannedEndSector,
+    required int alignSectors,
+  }) {
+    var cursor = _gptFirstUsableSector;
+
+    _FreeRange? matchRange(int rawStart, int rawEnd) {
+      final alignedStart = _alignUp(rawStart, alignSectors);
+      final start = _alignUp(
+        plannedStartSector < alignedStart ? alignedStart : plannedStartSector,
+        alignSectors,
+      );
+      if (start > rawEnd || plannedEndSector > rawEnd) {
+        return null;
+      }
+      return _FreeRange(startSector: start, endSector: rawEnd);
+    }
+
+    for (final partition in layout.partitions) {
+      final partitionStart = partition['startSector'] as int;
+      final partitionEnd = partition['endSector'] as int;
+      final range = matchRange(cursor, partitionStart - 1);
+      if (range != null) {
+        return range;
+      }
+      cursor = partitionEnd + 1;
+    }
+
+    return matchRange(cursor, layout.lastUsableSector);
+  }
+
   _AlongsideLayout? _planAlongsideLayout({
     required int freeStart,
     required int freeEnd,
@@ -830,6 +1274,7 @@ class PartitioningStage {
     required int currentSizeBytes,
     required int newPartitionSizeBytes,
     required int newPartitionEndSector,
+    String backupPath = '/tmp/gpt_backup_alongside.bin',
   }) async {
     if (newPartitionSizeBytes >= currentSizeBytes) {
       return StageResult.ok(
@@ -845,15 +1290,26 @@ class PartitioningStage {
         : newPartitionSizeBytes;
 
     if (partitionFs == 'ntfs') {
-      if (!await _hasCommand(ctx, 'ntfsresize')) {
-        return StageResult.fail('ntfsresize bulunamadi.');
+      final safetyIssue = await _checkNtfsResizeSafety(ctx, partitionPath);
+      if (safetyIssue != null) {
+        return StageResult.fail(_alongsideBlockerMessage(safetyIssue));
       }
+      ctx.progress(
+        0.12,
+        'stage_progress_partition_resize_ntfs',
+        'NTFS dosya sistemi küçültülüyor...',
+      );
       if (!await ctx.runCmd(
         'ntfsresize',
         ['--force', '--size', '$fsTargetBytes', partitionPath],
         ctx.log,
         isMock: ctx.isMock,
       )) {
+        await _restoreAlongsideBackup(
+          ctx,
+          selectedDisk,
+          backupPath: backupPath,
+        );
         return StageResult.fail(
           'NTFS dosya sistemi kucultulemedi: $partitionPath',
         );
@@ -865,6 +1321,11 @@ class PartitioningStage {
           'EXT4 shrink araci eksik. e2fsck ve resize2fs gerekli.',
         );
       }
+      ctx.progress(
+        0.12,
+        'stage_progress_partition_check_ext4',
+        'EXT4 dosya sistemi denetleniyor...',
+      );
       if (!await ctx.runCmd(
         'e2fsck',
         ['-f', '-p', partitionPath],
@@ -877,15 +1338,44 @@ class PartitioningStage {
         );
       }
       final resizeKiB = fsTargetBytes ~/ 1024;
+      ctx.progress(
+        0.13,
+        'stage_progress_partition_resize_ext4',
+        'EXT4 dosya sistemi küçültülüyor...',
+      );
       if (!await ctx.runCmd(
         'resize2fs',
         [partitionPath, '${resizeKiB}K'],
         ctx.log,
         isMock: ctx.isMock,
       )) {
+        await _restoreAlongsideBackup(
+          ctx,
+          selectedDisk,
+          backupPath: backupPath,
+        );
         return StageResult.fail(
           'EXT4 dosya sistemi kucultulemedi: $partitionPath',
         );
+      }
+    } else if (partitionFs == 'btrfs') {
+      ctx.progress(
+        0.12,
+        'stage_progress_partition_resize_btrfs',
+        'BTRFS dosya sistemi küçültülüyor...',
+      );
+      final btrfsResult = await _shrinkBtrfsFilesystem(
+        ctx,
+        partitionPath: partitionPath,
+        fsTargetBytes: fsTargetBytes,
+      );
+      if (!btrfsResult.success) {
+        await _restoreAlongsideBackup(
+          ctx,
+          selectedDisk,
+          backupPath: backupPath,
+        );
+        return btrfsResult;
       }
     } else {
       return StageResult.fail(
@@ -893,6 +1383,11 @@ class PartitioningStage {
       );
     }
 
+    ctx.progress(
+      0.14,
+      'stage_progress_partition_resize_partition_entry',
+      'Bölüm tablosundaki kaynak bölüm sınırı güncelleniyor...',
+    );
     if (!await ctx.runCmd(
       'parted',
       [
@@ -907,16 +1402,18 @@ class PartitioningStage {
       ctx.log,
       isMock: ctx.isMock,
     )) {
-      await _restoreAlongsideBackup(ctx, selectedDisk);
+      await _restoreAlongsideBackup(ctx, selectedDisk, backupPath: backupPath);
       return StageResult.fail(
         'Bölüm sonu güvenli şekilde küçültülemedi: $partitionPath',
       );
     }
 
-    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
-    if (!ctx.isMock) {
-      await Future.delayed(const Duration(seconds: 2));
-    }
+    ctx.progress(
+      0.15,
+      'stage_progress_partition_rescan_disk',
+      'Disk bölümleri yeniden taranıyor...',
+    );
+    await _rescanDisk(ctx, selectedDisk);
 
     ctx.log(
       'Shrink tamamlandi: $partitionPath → yeni boyut ${newPartitionSizeBytes ~/ (1024 * 1024 * 1024)} GB',
@@ -926,18 +1423,327 @@ class PartitioningStage {
     );
   }
 
+  Future<StageResult> _shrinkBtrfsFilesystem(
+    StageContext ctx, {
+    required String partitionPath,
+    required int fsTargetBytes,
+  }) async {
+    if (!await _hasCommand(ctx, 'btrfs')) {
+      return StageResult.fail('BTRFS shrink araci eksik: btrfs-progs gerekli.');
+    }
+
+    final mountPoint =
+        '/tmp/ro-installer-btrfs-shrink-${_safePathComponent(partitionPath)}';
+    var mounted = false;
+
+    Future<StageResult> failAfterUnmount(String message) async {
+      if (mounted) {
+        await ctx.runCmd('umount', [mountPoint], ctx.log, isMock: ctx.isMock);
+      }
+      return StageResult.fail(message);
+    }
+
+    if (!await ctx.runCmd(
+      'mkdir',
+      ['-p', mountPoint],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      return StageResult.fail('BTRFS gecici baglama dizini olusturulamadi.');
+    }
+
+    if (!await ctx.runCmd(
+      'mount',
+      ['-o', 'subvolid=5', partitionPath, mountPoint],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      if (!await ctx.runCmd(
+        'mount',
+        [partitionPath, mountPoint],
+        ctx.log,
+        isMock: ctx.isMock,
+      )) {
+        return StageResult.fail(
+          'BTRFS bolumu gecici olarak baglanamadi: $partitionPath',
+        );
+      }
+    }
+    mounted = true;
+
+    final showResult = await ctx.commandRunner.run('btrfs', [
+      'filesystem',
+      'show',
+      '--raw',
+      mountPoint,
+    ]);
+    if (showResult.exitCode != 0) {
+      return failAfterUnmount('BTRFS aygit bilgisi okunamadi.');
+    }
+    final deviceCount = _parseBtrfsDeviceCount(showResult.stdout);
+    if (deviceCount != null && deviceCount > 1) {
+      return failAfterUnmount(
+        'Cok aygitli BTRFS dosya sistemi otomatik kucultme icin desteklenmiyor.',
+      );
+    }
+
+    final minSizeResult = await ctx.commandRunner.run('btrfs', [
+      'inspect-internal',
+      'min-dev-size',
+      mountPoint,
+    ]);
+    final minSizeBytes = minSizeResult.exitCode == 0
+        ? _parseFirstInteger(minSizeResult.stdout)
+        : null;
+    if (minSizeBytes == null) {
+      return failAfterUnmount(
+        'BTRFS minimum shrink siniri okunamadi; guvenli olmayan resize durduruldu.',
+      );
+    }
+    if (fsTargetBytes <= minSizeBytes + _filesystemSafetyMarginBytes) {
+      return failAfterUnmount(
+        'BTRFS bolumu istenen boyuta guvenli sekilde kucultulemiyor.',
+      );
+    }
+
+    if (!await ctx.runCmd(
+      'btrfs',
+      ['filesystem', 'resize', '$fsTargetBytes', mountPoint],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      return failAfterUnmount(
+        'BTRFS dosya sistemi kucultulemedi: $partitionPath',
+      );
+    }
+
+    await ctx.runCmd('sync', const <String>[], ctx.log, isMock: ctx.isMock);
+    if (!await ctx.runCmd(
+      'umount',
+      [mountPoint],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      return StageResult.fail(
+        'BTRFS gecici baglama noktasi ayrilamadi: $mountPoint',
+      );
+    }
+    mounted = false;
+
+    return StageResult.ok('BTRFS shrink tamamlandi.');
+  }
+
+  int? _parseBtrfsDeviceCount(String output) {
+    final totalMatch = RegExp(
+      r'Total\s+devices\s+(\d+)',
+      caseSensitive: false,
+    ).firstMatch(output);
+    if (totalMatch != null) {
+      return int.tryParse(totalMatch.group(1)!);
+    }
+    final deviceMatches = RegExp(
+      r'^\s*devid\s+\d+',
+      multiLine: true,
+      caseSensitive: false,
+    ).allMatches(output);
+    if (deviceMatches.isNotEmpty) {
+      return deviceMatches.length;
+    }
+    return null;
+  }
+
+  int? _parseFirstInteger(String output) {
+    final match = RegExp(r'\d+').firstMatch(output);
+    return match == null ? null : int.tryParse(match.group(0)!);
+  }
+
+  String _safePathComponent(String value) {
+    return value.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+  }
+
+  Set<String> _readStringSet(Object? rawValue) {
+    if (rawValue is Iterable) {
+      return rawValue.map((value) => value.toString()).toSet();
+    }
+    if (rawValue is String && rawValue.isNotEmpty) {
+      return {rawValue};
+    }
+    return <String>{};
+  }
+
+  String _alongsideBlockerMessage(String code) {
+    switch (code) {
+      case 'boot_mode_not_uefi':
+        return 'Yanina kurulum yalnizca UEFI modunda desteklenir. BIOS/Legacy modda mevcut EFI guvenli kullanilamaz.';
+      case 'partition_table_not_gpt':
+        return 'Yanina kurulum yalnizca GPT disklerde desteklenir. MBR/unknown bolum tablosunda otomatik resize guvenli degil.';
+      case 'missing_efi':
+        return 'Yanina kurulum icin mevcut ve kullanilabilir bir EFI bolumu gerekli.';
+      case 'bitlocker_enabled':
+        return 'BitLocker etkin gorunuyor. Windows bolumu otomatik kucultulmeyecek.';
+      case 'ntfs_hibernated_or_fast_startup':
+        return 'Windows hibernation/Fast Startup acik gorunuyor. Windows tamamen kapatilmadan NTFS kucultme yapilmiyor.';
+      case 'ntfs_dirty':
+        return 'NTFS bolumu kirli veya tutarsiz gorunuyor. Sınırlı onarım sonrası güvenli küçültme onayı alınamadı.';
+      case 'ntfs_repair_tool_missing':
+        return 'ntfsfix bulunamadi. NTFS kirli bayragi otomatik temizlenemiyor.';
+      case 'ntfs_repair_failed':
+        return 'ntfsfix NTFS kirli bayragini temizleyemedi. Windows tarafinda chkdsk/onarim gerekli.';
+      case 'ntfs_resize_tool_missing':
+        return 'ntfsresize bulunamadi. NTFS bolumu guvenli sekilde kucultulemez.';
+      case 'ntfs_check_failed':
+        return 'NTFS on kontrolu basarisiz oldu. Bolum kucultme islemi baslatilmadi.';
+      default:
+        return 'Yanina kurulum on kontrolu basarisiz: $code';
+    }
+  }
+
+  Future<String?> _checkNtfsResizeSafety(
+    StageContext ctx,
+    String partitionPath,
+  ) async {
+    if (!await _hasCommand(ctx, 'ntfsresize')) {
+      return 'ntfs_resize_tool_missing';
+    }
+
+    ctx.progress(
+      0.11,
+      'stage_progress_partition_check_ntfs',
+      'NTFS küçültme ön kontrolü yapılıyor...',
+    );
+    final stopwatch = Stopwatch()..start();
+    final result = await ctx.commandRunner.run(
+      'ntfsresize',
+      ['--info', '--force', partitionPath],
+      isMock: ctx.isMock,
+      onLog: (event) => ctx.log(event.displayMessage),
+    );
+    stopwatch.stop();
+    ctx.log(
+      '[SÜRE] ntfsresize --info --force $partitionPath -> exit=${result.exitCode} duration=${_formatDuration(stopwatch.elapsed)}',
+    );
+
+    final text = '${result.stdout}\n${result.stderr}'.toLowerCase();
+    if (text.contains('bitlocker')) {
+      return 'bitlocker_enabled';
+    }
+    if (text.contains('hibernat') ||
+        text.contains('fast restart') ||
+        text.contains('fast startup') ||
+        text.contains('resume and shutdown windows fully')) {
+      return 'ntfs_hibernated_or_fast_startup';
+    }
+    if (text.contains('dirty') ||
+        text.contains('inconsistent') ||
+        text.contains('chkdsk')) {
+      return _repairDirtyNtfsAndRecheck(ctx, partitionPath);
+    }
+    if (!result.started) {
+      return 'ntfs_resize_tool_missing';
+    }
+    if (result.exitCode != 0) {
+      return 'ntfs_check_failed';
+    }
+    return null;
+  }
+
+  Future<String?> _repairDirtyNtfsAndRecheck(
+    StageContext ctx,
+    String partitionPath,
+  ) async {
+    if (!await _hasCommand(ctx, 'ntfsfix')) {
+      return 'ntfs_repair_tool_missing';
+    }
+
+    ctx.progress(
+      0.115,
+      'stage_progress_partition_repair_ntfs',
+      'NTFS kirli bayrağı sınırlı onarımla temizleniyor...',
+    );
+    final repairStopwatch = Stopwatch()..start();
+    final repairResult = await ctx.commandRunner.run(
+      'ntfsfix',
+      ['-d', partitionPath],
+      isMock: ctx.isMock,
+      onLog: (event) => ctx.log(event.displayMessage),
+    );
+    repairStopwatch.stop();
+    ctx.log(
+      '[SÜRE] ntfsfix -d $partitionPath -> exit=${repairResult.exitCode} duration=${_formatDuration(repairStopwatch.elapsed)}',
+    );
+    if (!repairResult.started) {
+      return 'ntfs_repair_tool_missing';
+    }
+    if (repairResult.exitCode != 0) {
+      return 'ntfs_repair_failed';
+    }
+
+    final recheckStopwatch = Stopwatch()..start();
+    final recheckResult = await ctx.commandRunner.run(
+      'ntfsresize',
+      ['--info', '--force', partitionPath],
+      isMock: ctx.isMock,
+      onLog: (event) => ctx.log(event.displayMessage),
+    );
+    recheckStopwatch.stop();
+    ctx.log(
+      '[SÜRE] ntfsresize --info --force $partitionPath (onarım sonrası) -> exit=${recheckResult.exitCode} duration=${_formatDuration(recheckStopwatch.elapsed)}',
+    );
+
+    final recheckText = '${recheckResult.stdout}\n${recheckResult.stderr}'
+        .toLowerCase();
+    if (recheckText.contains('bitlocker')) {
+      return 'bitlocker_enabled';
+    }
+    if (recheckText.contains('hibernat') ||
+        recheckText.contains('fast restart') ||
+        recheckText.contains('fast startup') ||
+        recheckText.contains('resume and shutdown windows fully')) {
+      return 'ntfs_hibernated_or_fast_startup';
+    }
+    if (recheckText.contains('dirty') ||
+        recheckText.contains('inconsistent') ||
+        recheckText.contains('chkdsk')) {
+      return 'ntfs_dirty';
+    }
+    if (!recheckResult.started) {
+      return 'ntfs_resize_tool_missing';
+    }
+    if (recheckResult.exitCode != 0) {
+      return 'ntfs_check_failed';
+    }
+    return null;
+  }
+
+  String _formatDuration(Duration duration) {
+    final ms = duration.inMilliseconds;
+    if (ms < 1000) {
+      return '${ms}ms';
+    }
+    return '${(ms / 1000).toStringAsFixed(1)}s';
+  }
+
+  Future<void> _rescanDisk(StageContext ctx, String selectedDisk) async {
+    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
+    if (!ctx.isMock) {
+      await ctx.runCmd('udevadm', ['settle'], ctx.log, isMock: ctx.isMock);
+      await Future.delayed(const Duration(seconds: 2));
+    }
+  }
+
   Future<void> _restoreAlongsideBackup(
     StageContext ctx,
-    String selectedDisk,
-  ) async {
+    String selectedDisk, {
+    String backupPath = '/tmp/gpt_backup_alongside.bin',
+  }) async {
     ctx.log('UYARI: GPT yedegi geri yukleniyor...');
     await ctx.runCmd(
       'sgdisk',
-      ['--load-backup=/tmp/gpt_backup_alongside.bin', selectedDisk],
+      ['--load-backup=$backupPath', selectedDisk],
       ctx.log,
       isMock: ctx.isMock,
     );
-    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
+    await _rescanDisk(ctx, selectedDisk);
   }
 
   int _partitionNumber(String path) {
@@ -994,6 +1800,22 @@ class PartitioningStage {
     return 4096; // Varsayılan 4 GB
   }
 
+  Future<int?> _readDiskSizeBytes(StageContext ctx, String selectedDisk) async {
+    if (ctx.isMock) {
+      return null;
+    }
+
+    final result = await ctx.commandRunner.run('blockdev', [
+      '--getsize64',
+      selectedDisk,
+    ]);
+    final size = int.tryParse(result.stdout.trim());
+    if (result.exitCode == 0 && size != null && size > 0) {
+      return size;
+    }
+    return null;
+  }
+
   String _normalizeManualFsType(String fsType) {
     switch (fsType) {
       case 'vfat':
@@ -1007,10 +1829,36 @@ class PartitioningStage {
 
   /// RAM'e göre dinamik SWAP boyutu hesaplar (MB cinsinden)
   int _calculateSwapMB(int ramMB) {
-    if (ramMB <= 2048) return ramMB * 2;
-    if (ramMB <= 8192) return ramMB;
-    if (ramMB <= 16384) return ramMB ~/ 2;
-    return 8192; // 8 GB üst sınır
+    final normalizedRamMB = ramMB > 0 ? ramMB : 4096;
+    final hibernateMarginMB = normalizedRamMB <= 8192 ? 1024 : 2048;
+    final hibernateSwapMB = normalizedRamMB + hibernateMarginMB;
+    final lowRamSwapMB = normalizedRamMB <= 4096
+        ? normalizedRamMB * 2
+        : hibernateSwapMB;
+    final rawSwapMB = lowRamSwapMB > hibernateSwapMB
+        ? lowRamSwapMB
+        : hibernateSwapMB;
+    return ((rawSwapMB + 511) ~/ 512) * 512;
+  }
+
+  String _partitionPath(String disk, int partitionNumber) {
+    final needsP =
+        disk.contains('nvme') ||
+        disk.contains('loop') ||
+        disk.contains('mmcblk');
+    return needsP ? '${disk}p$partitionNumber' : '$disk$partitionNumber';
+  }
+
+  int _bytesToGiB(int bytes) {
+    return (bytes + 1024 * 1024 * 1024 - 1) ~/ (1024 * 1024 * 1024);
+  }
+
+  int _minimumSourcePartitionBytes(int currentSizeBytes) {
+    final percentReserve = (currentSizeBytes * 0.10).round();
+    final baseReserve = percentReserve > _minSourcePartitionBytes
+        ? percentReserve
+        : _minSourcePartitionBytes;
+    return baseReserve + _sourcePartitionExtraMarginBytes;
   }
 }
 

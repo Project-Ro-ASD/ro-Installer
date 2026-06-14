@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/disk_service.dart';
+import '../services/partition_service.dart';
 import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/nebula_ui.dart';
@@ -155,6 +156,36 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
 
     if (partitionMethod == 'manual') {
       state.nextStep();
+      return;
+    }
+
+    if (partitionMethod == 'free_space') {
+      if (state.selectedFreeSpace.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(state.t('disk_free_space_missing')),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      final confirmed = await _showDecisionDialog(
+        accent: const Color(0xFF8CB6FF),
+        icon: Icons.space_dashboard_rounded,
+        title: state.t('disk_free_space_confirm_title'),
+        message: state.t('disk_free_space_confirm_body', {
+          'disk': state.selectedDisk,
+          'size': _diskSizeLabel(state.selectedFreeSpace['sizeBytes']),
+          'efi': state.existingEfiPartition,
+        }),
+        confirmLabel: state.t('disk_free_space_confirm_action'),
+        cancelLabel: state.t('cancel'),
+      );
+
+      if (confirmed == true && mounted) {
+        state.nextStep();
+      }
       return;
     }
 
@@ -325,6 +356,7 @@ class _InstallationPlanPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final alongsideAvailability = _methodAvailability(state, 'alongside');
+    final freeSpaceAvailability = _methodAvailability(state, 'free_space');
     final showManual = state.installType == 'advanced';
 
     return NebulaPanel(
@@ -345,6 +377,7 @@ class _InstallationPlanPanel extends StatelessWidget {
           _CompactMethodGrid(
             state: state,
             alongsideAvailability: alongsideAvailability,
+            freeSpaceAvailability: freeSpaceAvailability,
             showManual: showManual,
           ),
         ],
@@ -820,11 +853,13 @@ class _CompactMethodGrid extends StatelessWidget {
   const _CompactMethodGrid({
     required this.state,
     required this.alongsideAvailability,
+    required this.freeSpaceAvailability,
     required this.showManual,
   });
 
   final InstallerState state;
   final _MethodAvailability alongsideAvailability;
+  final _MethodAvailability freeSpaceAvailability;
   final bool showManual;
 
   @override
@@ -850,6 +885,16 @@ class _CompactMethodGrid extends StatelessWidget {
         disabled: alongsideAvailability.disabled,
         onTap: () => state.updatePartitionMethod('alongside'),
       ),
+      if (showManual)
+        _CompactMethodOption(
+          label: state.t('disk_free_space_method'),
+          caption: state.t('disk_free_space_caption'),
+          icon: Icons.space_dashboard_rounded,
+          accent: const Color(0xFF6BE7B1),
+          selected: state.partitionMethod == 'free_space',
+          disabled: freeSpaceAvailability.disabled,
+          onTap: () => state.updatePartitionMethod('free_space'),
+        ),
       if (showManual)
         _CompactMethodOption(
           label: state.t('disk_manual'),
@@ -883,39 +928,19 @@ class _CompactMethodGrid extends StatelessWidget {
         if (alongsideAvailability.disabled &&
             alongsideAvailability.reasons.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              color: Colors.redAccent.withValues(alpha: 0.08),
-              border: Border.all(
-                color: Colors.redAccent.withValues(alpha: 0.18),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  state.t('disk_alongside_locked_title'),
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: Colors.redAccent,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ...alongsideAvailability.reasons.map(
-                  (reason) => Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Text(
-                      '• $reason',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.redAccent,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          _MethodNotice(
+            title: state.t('disk_alongside_locked_title'),
+            messages: alongsideAvailability.reasons,
+            color: Colors.redAccent,
+          ),
+        ],
+        if (!alongsideAvailability.disabled &&
+            alongsideAvailability.warnings.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _MethodNotice(
+            title: 'NTFS',
+            messages: alongsideAvailability.warnings,
+            color: Colors.orangeAccent,
           ),
         ],
         if (!alongsideAvailability.disabled &&
@@ -935,7 +960,116 @@ class _CompactMethodGrid extends StatelessWidget {
           const SizedBox(height: 12),
           _AlongsideSizeAllocator(visible: true, state: state, dense: true),
         ],
+        if (showManual &&
+            state.partitionMethod == 'free_space' &&
+            !freeSpaceAvailability.disabled) ...[
+          const SizedBox(height: 12),
+          _FreeSpaceAllocator(state: state),
+        ],
+        if (showManual &&
+            freeSpaceAvailability.disabled &&
+            state.partitionMethod == 'free_space' &&
+            freeSpaceAvailability.reasons.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _MethodLockout(
+            title: state.t('disk_free_space_locked_title'),
+            reasons: freeSpaceAvailability.reasons,
+          ),
+        ],
       ],
+    );
+  }
+}
+
+class _MethodLockout extends StatelessWidget {
+  const _MethodLockout({required this.title, required this.reasons});
+
+  final String title;
+  final List<String> reasons;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.redAccent.withValues(alpha: 0.08),
+        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: Colors.redAccent,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...reasons.map(
+            (reason) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                '- $reason',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.redAccent,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MethodNotice extends StatelessWidget {
+  const _MethodNotice({
+    required this.title,
+    required this.messages,
+    required this.color,
+  });
+
+  final String title;
+  final List<String> messages;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: color.withValues(alpha: 0.08),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.labelLarge?.copyWith(color: color),
+          ),
+          const SizedBox(height: 8),
+          ...messages.map(
+            (message) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                '- $message',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: color,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1167,6 +1301,304 @@ class _AlongsideSizeAllocator extends StatelessWidget {
   }
 }
 
+class _FreeSpaceAllocator extends StatefulWidget {
+  const _FreeSpaceAllocator({required this.state});
+
+  final InstallerState state;
+
+  @override
+  State<_FreeSpaceAllocator> createState() => _FreeSpaceAllocatorState();
+}
+
+class _FreeSpaceAllocatorState extends State<_FreeSpaceAllocator> {
+  bool _isLoading = true;
+  String _loadedDisk = '';
+  List<Map<String, dynamic>> _partitions = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPartitions();
+  }
+
+  @override
+  void didUpdateWidget(covariant _FreeSpaceAllocator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_loadedDisk != widget.state.selectedDisk) {
+      _loadPartitions();
+    }
+  }
+
+  Future<void> _loadPartitions() async {
+    final disk = widget.state.selectedDisk;
+    if (disk.isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _loadedDisk = '';
+        _partitions = const [];
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _loadedDisk = disk;
+    });
+
+    final partitions = await PartitionService.instance.getPartitions(disk);
+    if (!mounted || _loadedDisk != disk) {
+      return;
+    }
+
+    final selectionStillExists =
+        widget.state.selectedFreeSpace.isNotEmpty &&
+        partitions.any(
+          (partition) =>
+              partition['isFreeSpace'] == true &&
+              _sameFreeSpace(partition, widget.state.selectedFreeSpace),
+        );
+    if (!selectionStillExists && widget.state.selectedFreeSpace.isNotEmpty) {
+      widget.state.updateFreeSpaceSelection(null);
+    }
+
+    setState(() {
+      _partitions = partitions;
+      _isLoading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.state;
+    final theme = Theme.of(context);
+    final freeSpaces = _partitions
+        .where((partition) => partition['isFreeSpace'] == true)
+        .toList(growable: false);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: theme.colorScheme.surface.withValues(
+          alpha: theme.brightness == Brightness.dark ? 0.22 : 0.6,
+        ),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.38),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  state.t('disk_free_space_pick_title'),
+                  style: theme.textTheme.titleSmall,
+                ),
+              ),
+              IconButton(
+                tooltip: state.t('disk_target_refresh'),
+                onPressed: _isLoading ? null : _loadPartitions,
+                icon: Icon(
+                  Icons.refresh_rounded,
+                  color: theme.colorScheme.primary,
+                  size: 18,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            state.t('disk_free_space_pick_desc'),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: context.installerVisuals.mutedForeground,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (_isLoading)
+            Text(
+              state.t('disk_free_space_loading'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: context.installerVisuals.mutedForeground,
+              ),
+            )
+          else if (_partitions.isEmpty || freeSpaces.isEmpty)
+            Text(
+              state.t('disk_free_space_empty'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: Colors.orangeAccent,
+                height: 1.35,
+              ),
+            )
+          else ...[
+            _PartitionMapBar(
+              partitions: _partitions,
+              selectedFreeSpace: state.selectedFreeSpace,
+              onSelect: state.updateFreeSpaceSelection,
+            ),
+            const SizedBox(height: 12),
+            ...freeSpaces.map(
+              (freeSpace) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _FreeSpaceChoice(
+                  freeSpace: freeSpace,
+                  selected: _sameFreeSpace(freeSpace, state.selectedFreeSpace),
+                  onTap: () => state.updateFreeSpaceSelection(freeSpace),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PartitionMapBar extends StatelessWidget {
+  const _PartitionMapBar({
+    required this.partitions,
+    required this.selectedFreeSpace,
+    required this.onSelect,
+  });
+
+  final List<Map<String, dynamic>> partitions;
+  final Map<String, dynamic> selectedFreeSpace;
+  final ValueChanged<Map<String, dynamic>?> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final totalBytes = partitions.fold<int>(
+      0,
+      (sum, partition) => sum + ((partition['sizeBytes'] as int?) ?? 0),
+    );
+    if (totalBytes <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: SizedBox(
+        height: 34,
+        child: Row(
+          children: partitions.map((partition) {
+            final sizeBytes = (partition['sizeBytes'] as int?) ?? 0;
+            final flex = ((sizeBytes / totalBytes) * 1000)
+                .round()
+                .clamp(1, 1000)
+                .toInt();
+            final isFree = partition['isFreeSpace'] == true;
+            final selected =
+                isFree &&
+                selectedFreeSpace.isNotEmpty &&
+                _sameFreeSpace(partition, selectedFreeSpace);
+            final color = _partitionSegmentColor(context, partition, selected);
+
+            return Expanded(
+              flex: flex,
+              child: Material(
+                color: color,
+                child: InkWell(
+                  onTap: isFree ? () => onSelect(partition) : null,
+                  child: Tooltip(
+                    message:
+                        '${_partitionSegmentLabel(context, partition)} • ${_diskSizeLabel(sizeBytes)}',
+                    child: Center(
+                      child: selected
+                          ? const Icon(
+                              Icons.check_rounded,
+                              size: 16,
+                              color: Colors.white,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class _FreeSpaceChoice extends StatelessWidget {
+  const _FreeSpaceChoice({
+    required this.freeSpace,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Map<String, dynamic> freeSpace;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final state = Provider.of<InstallerState>(context, listen: false);
+    final size = _diskSizeLabel(freeSpace['sizeBytes']);
+    final start = freeSpace['startSector']?.toString() ?? '?';
+    final end = freeSpace['endSector']?.toString() ?? '?';
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            color: selected
+                ? const Color(0xFF6BE7B1).withValues(alpha: 0.12)
+                : theme.colorScheme.surface.withValues(alpha: 0.18),
+            border: Border.all(
+              color: selected
+                  ? const Color(0xFF6BE7B1).withValues(alpha: 0.78)
+                  : theme.colorScheme.outlineVariant.withValues(alpha: 0.36),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_off_rounded,
+                color: selected
+                    ? const Color(0xFF6BE7B1)
+                    : theme.colorScheme.outline,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      state.t('disk_free_space_selected', {'size': size}),
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Sector $start-$end',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: context.installerVisuals.mutedForeground,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AllocationStat extends StatelessWidget {
   const _AllocationStat({
     required this.label,
@@ -1354,10 +1786,15 @@ class _DiskEmptyState extends StatelessWidget {
 }
 
 class _MethodAvailability {
-  const _MethodAvailability({required this.disabled, this.reasons = const []});
+  const _MethodAvailability({
+    required this.disabled,
+    this.reasons = const [],
+    this.warnings = const [],
+  });
 
   final bool disabled;
   final List<String> reasons;
+  final List<String> warnings;
 }
 
 class _DiskTone {
@@ -1375,6 +1812,30 @@ class _DiskTone {
 }
 
 _MethodAvailability _methodAvailability(InstallerState state, String code) {
+  if (code == 'free_space') {
+    if (state.isDetectingOS) {
+      return _MethodAvailability(
+        disabled: true,
+        reasons: [state.t('disk_analysis_in_progress')],
+      );
+    }
+
+    final reasons = <String>[];
+    if (state.diskBootMode != 'uefi') {
+      reasons.add(state.t('disk_blocker_boot_mode_not_uefi'));
+    }
+    if (state.diskPartitionTable != 'gpt') {
+      reasons.add(state.t('disk_blocker_partition_table_not_gpt'));
+    }
+    if (!state.hasExistingEfi) {
+      reasons.add(state.t('disk_blocker_missing_efi'));
+    }
+    if (state.largestFreeContiguousBytes < 40 * 1024 * 1024 * 1024) {
+      reasons.add(state.t('disk_blocker_no_free_space'));
+    }
+    return _MethodAvailability(disabled: reasons.isNotEmpty, reasons: reasons);
+  }
+
   if (code != 'alongside') {
     return const _MethodAvailability(disabled: false);
   }
@@ -1387,11 +1848,16 @@ _MethodAvailability _methodAvailability(InstallerState state, String code) {
   }
 
   final reasons = _localizedAlongsideReasons(state);
+  final warnings = _localizedAlongsideWarnings(state);
   if (reasons.isNotEmpty) {
-    return _MethodAvailability(disabled: true, reasons: reasons);
+    return _MethodAvailability(
+      disabled: true,
+      reasons: reasons,
+      warnings: warnings,
+    );
   }
 
-  return const _MethodAvailability(disabled: false);
+  return _MethodAvailability(disabled: false, warnings: warnings);
 }
 
 String _alongsideCaption(InstallerState state) {
@@ -1442,8 +1908,29 @@ String _shrinkCandidateChipLabel(InstallerState state) {
 }
 
 List<String> _localizedAlongsideReasons(InstallerState state) {
+  return _localizedAlongsideCodes(
+    state,
+    state.alongsideBlockers.where(
+      (code) => !_repairableAlongsideBlockers.contains(code),
+    ),
+  );
+}
+
+List<String> _localizedAlongsideWarnings(InstallerState state) {
+  return _localizedAlongsideCodes(
+    state,
+    state.alongsideBlockers.where(_repairableAlongsideBlockers.contains),
+  );
+}
+
+const _repairableAlongsideBlockers = {'ntfs_dirty'};
+
+List<String> _localizedAlongsideCodes(
+  InstallerState state,
+  Iterable<String> codes,
+) {
   final reasons = <String>[];
-  for (final code in state.alongsideBlockers) {
+  for (final code in codes) {
     switch (code) {
       case 'boot_mode_not_uefi':
         reasons.add(state.t('disk_blocker_boot_mode_not_uefi'));
@@ -1467,6 +1954,8 @@ List<String> _localizedAlongsideReasons(InstallerState state) {
         reasons.add(state.t('disk_blocker_ext4_resize_tool_missing'));
       case 'ext4_check_tool_missing':
         reasons.add(state.t('disk_blocker_ext4_check_tool_missing'));
+      case 'btrfs_resize_tool_missing':
+        reasons.add(state.t('disk_blocker_btrfs_resize_tool_missing'));
       case 'ntfs_check_failed':
         reasons.add(state.t('disk_blocker_ntfs_check_failed'));
       case 'alongside_minimum_not_met':
@@ -1542,4 +2031,57 @@ double _alongsideSliderMax(InstallerState state) {
       ? state.alongsideMaxLinuxSizeBytes / (1024 * 1024 * 1024)
       : 40.0;
   return maxSize < 40 ? 40 : maxSize;
+}
+
+bool _sameFreeSpace(Map<String, dynamic> left, Map<String, dynamic> right) {
+  if (left.isEmpty || right.isEmpty) {
+    return false;
+  }
+  return left['startSector'] == right['startSector'] &&
+      left['endSector'] == right['endSector'];
+}
+
+Color _partitionSegmentColor(
+  BuildContext context,
+  Map<String, dynamic> partition,
+  bool selected,
+) {
+  if (selected) {
+    return const Color(0xFF6BE7B1);
+  }
+  if (partition['isFreeSpace'] == true) {
+    return const Color(0xFF6BE7B1).withValues(alpha: 0.52);
+  }
+
+  final type = (partition['type'] ?? '').toString().toLowerCase();
+  final flags = (partition['flags'] ?? '').toString().toLowerCase();
+  final theme = Theme.of(context);
+  if (type == 'fat32' || flags.contains('esp') || flags.contains('boot')) {
+    return theme.colorScheme.tertiary.withValues(alpha: 0.78);
+  }
+  if (type == 'ntfs') {
+    return const Color(0xFF8CB6FF).withValues(alpha: 0.78);
+  }
+  if (type == 'linux-swap') {
+    return Colors.orangeAccent.withValues(alpha: 0.76);
+  }
+  if (type == 'btrfs' || type == 'ext4' || type == 'xfs') {
+    return theme.colorScheme.primary.withValues(alpha: 0.74);
+  }
+  return theme.colorScheme.outline.withValues(alpha: 0.5);
+}
+
+String _partitionSegmentLabel(
+  BuildContext context,
+  Map<String, dynamic> partition,
+) {
+  if (partition['isFreeSpace'] == true) {
+    return Provider.of<InstallerState>(
+      context,
+      listen: false,
+    ).t('disk_free_space_label');
+  }
+  final name = (partition['name'] ?? '').toString();
+  final type = (partition['type'] ?? 'unknown').toString().toUpperCase();
+  return name.isEmpty ? type : '$name $type';
 }

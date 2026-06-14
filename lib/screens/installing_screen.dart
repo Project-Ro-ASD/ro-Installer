@@ -20,6 +20,10 @@ class InstallingScreen extends StatefulWidget {
 
 class _InstallingScreenState extends State<InstallingScreen>
     with SingleTickerProviderStateMixin {
+  static const int _maxStatusHistoryEntries = 1500;
+  static const int _maxTechnicalLogEntries = 3000;
+  static const Duration _autoScrollMinInterval = Duration(milliseconds: 120);
+
   double _progress = 0.0;
   String _statusText = '';
   bool _isFinished = false;
@@ -32,6 +36,7 @@ class _InstallingScreenState extends State<InstallingScreen>
   bool _startExpansion = false;
   int _currentSlide = 0;
   Timer? _slideTimer;
+  DateTime _lastLogAutoScrollAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   final List<String> _slideImages = [
     'assets/images/slide1.png',
@@ -76,17 +81,13 @@ class _InstallingScreenState extends State<InstallingScreen>
 
     setState(() {
       _technicalLogs.add(logMsg);
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+      final overflow = _technicalLogs.length - _maxTechnicalLogEntries;
+      if (overflow > 0) {
+        _technicalLogs.removeRange(0, overflow);
       }
     });
+
+    _scrollTechnicalLogsToEnd();
   }
 
   void _pushStatus(String status) {
@@ -96,6 +97,25 @@ class _InstallingScreenState extends State<InstallingScreen>
 
     setState(() {
       _statusHistory.add(status);
+      final overflow = _statusHistory.length - _maxStatusHistoryEntries;
+      if (overflow > 0) {
+        _statusHistory.removeRange(0, overflow);
+      }
+    });
+  }
+
+  void _scrollTechnicalLogsToEnd() {
+    final now = DateTime.now();
+    if (now.difference(_lastLogAutoScrollAt) < _autoScrollMinInterval) {
+      return;
+    }
+    _lastLogAutoScrollAt = now;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) {
+        return;
+      }
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
     });
   }
 
@@ -220,6 +240,7 @@ class _InstallingScreenState extends State<InstallingScreen>
       'partitionMethod': state.partitionMethod,
       'fileSystem': state.fileSystem,
       'manualPartitions': state.manualPartitions,
+      'selectedFreeSpace': state.selectedFreeSpace,
       'username': state.username,
       'password': state.password,
       'selectedRegion': state.selectedRegion,
@@ -231,10 +252,13 @@ class _InstallingScreenState extends State<InstallingScreen>
       'linuxDiskSizeGB': state.linuxDiskSizeGB,
       'hasExistingEfi': state.hasExistingEfi,
       'existingEfiPartition': state.existingEfiPartition,
+      'diskBootMode': state.diskBootMode,
+      'diskPartitionTable': state.diskPartitionTable,
       'shrinkCandidatePartition': state.shrinkCandidatePartition,
       'shrinkCandidateFs': state.shrinkCandidateFs,
       'shrinkCandidateSizeBytes': state.shrinkCandidateSizeBytes,
       'largestFreeContiguousBytes': state.largestFreeContiguousBytes,
+      'selectedKernelChannels': state.selectedKernelChannelsList,
     };
 
     _pushStatus(_statusText);
@@ -273,6 +297,7 @@ class _InstallingScreenState extends State<InstallingScreen>
         'selectedDisk': state.selectedDisk,
         'partitionMethod': state.partitionMethod,
         'fileSystem': state.fileSystem,
+        'selectedFreeSpace': state.selectedFreeSpace,
         'selectedRegion': state.selectedRegion,
         'selectedTimezone': state.selectedTimezone,
         'selectedKeyboard': state.selectedKeyboard,
@@ -283,6 +308,7 @@ class _InstallingScreenState extends State<InstallingScreen>
         'hasExistingEfi': state.hasExistingEfi,
         'shrinkCandidatePartition': state.shrinkCandidatePartition,
         'shrinkCandidateFs': state.shrinkCandidateFs,
+        'selectedKernelChannels': state.selectedKernelChannelsList,
       },
     );
 
@@ -1236,7 +1262,7 @@ class _BrandFocusCard extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(14),
                     child: Image.asset(
-                      'assets/branding/roasd-logo.png',
+                      'stitch_velvet_nebula_installer_redesign/product-logo.png',
                       fit: BoxFit.contain,
                     ),
                   ),

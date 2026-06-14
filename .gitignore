@@ -11,6 +11,12 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+__pycache__/
+.agents
+.agents/
+.codex
+.codex/
+.git.broken-*/
 
 # IntelliJ related
 *.iml
@@ -27,7 +33,6 @@ migrate_working_dir/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
-.flutter-sdk/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
@@ -47,9 +52,16 @@ app.*.map.json
 
 # Local VM test artifacts
 /outputs/
+/iso-realese/
+/rpm-outputs/
+*.iso
+*.rpm
+*.src.rpm
 /*.qcow2
 /*.fd
-/*.iso
-/linux/__pycache__/
-/tool/__pycache__/
-/dist/
+
+# Local hardware/debug captures
+/gerçeksistemdenloglar/*.txt
+
+# Generated design prototype exports kept locally for reference
+/stitch_velvet_nebula_installer_redesign/

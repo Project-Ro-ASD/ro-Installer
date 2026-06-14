@@ -42,17 +42,53 @@ class _AccountScreenState extends State<AccountScreen> {
     super.dispose();
   }
 
-  void _submit() {
-    if (_formKey.currentState!.validate()) {
-      final state = Provider.of<InstallerState>(context, listen: false);
-      state.updateAccount(
-        _nameController.text,
-        _usernameController.text,
-        _passwordController.text,
-        _isAdmin,
-      );
-      state.nextStep();
+  void _submit() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
     }
+
+    final state = Provider.of<InstallerState>(context, listen: false);
+    final weakPassword = isWeakInstallerPassword(
+      password: _passwordController.text,
+      username: _usernameController.text,
+      fullName: _nameController.text,
+    );
+    if (weakPassword) {
+      final confirmed = await _confirmWeakPassword(state);
+      if (!mounted || !confirmed) {
+        return;
+      }
+    }
+
+    state.updateAccount(
+      _nameController.text,
+      _usernameController.text,
+      _passwordController.text,
+      _isAdmin,
+    );
+    state.nextStep();
+  }
+
+  Future<bool> _confirmWeakPassword(InstallerState state) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            icon: const Icon(Icons.warning_amber_rounded),
+            title: Text(state.t('acc_warn_weak_password_title')),
+            content: Text(state.t('acc_warn_weak_password_body')),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text(state.t('acc_warn_weak_password_cancel')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text(state.t('acc_warn_weak_password_continue')),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   @override

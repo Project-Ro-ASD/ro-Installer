@@ -93,7 +93,11 @@ void main() {
               c.args.join(' ').contains('/mnt/etc/kernel/cmdline'),
         );
         final dracutIdx = fake.commandLog.indexWhere(
-          (c) => c.command == 'chroot' && c.args.contains('dracut'),
+          (c) =>
+              c.command == 'chroot' &&
+              c.args
+                  .join(' ')
+                  .contains(r'dracut -f "/boot/initramfs-$kver.img"'),
         );
         final kernelInstallIdx = fake.commandLog.indexWhere(
           (c) =>
@@ -134,11 +138,57 @@ void main() {
             '-p',
             '1',
             '-L',
-            'Fedora',
+            'Ro-ASD',
             '-l',
             r'\EFI\fedora\shimx64.efi',
           ]),
           true,
+        );
+      },
+    );
+
+    test(
+      'swap bölümü varsa kernel cmdline ve GRUB hibernate resume parametresini alır',
+      () async {
+        final fake = FakeCommandRunner();
+        addHappyPathResponses(fake);
+        fake.addResponse('blkid', [
+          '-s',
+          'UUID',
+          '-o',
+          'value',
+          '/dev/sda2',
+        ], stdout: 'swap-uuid-9999');
+
+        final state = <String, dynamic>{
+          'selectedDisk': '/dev/sda',
+          'fileSystem': 'btrfs',
+          'partitionMethod': 'full',
+        };
+        final ctx = makeContext(state, fake);
+
+        final stage = const BootloaderStage();
+        final result = await stage.execute(ctx);
+
+        expect(result.success, true);
+        expect(
+          fake.wasCalledWith('sh', [
+            '-c',
+            'echo "root=UUID=root-uuid-1234 ro rootflags=subvol=@ resume=UUID=swap-uuid-9999 rhgb quiet" > /mnt/etc/kernel/cmdline',
+          ]),
+          true,
+        );
+
+        final grubDefaults = fake.commandLog.firstWhere(
+          (c) =>
+              c.command == 'sh' &&
+              c.args.join(' ').contains('/mnt/etc/default/grub'),
+        );
+        expect(
+          grubDefaults.args.join(' '),
+          contains(
+            'GRUB_CMDLINE_LINUX="resume=UUID=swap-uuid-9999 rhgb quiet"',
+          ),
         );
       },
     );
@@ -391,12 +441,7 @@ void main() {
       addHappyPathResponses(fake);
       fake.addResponse(
         'chroot',
-        [
-          '/mnt',
-          'sh',
-          '-c',
-          'kver=\$(ls /lib/modules | head -1) && kernel-install add \$kver /lib/modules/\$kver/vmlinuz',
-        ],
+        ['/mnt', 'sh', '-c', bootloaderKernelInstallScript],
         exitCode: 1,
         stderr: 'kernel-install failed',
       );
@@ -407,6 +452,35 @@ void main() {
 
       expect(result.success, false);
       expect(result.message, 'kernel-install başarısız oldu.');
+    });
+
+    test('BLS script Ro stable kerneli varsayilan tutar', () async {
+      final fake = FakeCommandRunner();
+      addHappyPathResponses(fake);
+
+      final ctx = makeContext(<String, dynamic>{
+        'selectedKernelChannels': ['stable', 'experimental'],
+      }, fake);
+      final stage = const BootloaderStage();
+      final result = await stage.execute(ctx);
+
+      expect(result.success, true);
+      final kernelInstall = fake.commandLog.firstWhere(
+        (c) =>
+            c.command == 'chroot' &&
+            c.args.join(' ').contains('kernel-install'),
+      );
+      expect(
+        kernelInstall.args.join(' '),
+        contains('rpm -ql ro-kernel-stable-core'),
+      );
+      expect(
+        kernelInstall.args.join(' '),
+        contains('rpm -ql ro-kernel-experimental-core'),
+      );
+      expect(kernelInstall.args.join(' '), contains('is_ro_kernel'));
+      expect(kernelInstall.args.join(' '), contains('No Ro kernel found'));
+      expect(kernelInstall.args.join(' '), contains('grubby --set-default'));
     });
 
     test('grub2-mkconfig başarısız olursa stage hata ile durur', () async {

@@ -5,6 +5,17 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
+EdgeInsetsGeometry _scaledPadding(
+  BuildContext context,
+  EdgeInsetsGeometry padding,
+) {
+  return EdgeInsetsGeometry.lerp(
+    EdgeInsets.zero,
+    padding,
+    context.installerDensity.chromeScale,
+  )!;
+}
+
 class NebulaPanel extends StatelessWidget {
   const NebulaPanel({
     super.key,
@@ -37,7 +48,7 @@ class NebulaPanel extends StatelessWidget {
             width: width,
             height: height,
             alignment: alignment,
-            padding: padding,
+            padding: _scaledPadding(context, padding),
             decoration: BoxDecoration(
               color: visuals.panelColor,
               borderRadius: BorderRadius.circular(visuals.panelRadius),
@@ -100,6 +111,7 @@ class NebulaScreenIntro extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final visuals = context.installerVisuals;
+    final density = context.installerDensity;
 
     return Column(
       children: [
@@ -109,7 +121,7 @@ class NebulaScreenIntro extends StatelessWidget {
             color: theme.colorScheme.primary,
             icon: Icons.auto_awesome_rounded,
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16 * density.spacingScale),
         ],
         ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxWidth),
@@ -120,7 +132,7 @@ class NebulaScreenIntro extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: theme.textTheme.headlineLarge,
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12 * density.spacingScale),
               Text(
                 description,
                 textAlign: TextAlign.center,
@@ -153,7 +165,10 @@ class NebulaStatusChip extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      padding: _scaledPadding(
+        context,
+        const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      ),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
         color: color.withValues(alpha: 0.14),
@@ -307,7 +322,7 @@ class _NebulaPrimaryButtonState extends State<NebulaPrimaryButton> {
                           ? () => setState(() => _pressed = false)
                           : null,
                       child: Padding(
-                        padding: widget.padding,
+                        padding: _scaledPadding(context, widget.padding),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -374,7 +389,7 @@ class _NebulaSecondaryButtonState extends State<NebulaSecondaryButton> {
             backgroundColor: _hovered
                 ? scheme.surface.withValues(alpha: 0.16)
                 : Colors.transparent,
-            padding: widget.padding,
+            padding: _scaledPadding(context, widget.padding),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,

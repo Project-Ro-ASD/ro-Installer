@@ -139,8 +139,11 @@ void main() {
       expect(details['partitionTable'], 'gpt');
       expect(details['shrinkCandidatePartition'], '/dev/sda2');
       expect(details['shrinkCandidateFs'], 'ntfs');
-      expect(details['alongsideMaxLinuxSizeBytes'], 42949672960);
-      expect((details['alongsideBlockers'] as List<dynamic>), isEmpty);
+      expect(details['alongsideMaxLinuxSizeBytes'], 32212254720);
+      expect(
+        (details['alongsideBlockers'] as List<dynamic>),
+        contains('alongside_minimum_not_met'),
+      );
     });
 
     test('boş disk algılandığında OS yok döner', () async {
@@ -248,5 +251,125 @@ void main() {
         );
       },
     );
+
+    test('dirty NTFS shrink adayi olarak kalir ama uyarı kodu taşır', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse(
+        'lsblk',
+        [
+          '-J',
+          '-b',
+          '-o',
+          'NAME,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
+          '/dev/sda',
+        ],
+        stdout: '''
+{
+  "blockdevices": [
+    {
+      "name": "sda",
+      "size": 214748364800,
+      "pttype": "gpt",
+      "children": [
+        {
+          "name": "sda1",
+          "fstype": "vfat",
+          "size": 536870912,
+          "start": 2048,
+          "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+          "mountpoints": [null]
+        },
+        {
+          "name": "sda2",
+          "fstype": "ntfs",
+          "size": 150000000000,
+          "start": 1050624,
+          "parttype": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+          "mountpoints": [null]
+        }
+      ]
+    }
+  ]
+}''',
+      );
+      fake.addResponse(
+        'ntfsresize',
+        ['--info', '--force', '/dev/sda2'],
+        exitCode: 1,
+        stderr: 'Volume is dirty. Run chkdsk.',
+      );
+      fake.addResponseForCommand('sgdisk', stdout: '', exitCode: 0);
+
+      final service = DiskService(commandRunner: fake);
+      final details = await service.detectDiskDetails('/dev/sda');
+
+      expect(details['shrinkCandidatePartition'], '/dev/sda2');
+      expect(details['shrinkCandidateFs'], 'ntfs');
+      expect(details['alongsideMaxLinuxSizeBytes'], greaterThan(0));
+      expect(
+        (details['alongsideBlockers'] as List<dynamic>).map(
+          (entry) => entry.toString(),
+        ),
+        contains('ntfs_dirty'),
+      );
+      expect(
+        (details['alongsideBlockers'] as List<dynamic>).map(
+          (entry) => entry.toString(),
+        ),
+        isNot(contains('ntfs_check_failed')),
+      );
+    });
+
+    test('BTRFS Linux bolumu alongside shrink adayi olabilir', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse(
+        'lsblk',
+        [
+          '-J',
+          '-b',
+          '-o',
+          'NAME,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
+          '/dev/sda',
+        ],
+        stdout: '''
+{
+  "blockdevices": [
+    {
+      "name": "sda",
+      "size": 214748364800,
+      "pttype": "gpt",
+      "children": [
+        {
+          "name": "sda1",
+          "fstype": "vfat",
+          "size": 536870912,
+          "start": 2048,
+          "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+          "mountpoints": [null]
+        },
+        {
+          "name": "sda2",
+          "fstype": "btrfs",
+          "size": 128849018880,
+          "start": 1050624,
+          "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+          "mountpoints": [null]
+        }
+      ]
+    }
+  ]
+}''',
+      );
+      fake.addResponseForCommand('sgdisk', stdout: '', exitCode: 0);
+
+      final service = DiskService(commandRunner: fake);
+      final details = await service.detectDiskDetails('/dev/sda');
+
+      expect(details['hasExistingOS'], true);
+      expect(details['detectedOS'], 'Linux');
+      expect(details['shrinkCandidatePartition'], '/dev/sda2');
+      expect(details['shrinkCandidateFs'], 'btrfs');
+      expect((details['alongsideBlockers'] as List<dynamic>), isEmpty);
+    });
   });
 }

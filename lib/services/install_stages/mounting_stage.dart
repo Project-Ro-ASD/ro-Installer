@@ -38,6 +38,8 @@ class MountingStage {
         return _mountFullDisk(ctx, selectedDisk, rootFs);
       case 'alongside':
         return _mountAlongside(ctx, selectedDisk, rootFs);
+      case 'free_space':
+        return _mountAlongside(ctx, selectedDisk, rootFs);
       case 'manual':
         return _mountManualPartitions(ctx);
       default:
@@ -53,12 +55,9 @@ class MountingStage {
     String selectedDisk,
     String rootFs,
   ) async {
-    String efiPart = '${selectedDisk}1';
-    String rootPart = '${selectedDisk}2';
-    if (selectedDisk.contains('nvme') || selectedDisk.contains('loop')) {
-      efiPart = '${selectedDisk}p1';
-      rootPart = '${selectedDisk}p2';
-    }
+    final efiPart = _partitionPath(selectedDisk, 1);
+    final swapPart = _partitionPath(selectedDisk, 2);
+    final rootPart = _partitionPath(selectedDisk, 3);
 
     // Root bölümünü bağla
     if (!await _mountRoot(ctx, rootPart, rootFs)) {
@@ -69,6 +68,8 @@ class MountingStage {
     if (!await _mountEfi(ctx, efiPart)) {
       return StageResult.fail('EFI bölümü bağlanamadı: $efiPart');
     }
+
+    await ctx.runCmd('swapon', [swapPart], ctx.log, isMock: ctx.isMock);
 
     ctx.log('[AŞAMA 4] Tam disk bağlama tamamlandı.');
     return StageResult.ok(
@@ -330,5 +331,13 @@ class MountingStage {
 
   int _mountDepth(String mountPoint) {
     return mountPoint.split('/').where((segment) => segment.isNotEmpty).length;
+  }
+
+  String _partitionPath(String disk, int partitionNumber) {
+    final needsP =
+        disk.contains('nvme') ||
+        disk.contains('loop') ||
+        disk.contains('mmcblk');
+    return needsP ? '${disk}p$partitionNumber' : '$disk$partitionNumber';
   }
 }

@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'command_runner.dart';
+
 class InstallLogExportResult {
   const InstallLogExportResult({
     required this.success,
@@ -35,8 +37,12 @@ class InstallLogExportService {
       final logFile = File('${targetDir.path}/install-$stamp.log');
       final summaryFile = File('${targetDir.path}/install-$stamp.summary.json');
 
-      final sanitizedStatus = statusHistory.map(_sanitizeLine).toList(growable: false);
-      final sanitizedTechnical = technicalLogs.map(_sanitizeLine).toList(growable: false);
+      final sanitizedStatus = statusHistory
+          .map(_sanitizeLine)
+          .toList(growable: false);
+      final sanitizedTechnical = technicalLogs
+          .map(_sanitizeLine)
+          .toList(growable: false);
       final sanitizedContext = _sanitizeContext(installContext);
 
       final buffer = StringBuffer()
@@ -122,30 +128,40 @@ class InstallLogExportService {
   }
 
   String _sanitizeLine(String raw) {
-    var line = raw;
-
-    line = line.replaceAllMapped(
-      RegExp(r'(password\s+)(\S+)', caseSensitive: false),
-      (m) => '${m.group(1)}***',
-    );
-
-    line = line.replaceAllMapped(
-      RegExp("(echo\\s+['\"])([^'\":\\s]+):([^'\"\\s]+)(['\"]\\s*\\|\\s*chpasswd)", caseSensitive: false),
-      (m) => '${m.group(1)}***:***${m.group(4)}',
-    );
-
-    line = line.replaceAllMapped(
-      RegExp("(root:)([^\\s'\"]+)", caseSensitive: false),
-      (m) => '${m.group(1)}***',
-    );
-
-    return line;
+    return SecretRedactor.redactText(raw);
   }
 
   Map<String, dynamic> _sanitizeContext(Map<String, dynamic> raw) {
-    final context = Map<String, dynamic>.from(raw);
-    context.remove('password');
-    context.remove('username');
-    return context;
+    return _sanitizeContextMap(raw);
+  }
+
+  Map<String, dynamic> _sanitizeContextMap(Map<dynamic, dynamic> raw) {
+    final sanitized = <String, dynamic>{};
+    for (final entry in raw.entries) {
+      final key = entry.key.toString();
+      final keyLower = key.toLowerCase();
+      if (keyLower == 'username' ||
+          keyLower.contains('password') ||
+          keyLower.contains('passphrase') ||
+          keyLower.contains('secret') ||
+          keyLower.contains('token')) {
+        continue;
+      }
+      sanitized[key] = _sanitizeContextValue(entry.value);
+    }
+    return sanitized;
+  }
+
+  dynamic _sanitizeContextValue(dynamic value) {
+    if (value is Map) {
+      return _sanitizeContextMap(value);
+    }
+    if (value is List) {
+      return value.map(_sanitizeContextValue).toList(growable: false);
+    }
+    if (value is String) {
+      return SecretRedactor.redactText(value);
+    }
+    return value;
   }
 }

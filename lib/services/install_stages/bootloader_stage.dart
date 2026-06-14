@@ -1,6 +1,106 @@
 import 'stage_context.dart';
 import 'stage_result.dart';
 
+const bootloaderKernelInstallScript = r'''
+set -e
+found=0
+preferred_kver=""
+preferred_image=""
+stable_module_versions="$(rpm -ql ro-kernel-stable-core ro-kernel-stable-modules 2>/dev/null | awk -F/ '
+  $2 == "lib" && $3 == "modules" && $4 != "" { print $4 }
+  $2 == "usr" && $3 == "lib" && $4 == "modules" && $5 != "" { print $5 }
+' | sort -u)"
+experimental_module_versions="$(rpm -ql ro-kernel-experimental-core ro-kernel-experimental-modules 2>/dev/null | awk -F/ '
+  $2 == "lib" && $3 == "modules" && $4 != "" { print $4 }
+  $2 == "usr" && $3 == "lib" && $4 == "modules" && $5 != "" { print $5 }
+' | sort -u)"
+ro_module_versions="$(printf '%s\n%s\n' "$stable_module_versions" "$experimental_module_versions" | awk 'NF' | sort -u)"
+is_ro_kernel() {
+  case "$1" in
+    *ro_stable*|*ro-stable*|*ro_experimental*|*ro-experimental*) return 0 ;;
+  esac
+  if [ -n "$ro_module_versions" ] && printf '%s\n' "$ro_module_versions" | grep -Fxq "$1"; then
+    return 0
+  fi
+  return 1
+}
+is_stable_kernel() {
+  case "$1" in
+    *ro_stable*|*ro-stable*) return 0 ;;
+  esac
+  if [ -n "$stable_module_versions" ] && printf '%s\n' "$stable_module_versions" | grep -Fxq "$1"; then
+    return 0
+  fi
+  return 1
+}
+for kver in $(find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V); do
+  kdir="/lib/modules/$kver"
+  image="/boot/vmlinuz-$kver"
+  if [ ! -f "$image" ]; then
+    image="$kdir/vmlinuz"
+  fi
+  if ! is_ro_kernel "$kver"; then
+    echo "Non-Ro kernel module directory found: $kver" >&2
+    exit 1
+  fi
+  if [ ! -f "$image" ]; then
+    echo "kernel image not found for $kver" >&2
+    exit 1
+  fi
+  kernel-install add "$kver" "$image"
+  if is_stable_kernel "$kver"; then
+    preferred_kver="$kver"
+    preferred_image="$image"
+  elif [ -z "$preferred_image" ]; then
+    preferred_kver="$kver"
+    preferred_image="$image"
+  fi
+  found=1
+done
+[ "$found" -eq 1 ]
+if [ -z "$preferred_image" ]; then
+  echo "No Ro kernel found; refusing to generate a stock Fedora boot target" >&2
+  exit 1
+fi
+if [ -n "$preferred_image" ] && command -v grubby >/dev/null 2>&1; then
+  grubby --set-default "$preferred_image" || true
+  echo "preferred default kernel: $preferred_kver"
+fi
+''';
+
+const bootloaderDracutScript = r'''
+set -e
+found=0
+stable_module_versions="$(rpm -ql ro-kernel-stable-core ro-kernel-stable-modules 2>/dev/null | awk -F/ '
+  $2 == "lib" && $3 == "modules" && $4 != "" { print $4 }
+  $2 == "usr" && $3 == "lib" && $4 == "modules" && $5 != "" { print $5 }
+' | sort -u)"
+experimental_module_versions="$(rpm -ql ro-kernel-experimental-core ro-kernel-experimental-modules 2>/dev/null | awk -F/ '
+  $2 == "lib" && $3 == "modules" && $4 != "" { print $4 }
+  $2 == "usr" && $3 == "lib" && $4 == "modules" && $5 != "" { print $5 }
+' | sort -u)"
+ro_module_versions="$(printf '%s\n%s\n' "$stable_module_versions" "$experimental_module_versions" | awk 'NF' | sort -u)"
+is_ro_kernel() {
+  case "$1" in
+    *ro_stable*|*ro-stable*|*ro_experimental*|*ro-experimental*) return 0 ;;
+  esac
+  if [ -n "$ro_module_versions" ] && printf '%s\n' "$ro_module_versions" | grep -Fxq "$1"; then
+    return 0
+  fi
+  return 1
+}
+for kver in $(find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V); do
+  if ! is_ro_kernel "$kver"; then
+    echo "Skipping non-Ro kernel initramfs generation: $kver" >&2
+    continue
+  fi
+  echo "Generating initramfs for Ro kernel: $kver"
+  dracut -f "/boot/initramfs-$kver.img" "$kver"
+  found=1
+done
+[ "$found" -eq 1 ]
+''';
+
 /// AŞAMA 7: Bootloader (Önyükleyici Kurulumu)
 ///
 /// Fedora UEFI boot zincirini kurar ve yapılandırır:
@@ -63,9 +163,22 @@ class BootloaderStage {
     final rootFs = (ctx.state['fileSystem'] ?? 'btrfs').toString();
     final needsBtrfsRootflags = rootFs == 'btrfs';
     final rootFlags = needsBtrfsRootflags ? ' rootflags=subvol=@' : '';
+    final swapDevice = _resolveSwapDevice(ctx.state);
+    final resumeUuid = swapDevice == null
+        ? null
+        : await _lookupDeviceUuid(ctx, swapDevice);
+    if (swapDevice != null && resumeUuid == null && !ctx.isMock) {
+      return StageResult.fail(
+        'Hibernate resume için SWAP UUID tespit edilemedi: $swapDevice',
+      );
+    }
+    final resumeArg = resumeUuid == null ? '' : ' resume=UUID=$resumeUuid';
+    final grubCmdline = resumeUuid == null
+        ? 'rhgb quiet'
+        : 'resume=UUID=$resumeUuid rhgb quiet';
     final cmdlineWrite = await _requireCommand(ctx, 'sh', [
       '-c',
-      'echo "root=UUID=$cmdlineUuid ro$rootFlags rhgb quiet" > /mnt/etc/kernel/cmdline',
+      'echo "root=UUID=$cmdlineUuid ro$rootFlags$resumeArg rhgb quiet" > /mnt/etc/kernel/cmdline',
     ], '/etc/kernel/cmdline yazılamadı.');
     if (cmdlineWrite != null) return cmdlineWrite;
 
@@ -86,7 +199,7 @@ GRUB_DISTRIBUTOR="\$(sed 's, release .*\$,,g' /etc/system-release)"
 GRUB_DEFAULT=saved
 GRUB_DISABLE_SUBMENU=true
 GRUB_TERMINAL_OUTPUT="console"
-GRUB_CMDLINE_LINUX="rhgb quiet"
+GRUB_CMDLINE_LINUX="$grubCmdline"
 GRUB_DISABLE_RECOVERY="true"
 GRUB_ENABLE_BLSCFG=true
 GRUB_DISABLE_OS_PROBER=false
@@ -104,9 +217,9 @@ EOF
 
     final dracutResult = await _requireCommand(ctx, 'chroot', [
       '/mnt',
-      'dracut',
-      '-f',
-      '--regenerate-all',
+      'sh',
+      '-c',
+      bootloaderDracutScript,
     ], 'Dracut initramfs oluşturma başarısız.');
     if (dracutResult != null) return dracutResult;
     ctx.log('✓ Dracut initramfs başarıyla oluşturuldu.');
@@ -118,12 +231,14 @@ EOF
       'Bootloader girişleri oluşturuluyor (BLS)...',
     );
 
-    // Yüklü kernel versiyonunu bul ve kernel-install ile BLS .conf dosyalarını oluştur
+    // Yüklü kernel sürümlerini bul ve her biri için BLS .conf dosyası oluştur.
+    // Ro kernel paketleri /boot/vmlinuz-$kver üretir; bazı Fedora akışlarında
+    // /lib/modules/$kver/vmlinuz da bulunabilir.
     final kernelInstallResult = await _requireCommand(ctx, 'chroot', [
       '/mnt',
       'sh',
       '-c',
-      'kver=\$(ls /lib/modules | head -1) && kernel-install add \$kver /lib/modules/\$kver/vmlinuz',
+      bootloaderKernelInstallScript,
     ], 'kernel-install başarısız oldu.');
     if (kernelInstallResult != null) return kernelInstallResult;
 
@@ -238,7 +353,7 @@ EOF
       '-p',
       efiPartNum,
       '-L',
-      'Fedora',
+      'Ro-ASD',
       '-l',
       r'\EFI\fedora\shimx64.efi',
     ], 'EFI boot kaydı oluşturulamadı.');
@@ -292,6 +407,69 @@ EOF
     }
 
     return null;
+  }
+
+  String? _resolveSwapDevice(Map<String, dynamic> state) {
+    final resolved = (state['_resolvedSwapPart'] ?? '').toString();
+    if (resolved.isNotEmpty) {
+      return resolved;
+    }
+
+    final partitionMethod = (state['partitionMethod'] ?? 'full').toString();
+    if (partitionMethod == 'full') {
+      final selectedDisk = (state['selectedDisk'] ?? '').toString();
+      if (selectedDisk.isNotEmpty) {
+        return _partitionPath(selectedDisk, 2);
+      }
+    }
+
+    if (partitionMethod == 'manual') {
+      final manualPartitions =
+          state['manualPartitions'] as List<dynamic>? ?? const [];
+      for (final part in manualPartitions) {
+        if (part is Map<String, dynamic> &&
+            part['isFreeSpace'] != true &&
+            part['mount'] == '[SWAP]') {
+          final name = (part['name'] ?? '').toString();
+          if (name.isNotEmpty) {
+            return name;
+          }
+        }
+      }
+    }
+
+    if (partitionMethod == 'free_space') {
+      return null;
+    }
+
+    return null;
+  }
+
+  Future<String?> _lookupDeviceUuid(StageContext ctx, String device) async {
+    if (ctx.isMock) {
+      return 'mock-swap-uuid';
+    }
+
+    final result = await ctx.commandRunner.run('blkid', [
+      '-s',
+      'UUID',
+      '-o',
+      'value',
+      device,
+    ]);
+    final uuid = result.stdout.trim();
+    if (result.exitCode == 0 && uuid.isNotEmpty) {
+      return uuid;
+    }
+    return null;
+  }
+
+  String _partitionPath(String disk, int partitionNumber) {
+    final needsP =
+        disk.contains('nvme') ||
+        disk.contains('loop') ||
+        disk.contains('mmcblk');
+    return needsP ? '${disk}p$partitionNumber' : '$disk$partitionNumber';
   }
 }
 

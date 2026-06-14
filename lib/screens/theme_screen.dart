@@ -13,72 +13,92 @@ class ThemeScreen extends StatelessWidget {
     final state = Provider.of<InstallerState>(context);
     final theme = Theme.of(context);
     final visuals = context.installerVisuals;
+    final density = context.installerDensity;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Column(
-        children: [
-          const SizedBox(height: 20),
-          Text(
-            state.t('theme_title'),
-            textAlign: TextAlign.center,
-            style: theme.textTheme.headlineLarge,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact =
+            constraints.maxWidth < 900 || constraints.maxHeight < 720;
+        final cardHeight = density.tinyViewport ? 300.0 : 350.0;
+        final darkCard = _ThemeOptionCard(
+          title: state.t('theme_dark_title'),
+          description: state.t('theme_dark_desc'),
+          selected: state.themeMode == 'dark',
+          onTap: () => state.updateTheme('dark'),
+          preview: const _ThemePreview(isDark: true),
+        );
+        final lightCard = _ThemeOptionCard(
+          title: state.t('theme_light_title'),
+          description: state.t('theme_light_desc'),
+          selected: state.themeMode == 'light',
+          onTap: () => state.updateTheme('light'),
+          preview: const _ThemePreview(isDark: false),
+        );
+
+        return Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: 12 * density.spacingScale,
+            vertical: 8 * density.spacingScale,
           ),
-          const SizedBox(height: 12),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: Text(
-              state.t('theme_desc'),
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: visuals.mutedForeground,
-              ),
-            ),
-          ),
-          const SizedBox(height: 34),
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(
-                  child: _ThemeOptionCard(
-                    title: state.t('theme_dark_title'),
-                    description: state.t('theme_dark_desc'),
-                    selected: state.themeMode == 'dark',
-                    onTap: () => state.updateTheme('dark'),
-                    preview: const _ThemePreview(isDark: true),
-                  ),
-                ),
-                const SizedBox(width: 24),
-                Expanded(
-                  child: _ThemeOptionCard(
-                    title: state.t('theme_light_title'),
-                    description: state.t('theme_light_desc'),
-                    selected: state.themeMode == 'light',
-                    onTap: () => state.updateTheme('light'),
-                    preview: const _ThemePreview(isDark: false),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          Row(
+          child: Column(
             children: [
-              NebulaSecondaryButton(
-                label: state.t('prev'),
-                icon: Icons.arrow_back_rounded,
-                onPressed: state.previousStep,
+              SizedBox(height: 20 * density.spacingScale),
+              Text(
+                state.t('theme_title'),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.headlineLarge,
               ),
-              const Spacer(),
-              NebulaPrimaryButton(
-                label: state.t('next'),
-                icon: Icons.arrow_forward_rounded,
-                onPressed: state.nextStep,
+              SizedBox(height: 12 * density.spacingScale),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: Text(
+                  state.t('theme_desc'),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: visuals.mutedForeground,
+                  ),
+                ),
+              ),
+              SizedBox(height: 34 * density.spacingScale),
+              Expanded(
+                child: compact
+                    ? SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            SizedBox(height: cardHeight, child: darkCard),
+                            SizedBox(height: 18 * density.spacingScale),
+                            SizedBox(height: cardHeight, child: lightCard),
+                          ],
+                        ),
+                      )
+                    : Row(
+                        children: [
+                          Expanded(child: darkCard),
+                          SizedBox(width: 24 * density.spacingScale),
+                          Expanded(child: lightCard),
+                        ],
+                      ),
+              ),
+              SizedBox(height: 24 * density.spacingScale),
+              Row(
+                children: [
+                  NebulaSecondaryButton(
+                    label: state.t('prev'),
+                    icon: Icons.arrow_back_rounded,
+                    onPressed: state.previousStep,
+                  ),
+                  const Spacer(),
+                  NebulaPrimaryButton(
+                    label: state.t('next'),
+                    icon: Icons.arrow_forward_rounded,
+                    onPressed: state.nextStep,
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

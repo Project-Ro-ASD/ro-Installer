@@ -28,6 +28,8 @@ class FormattingStage {
         return _formatFullDisk(ctx, selectedDisk, rootFs);
       case 'alongside':
         return _formatAlongside(ctx, selectedDisk, rootFs);
+      case 'free_space':
+        return _formatAlongside(ctx, selectedDisk, rootFs);
       case 'manual':
         return _formatManualPartitions(ctx);
       default:
@@ -50,12 +52,9 @@ class FormattingStage {
       {'fs': rootFs.toUpperCase()},
     );
 
-    String efiPart = '${selectedDisk}1';
-    String rootPart = '${selectedDisk}2';
-    if (selectedDisk.contains('nvme') || selectedDisk.contains('loop')) {
-      efiPart = '${selectedDisk}p1';
-      rootPart = '${selectedDisk}p2';
-    }
+    final efiPart = _partitionPath(selectedDisk, 1);
+    final swapPart = _partitionPath(selectedDisk, 2);
+    final rootPart = _partitionPath(selectedDisk, 3);
 
     // EFI bölümünü FAT32 olarak biçimlendir
     if (!await ctx.runCmd(
@@ -67,10 +66,17 @@ class FormattingStage {
       return StageResult.fail('EFI bölümü biçimlendirilemedi: $efiPart');
     }
 
+    if (!await ctx.runCmd('mkswap', [swapPart], ctx.log, isMock: ctx.isMock)) {
+      return StageResult.fail('SWAP bölümü biçimlendirilemedi: $swapPart');
+    }
+
     // Root bölümünü seçilen dosya sistemiyle biçimlendir
     if (!await _formatPartition(ctx, rootPart, rootFs)) {
       return StageResult.fail('Root bölümü biçimlendirilemedi: $rootPart');
     }
+
+    ctx.state['_resolvedSwapPart'] = swapPart;
+    ctx.state['_resolvedRootPart'] = rootPart;
 
     ctx.log('[AŞAMA 3] Tam disk biçimlendirme tamamlandı.');
     return StageResult.ok(
@@ -97,13 +103,15 @@ class FormattingStage {
     // Alongside modunda oluşturulan bölümleri bul
     String swapPart = '';
     String rootPart = '';
+    final expectedSwapStart = ctx.state['_resolvedSwapStartSector'] as int?;
+    final expectedRootStart = ctx.state['_resolvedRootStartSector'] as int?;
 
     try {
       final lsblkResult = await ctx.commandRunner.run('lsblk', [
         '-J',
         '-b',
         '-o',
-        'NAME,PARTLABEL',
+        'NAME,PARTLABEL,START',
         selectedDisk,
       ]);
       if (lsblkResult.exitCode == 0) {
@@ -114,8 +122,19 @@ class FormattingStage {
           for (var child in children) {
             final partLabel = (child['partlabel'] ?? '').toString();
             final childName = child['name'].toString();
-            if (partLabel == 'RoASD_Swap') swapPart = '/dev/$childName';
-            if (partLabel == 'RoASD_Root') rootPart = '/dev/$childName';
+            final childStart = child['start'] is int
+                ? child['start'] as int
+                : int.tryParse((child['start'] ?? '').toString());
+            if (partLabel == 'RoASD_Swap' &&
+                (expectedSwapStart == null ||
+                    childStart == expectedSwapStart)) {
+              swapPart = '/dev/$childName';
+            }
+            if (partLabel == 'RoASD_Root' &&
+                (expectedRootStart == null ||
+                    childStart == expectedRootStart)) {
+              rootPart = '/dev/$childName';
+            }
           }
         }
       }
@@ -286,5 +305,13 @@ class FormattingStage {
       default:
         return fsType;
     }
+  }
+
+  String _partitionPath(String disk, int partitionNumber) {
+    final needsP =
+        disk.contains('nvme') ||
+        disk.contains('loop') ||
+        disk.contains('mmcblk');
+    return needsP ? '${disk}p$partitionNumber' : '$disk$partitionNumber';
   }
 }

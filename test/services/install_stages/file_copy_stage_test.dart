@@ -13,16 +13,17 @@ StageContext makeContext(
     log: (msg) {},
     onProgress: (p, s) {},
     commandRunner: runner,
-    runCmd: (
-      cmd,
-      args,
-      onLog, {
-      bool isMock = false,
-      List<int> allowedExitCodes = const [0],
-    }) async {
-      final result = await runner.run(cmd, args);
-      return allowedExitCodes.contains(result.exitCode);
-    },
+    runCmd:
+        (
+          cmd,
+          args,
+          onLog, {
+          bool isMock = false,
+          List<int> allowedExitCodes = const [0],
+        }) async {
+          final result = await runner.run(cmd, args);
+          return allowedExitCodes.contains(result.exitCode);
+        },
     isMock: isMock,
   );
 }
@@ -49,7 +50,13 @@ void main() {
       expect(result.success, true);
 
       final rsyncCall = fake.commandLog.firstWhere((c) => c.command == 'rsync');
+      expect(rsyncCall.args, contains('--numeric-ids'));
+      expect(rsyncCall.args, contains('--info=progress2,stats2'));
+      expect(rsyncCall.args, contains('--human-readable'));
       expect(rsyncCall.args, contains('--exclude=/etc/kernel/cmdline'));
+      expect(rsyncCall.args, contains('--exclude=/var/cache/dnf/*'));
+      expect(rsyncCall.args, contains('--exclude=/var/tmp/*'));
+      expect(rsyncCall.args, contains('--exclude=/home/*/.cache/*'));
       expect(rsyncCall.args, contains('--exclude=/boot/loader/entries/*'));
       expect(rsyncCall.args, contains('--exclude=/boot/grub2/grubenv'));
       expect(rsyncCall.args, contains('--exclude=/boot/efi'));

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -13,101 +15,109 @@ class WelcomeScreen extends StatelessWidget {
     final state = Provider.of<InstallerState>(context);
     final theme = Theme.of(context);
     final visuals = context.installerVisuals;
+    final density = context.installerDensity;
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final compactWarning = constraints.maxWidth < 560;
         final warningWidth = compactWarning ? double.infinity : 292.0;
+        final pagePadding = EdgeInsets.symmetric(
+          horizontal: 24 * density.spacingScale,
+          vertical: 12 * density.spacingScale,
+        );
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  state.t('welcome_title'),
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.displaySmall?.copyWith(
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 560),
-                  child: Text(
-                    state.t('welcome_desc'),
+        return SingleChildScrollView(
+          padding: pagePadding,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: math.max(
+                0,
+                constraints.maxHeight - pagePadding.vertical,
+              ),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    state.t('welcome_title'),
                     textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: visuals.mutedForeground,
+                    style: theme.textTheme.displaySmall?.copyWith(
+                      color: theme.colorScheme.onSurface,
                     ),
                   ),
-                ),
-                const SizedBox(height: 40),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 460),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      NebulaPanel(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(26),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            NebulaSectionLabel(
-                              state.t('welcome_language_section'),
-                            ),
-                            const SizedBox(height: 18),
-                            NebulaDropdown<String>(
-                              value: state.selectedLanguage,
-                              leadingIcon: Icons.language_rounded,
-                              items: state.availableLocales
-                                  .map(
-                                    (locale) => NebulaDropdownItem<String>(
-                                      value: locale.code,
-                                      label: locale.nativeName,
-                                      icon: Icons.language_rounded,
+                  SizedBox(height: 14 * density.spacingScale),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: Text(
+                      state.t('welcome_desc'),
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: visuals.mutedForeground,
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 40 * density.spacingScale),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 460),
+                    child: NebulaPanel(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(26),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          NebulaSectionLabel(
+                            state.t('welcome_language_section'),
+                          ),
+                          SizedBox(height: 18 * density.spacingScale),
+                          NebulaDropdown<String>(
+                            value: state.selectedLanguage,
+                            leadingIcon: Icons.language_rounded,
+                            items: state.availableLocales
+                                .map(
+                                  (locale) => NebulaDropdownItem<String>(
+                                    value: locale.code,
+                                    label: locale.nativeName,
+                                    icon: Icons.language_rounded,
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: state.updateLanguage,
+                          ),
+                          SizedBox(height: 22 * density.spacingScale),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: SizedBox(
+                              width: compactWarning
+                                  ? double.infinity
+                                  : warningWidth,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  NebulaPrimaryButton(
+                                    label: state.t('welcome_start'),
+                                    icon: Icons.arrow_forward_rounded,
+                                    onPressed: state.nextStep,
+                                  ),
+                                  SizedBox(height: 10 * density.spacingScale),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: _WelcomeWarningCard(
+                                      title: state.t('welcome_warning_title'),
+                                      body: state.t('welcome_warning_body'),
                                     ),
-                                  )
-                                  .toList(),
-                              onChanged: state.updateLanguage,
-                            ),
-                            const SizedBox(height: 22),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: SizedBox(
-                                width: compactWarning
-                                    ? double.infinity
-                                    : warningWidth,
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                  children: [
-                                    NebulaPrimaryButton(
-                                      label: state.t('welcome_start'),
-                                      icon: Icons.arrow_forward_rounded,
-                                      onPressed: state.nextStep,
-                                    ),
-                                    const SizedBox(height: 10),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: _WelcomeWarningCard(
-                                        title: state.t('welcome_warning_title'),
-                                        body: state.t('welcome_warning_body'),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );

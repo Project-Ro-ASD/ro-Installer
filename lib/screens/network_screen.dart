@@ -35,10 +35,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
   }
 
   bool _isConnectionReady(InstallerState state) {
-    final wifiConnected = state.wifiNetworks.any((net) => net['inUse'] == true);
-    return state.isEthernetConnected ||
-        wifiConnected ||
-        state.networkStatus == 'connected';
+    return state.hasActiveNetwork;
   }
 
   @override
@@ -124,7 +121,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        state.t('net_offline_hint'),
+                        state.t('net_online_required_hint'),
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: context.installerVisuals.mutedForeground,
                         ),
@@ -249,19 +246,15 @@ class _NetworkScreenState extends State<NetworkScreen> {
                   onPressed: state.previousStep,
                 ),
                 const Spacer(),
-                NebulaSecondaryButton(
-                  label: state.t('offline'),
-                  icon: Icons.wifi_off_rounded,
-                  onPressed: () {
-                    state.networkStatus = 'offline';
-                    state.nextStep();
-                  },
-                ),
-                const SizedBox(width: 12),
                 NebulaPrimaryButton(
                   label: state.t('connect'),
                   icon: Icons.arrow_forward_rounded,
-                  onPressed: onlineReady ? state.nextStep : null,
+                  onPressed: onlineReady
+                      ? () {
+                          state.networkStatus = 'connected';
+                          state.nextStep();
+                        }
+                      : null,
                 ),
               ],
             ),
@@ -284,7 +277,15 @@ class _NetworkScreenState extends State<NetworkScreen> {
 
     final theme = Theme.of(context);
     String password = '';
+    String identity = '';
+    String anonymousIdentity = '';
+    final detectedEnterprise = _isEnterpriseSecurity(security);
+    bool enterprise = detectedEnterprise;
+    bool showPassword = false;
+    bool showDetails = detectedEnterprise;
     bool isConnecting = false;
+    String eapProfile = 'peap-mschapv2';
+    String? errorText;
 
     showDialog<void>(
       context: context,
@@ -292,29 +293,175 @@ class _NetworkScreenState extends State<NetworkScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final canConnect =
+                !isConnecting &&
+                password.trim().isNotEmpty &&
+                (!enterprise || identity.trim().isNotEmpty);
+
             return AlertDialog(
               backgroundColor: theme.cardColor,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
               ),
               title: Text(state.t('net_wifi_dialog_title', {'ssid': ssid})),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    obscureText: true,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      labelText: state.t('net_password_label'),
-                    ),
-                    onChanged: (value) => password = value,
+              content: SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 460),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        obscureText: !showPassword,
+                        autofocus: true,
+                        decoration: InputDecoration(
+                          labelText: state.t('net_password_label'),
+                          suffixIcon: IconButton(
+                            tooltip: showPassword
+                                ? state.t('net_hide_password')
+                                : state.t('net_show_password'),
+                            icon: Icon(
+                              showPassword
+                                  ? Icons.visibility_off_rounded
+                                  : Icons.visibility_rounded,
+                            ),
+                            onPressed: () {
+                              setDialogState(() {
+                                showPassword = !showPassword;
+                              });
+                            },
+                          ),
+                        ),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            password = value;
+                            errorText = null;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: isConnecting
+                              ? null
+                              : () {
+                                  setDialogState(() {
+                                    showDetails = !showDetails;
+                                  });
+                                },
+                          icon: Icon(
+                            showDetails
+                                ? Icons.expand_less_rounded
+                                : Icons.tune_rounded,
+                          ),
+                          label: Text(
+                            showDetails
+                                ? state.t('net_wifi_details_hide')
+                                : state.t('net_wifi_details_show'),
+                          ),
+                        ),
+                      ),
+                      if (showDetails) ...[
+                        const SizedBox(height: 4),
+                        TextFormField(
+                          initialValue: security.isEmpty
+                              ? state.t('unknown')
+                              : security,
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: state.t('net_wifi_security_label'),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: enterprise,
+                          onChanged: isConnecting
+                              ? null
+                              : (value) {
+                                  setDialogState(() {
+                                    enterprise = value ?? false;
+                                    errorText = null;
+                                  });
+                                },
+                          title: Text(state.t('net_wifi_enterprise_label')),
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
+                        if (enterprise) ...[
+                          const SizedBox(height: 8),
+                          TextField(
+                            decoration: InputDecoration(
+                              labelText: state.t('net_wifi_identity_label'),
+                            ),
+                            onChanged: (value) {
+                              setDialogState(() {
+                                identity = value;
+                                errorText = null;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            decoration: InputDecoration(
+                              labelText: state.t(
+                                'net_wifi_anonymous_identity_label',
+                              ),
+                            ),
+                            onChanged: (value) {
+                              setDialogState(() {
+                                anonymousIdentity = value;
+                                errorText = null;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          DropdownButtonFormField<String>(
+                            initialValue: eapProfile,
+                            decoration: InputDecoration(
+                              labelText: state.t('net_wifi_eap_label'),
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'peap-mschapv2',
+                                child: Text('PEAP / MSCHAPv2'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'ttls-pap',
+                                child: Text('TTLS / PAP'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'ttls-mschapv2',
+                                child: Text('TTLS / MSCHAPv2'),
+                              ),
+                            ],
+                            onChanged: isConnecting
+                                ? null
+                                : (value) {
+                                    setDialogState(() {
+                                      eapProfile = value ?? 'peap-mschapv2';
+                                      errorText = null;
+                                    });
+                                  },
+                          ),
+                        ],
+                      ],
+                      if (errorText != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          errorText!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.redAccent,
+                          ),
+                        ),
+                      ],
+                      if (isConnecting)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 16),
+                          child: CircularProgressIndicator(),
+                        ),
+                    ],
                   ),
-                  if (isConnecting)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 16),
-                      child: CircularProgressIndicator(),
-                    ),
-                ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -324,16 +471,24 @@ class _NetworkScreenState extends State<NetworkScreen> {
                   child: Text(state.t('cancel')),
                 ),
                 ElevatedButton(
-                  onPressed: (isConnecting || password.isEmpty)
-                      ? null
-                      : () async {
-                          setDialogState(() => isConnecting = true);
+                  onPressed: canConnect
+                      ? () async {
+                          setDialogState(() {
+                            isConnecting = true;
+                            errorText = null;
+                          });
                           final success = await state.connectToWifi(
                             ssid,
                             password,
+                            security: security,
+                            identity: identity,
+                            anonymousIdentity: anonymousIdentity,
+                            enterprise: enterprise,
+                            eapMethod: _eapMethodForProfile(eapProfile),
+                            phase2Auth: _phase2AuthForProfile(eapProfile),
                           );
 
-                          if (!context.mounted) {
+                          if (!dialogContext.mounted) {
                             return;
                           }
 
@@ -342,16 +497,20 @@ class _NetworkScreenState extends State<NetworkScreen> {
                           if (success) {
                             Navigator.pop(dialogContext);
                           } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  state.t('net_connect_failed', {'ssid': ssid}),
-                                ),
-                                backgroundColor: Colors.redAccent,
-                              ),
-                            );
+                            final detail = state.lastWifiConnectionError.trim();
+                            setDialogState(() {
+                              errorText = detail.isEmpty
+                                  ? state.t('net_connect_failed', {
+                                      'ssid': ssid,
+                                    })
+                                  : state.t('net_connect_failed_detail', {
+                                      'ssid': ssid,
+                                      'error': detail,
+                                    });
+                            });
                           }
-                        },
+                        }
+                      : null,
                   child: Text(state.t('net_connect_action')),
                 ),
               ],
@@ -360,6 +519,21 @@ class _NetworkScreenState extends State<NetworkScreen> {
         );
       },
     );
+  }
+
+  bool _isEnterpriseSecurity(String security) {
+    final normalized = security.toLowerCase();
+    return normalized.contains('802.1x') ||
+        normalized.contains('wpa-eap') ||
+        normalized.contains('enterprise');
+  }
+
+  String _eapMethodForProfile(String profile) {
+    return profile.startsWith('ttls') ? 'ttls' : 'peap';
+  }
+
+  String _phase2AuthForProfile(String profile) {
+    return profile.endsWith('pap') ? 'pap' : 'mschapv2';
   }
 }
 

@@ -99,6 +99,26 @@ void main() {
       expect(mexicoState.selectedTimezone, 'America/Mexico_City');
       expect(mexicoState.selectedKeyboard, 'la-latin1');
     });
+
+    test('standart akisa donunce gelismis bolumleme secimi tasinmaz', () {
+      state.updateInstallType('advanced');
+      state.updatePartitionMethod('free_space');
+      state.updateFreeSpaceSelection({
+        'startSector': 2048,
+        'endSector': 4096,
+        'sizeBytes': 1024,
+      });
+
+      state.updateInstallType('standard');
+
+      expect(state.installType, 'standard');
+      expect(state.partitionMethod, 'full');
+      expect(state.selectedFreeSpace, isEmpty);
+
+      state.updatePartitionMethod('manual');
+
+      expect(state.partitionMethod, 'full');
+    });
   });
 }
 

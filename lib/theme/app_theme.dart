@@ -219,12 +219,72 @@ class InstallerMotionTokens extends ThemeExtension<InstallerMotionTokens> {
   }
 }
 
+@immutable
+class InstallerDensityTokens extends ThemeExtension<InstallerDensityTokens> {
+  const InstallerDensityTokens({
+    required this.spacingScale,
+    required this.chromeScale,
+    required this.compactChrome,
+    required this.tinyViewport,
+    required this.showFooter,
+    required this.maxTextScale,
+  });
+
+  final double spacingScale;
+  final double chromeScale;
+  final bool compactChrome;
+  final bool tinyViewport;
+  final bool showFooter;
+  final double maxTextScale;
+
+  @override
+  InstallerDensityTokens copyWith({
+    double? spacingScale,
+    double? chromeScale,
+    bool? compactChrome,
+    bool? tinyViewport,
+    bool? showFooter,
+    double? maxTextScale,
+  }) {
+    return InstallerDensityTokens(
+      spacingScale: spacingScale ?? this.spacingScale,
+      chromeScale: chromeScale ?? this.chromeScale,
+      compactChrome: compactChrome ?? this.compactChrome,
+      tinyViewport: tinyViewport ?? this.tinyViewport,
+      showFooter: showFooter ?? this.showFooter,
+      maxTextScale: maxTextScale ?? this.maxTextScale,
+    );
+  }
+
+  @override
+  InstallerDensityTokens lerp(
+    ThemeExtension<InstallerDensityTokens>? other,
+    double t,
+  ) {
+    if (other is! InstallerDensityTokens) {
+      return this;
+    }
+
+    return InstallerDensityTokens(
+      spacingScale: lerpDouble(spacingScale, other.spacingScale, t)!,
+      chromeScale: lerpDouble(chromeScale, other.chromeScale, t)!,
+      compactChrome: t < 0.5 ? compactChrome : other.compactChrome,
+      tinyViewport: t < 0.5 ? tinyViewport : other.tinyViewport,
+      showFooter: t < 0.5 ? showFooter : other.showFooter,
+      maxTextScale: lerpDouble(maxTextScale, other.maxTextScale, t)!,
+    );
+  }
+}
+
 extension InstallerThemeContext on BuildContext {
   InstallerVisualTokens get installerVisuals =>
       Theme.of(this).extension<InstallerVisualTokens>()!;
 
   InstallerMotionTokens get installerMotion =>
       Theme.of(this).extension<InstallerMotionTokens>()!;
+
+  InstallerDensityTokens get installerDensity =>
+      Theme.of(this).extension<InstallerDensityTokens>()!;
 }
 
 class AppTheme {
@@ -260,6 +320,15 @@ class AppTheme {
     crystalSpread: 28,
   );
 
+  static const InstallerDensityTokens _density = InstallerDensityTokens(
+    spacingScale: 1,
+    chromeScale: 1,
+    compactChrome: false,
+    tinyViewport: false,
+    showFooter: true,
+    maxTextScale: 1.18,
+  );
+
   static ThemeData get lightTheme {
     const visuals = InstallerVisualTokens(
       backgroundBase: _lightBase,
@@ -281,7 +350,7 @@ class AppTheme {
         end: Alignment.centerRight,
       ),
       panelRadius: 28,
-      panelBlur: 20,
+      panelBlur: 12,
       screenPadding: EdgeInsets.symmetric(horizontal: 28, vertical: 24),
     );
 
@@ -328,7 +397,7 @@ class AppTheme {
         end: Alignment.centerRight,
       ),
       panelRadius: 28,
-      panelBlur: 20,
+      panelBlur: 12,
       screenPadding: EdgeInsets.symmetric(horizontal: 28, vertical: 24),
     );
 
@@ -467,7 +536,7 @@ class AppTheme {
       cardColor: cardColor,
       textTheme: textTheme,
       dividerColor: scheme.outlineVariant.withValues(alpha: 0.4),
-      extensions: [visuals, _motion],
+      extensions: [visuals, _motion, _density],
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: cardColor,

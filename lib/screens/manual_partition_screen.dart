@@ -16,6 +16,9 @@ class ManualPartitionScreen extends StatefulWidget {
 }
 
 class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
+  static const int _minResizeSourceBytes = 40 * 1024 * 1024 * 1024;
+  static const Set<String> _resizableFilesystems = {'ntfs', 'ext4', 'btrfs'};
+
   int? _selectedIndex;
   bool _isLoading = true;
   String? _loadedDisk;
@@ -109,6 +112,26 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
     return hasPrev || hasNext;
   }
 
+  bool _canResizeSelection(InstallerState state) {
+    if (_selectedIndex == null ||
+        _selectedIndex! < 0 ||
+        _selectedIndex! >= state.manualPartitions.length) {
+      return false;
+    }
+
+    final part = state.manualPartitions[_selectedIndex!];
+    if (part['isFreeSpace'] == true || part['isPlanned'] == true) {
+      return false;
+    }
+
+    final type = _normalizeFilesystemType((part['type'] ?? '').toString());
+    final currentMount = (part['currentMount'] ?? 'unmounted').toString();
+    final sizeBytes = (part['sizeBytes'] as int?) ?? 0;
+    return _resizableFilesystems.contains(type) &&
+        currentMount == 'unmounted' &&
+        sizeBytes > _minResizeSourceBytes + kManualPartitionAlignmentBytes;
+  }
+
   void _mergeSelectedFreeSpace(InstallerState state) {
     if (!_canMergeSelection(state)) {
       return;
@@ -118,33 +141,48 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
     var end = _selectedIndex!;
     var totalBytes =
         state.manualPartitions[_selectedIndex!]['sizeBytes'] as int;
+    int? startSector =
+        state.manualPartitions[_selectedIndex!]['startSector'] as int?;
+    int? endSector =
+        state.manualPartitions[_selectedIndex!]['endSector'] as int?;
+    int? sectorSize =
+        state.manualPartitions[_selectedIndex!]['sectorSize'] as int?;
 
     while (start > 0 &&
         state.manualPartitions[start - 1]['isFreeSpace'] == true) {
       start--;
-      totalBytes += state.manualPartitions[start]['sizeBytes'] as int;
+      final entry = state.manualPartitions[start];
+      totalBytes += entry['sizeBytes'] as int;
+      startSector = entry['startSector'] as int? ?? startSector;
+      sectorSize = entry['sectorSize'] as int? ?? sectorSize;
     }
 
     while (end < state.manualPartitions.length - 1 &&
         state.manualPartitions[end + 1]['isFreeSpace'] == true) {
       end++;
-      totalBytes += state.manualPartitions[end]['sizeBytes'] as int;
+      final entry = state.manualPartitions[end];
+      totalBytes += entry['sizeBytes'] as int;
+      endSector = entry['endSector'] as int? ?? endSector;
+      sectorSize = entry['sectorSize'] as int? ?? sectorSize;
     }
 
+    final mergedFreeSpace = <String, dynamic>{
+      'name': 'Free Space',
+      'type': 'unallocated',
+      'sizeBytes': totalBytes,
+      'mount': 'unmounted',
+      'currentMount': 'unmounted',
+      'flags': '',
+      'isFreeSpace': true,
+      'isPlanned': true,
+      'formatOnInstall': false,
+    };
+    if (startSector != null) mergedFreeSpace['startSector'] = startSector;
+    if (endSector != null) mergedFreeSpace['endSector'] = endSector;
+    if (sectorSize != null) mergedFreeSpace['sectorSize'] = sectorSize;
+
     setState(() {
-      state.manualPartitions.replaceRange(start, end + 1, [
-        {
-          'name': 'Free Space',
-          'type': 'unallocated',
-          'sizeBytes': totalBytes,
-          'mount': 'unmounted',
-          'currentMount': 'unmounted',
-          'flags': '',
-          'isFreeSpace': true,
-          'isPlanned': true,
-          'formatOnInstall': false,
-        },
-      ]);
+      state.manualPartitions.replaceRange(start, end + 1, [mergedFreeSpace]);
       _selectedIndex = start;
     });
   }
@@ -188,6 +226,9 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
 
     var tempMount = '/';
     final textController = TextEditingController(text: maxMb.toString());
+    final startSector = part['startSector'] as int?;
+    final endSector = part['endSector'] as int?;
+    final sectorSize = part['sectorSize'] as int?;
 
     showDialog<void>(
       context: context,
@@ -267,9 +308,22 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
                     final newBytes = chosenMb * 1024 * 1024;
                     final remainingBytes =
                         (part['sizeBytes'] as int) - newBytes;
+                    final newSectorCount =
+                        startSector != null &&
+                            sectorSize != null &&
+                            sectorSize > 0
+                        ? (newBytes + sectorSize - 1) ~/ sectorSize
+                        : null;
+                    final newEndSector =
+                        startSector != null && newSectorCount != null
+                        ? startSector + newSectorCount - 1
+                        : null;
+                    final remainingStartSector = newEndSector == null
+                        ? null
+                        : newEndSector + 1;
 
                     setState(() {
-                      state.manualPartitions.insert(_selectedIndex!, {
+                      final newPartition = <String, dynamic>{
                         'name': 'New Partition',
                         'type': _filesystemForMount(tempMount),
                         'sizeBytes': newBytes,
@@ -279,12 +333,40 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
                         'isFreeSpace': false,
                         'isPlanned': true,
                         'formatOnInstall': true,
-                      });
+                      };
+                      if (startSector != null) {
+                        newPartition['startSector'] = startSector;
+                      }
+                      if (newEndSector != null) {
+                        newPartition['endSector'] = newEndSector;
+                      }
+                      if (sectorSize != null) {
+                        newPartition['sectorSize'] = sectorSize;
+                      }
+                      state.manualPartitions.insert(
+                        _selectedIndex!,
+                        newPartition,
+                      );
 
                       if (remainingBytes > 10 * 1024 * 1024) {
                         state.manualPartitions[_selectedIndex! +
                                 1]['sizeBytes'] =
                             remainingBytes;
+                        if (remainingStartSector != null) {
+                          state.manualPartitions[_selectedIndex! +
+                                  1]['startSector'] =
+                              remainingStartSector;
+                        }
+                        if (endSector != null) {
+                          state.manualPartitions[_selectedIndex! +
+                                  1]['endSector'] =
+                              endSector;
+                        }
+                        if (sectorSize != null) {
+                          state.manualPartitions[_selectedIndex! +
+                                  1]['sectorSize'] =
+                              sectorSize;
+                        }
                       } else {
                         state.manualPartitions.removeAt(_selectedIndex! + 1);
                       }
@@ -462,7 +544,6 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
     );
   }
 
-  // ignore: unused_element
   void _openResizeDialog(BuildContext context, InstallerState state) {
     if (_selectedIndex == null ||
         _selectedIndex! >= state.manualPartitions.length) {
@@ -474,8 +555,27 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
       return;
     }
 
+    final fsType = _normalizeFilesystemType((part['type'] ?? '').toString());
+    if (!_resizableFilesystems.contains(fsType)) {
+      return;
+    }
+
     final maxMb = (part['sizeBytes'] as int) ~/ (1024 * 1024);
+    final minMb = _minResizeSourceBytes ~/ (1024 * 1024);
+    if (maxMb <= minMb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(state.t('part_no_usable_space')),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     final textController = TextEditingController(text: maxMb.toString());
+    final startSector = part['startSector'] as int?;
+    final oldEndSector = part['endSector'] as int?;
+    final sectorSize = part['sectorSize'] as int?;
 
     showDialog<void>(
       context: context,
@@ -499,6 +599,11 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
                   Text(
                     state.t('part_current_size', {'size': '$maxMb MB'}),
                     style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'En az $minMb MB kaynak bölümde bırakılacak. Desteklenen küçültme: NTFS, EXT4, BTRFS.',
+                    style: const TextStyle(fontSize: 12),
                   ),
                   const SizedBox(height: 16),
                   TextField(
@@ -527,29 +632,63 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
                 ElevatedButton(
                   onPressed: () {
                     var chosenMb = int.tryParse(textController.text) ?? maxMb;
-                    if (chosenMb <= 0 || chosenMb >= maxMb) {
+                    if (chosenMb < minMb || chosenMb >= maxMb) {
                       return;
                     }
 
                     final newBytes = chosenMb * 1024 * 1024;
+                    final sectorCount =
+                        startSector != null &&
+                            sectorSize != null &&
+                            sectorSize > 0
+                        ? (newBytes + sectorSize - 1) ~/ sectorSize
+                        : null;
+                    final newEndSector =
+                        startSector != null && sectorCount != null
+                        ? startSector + sectorCount - 1
+                        : null;
                     final remainingBytes =
-                        (part['sizeBytes'] as int) - newBytes;
+                        newEndSector != null &&
+                            oldEndSector != null &&
+                            sectorSize != null
+                        ? (oldEndSector - newEndSector) * sectorSize
+                        : (part['sizeBytes'] as int) - newBytes;
 
                     setState(() {
                       part['sizeBytes'] = newBytes;
+                      if (newEndSector != null) {
+                        part['endSector'] = newEndSector;
+                      }
                       part['isResized'] = true;
+                      part['isPlanned'] = true;
+                      part['formatOnInstall'] = false;
 
-                      state.manualPartitions.insert(_selectedIndex! + 1, {
-                        'name': 'Free Space',
-                        'type': 'unallocated',
-                        'sizeBytes': remainingBytes,
-                        'mount': 'unmounted',
-                        'currentMount': 'unmounted',
-                        'flags': '',
-                        'isFreeSpace': true,
-                        'isPlanned': false,
-                        'formatOnInstall': false,
-                      });
+                      if (remainingBytes > 10 * 1024 * 1024) {
+                        final freeSpace = <String, dynamic>{
+                          'name': 'Free Space',
+                          'type': 'unallocated',
+                          'sizeBytes': remainingBytes,
+                          'mount': 'unmounted',
+                          'currentMount': 'unmounted',
+                          'flags': '',
+                          'isFreeSpace': true,
+                          'isPlanned': true,
+                          'formatOnInstall': false,
+                        };
+                        if (newEndSector != null) {
+                          freeSpace['startSector'] = newEndSector + 1;
+                        }
+                        if (oldEndSector != null) {
+                          freeSpace['endSector'] = oldEndSector;
+                        }
+                        if (sectorSize != null) {
+                          freeSpace['sectorSize'] = sectorSize;
+                        }
+                        state.manualPartitions.insert(
+                          _selectedIndex! + 1,
+                          freeSpace,
+                        );
+                      }
                     });
                     Navigator.pop(dialogContext);
                   },
@@ -704,7 +843,9 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
           onAdd: isSelectedFreeSpace
               ? () => _openAddDialog(context, state)
               : null,
-          onResize: null,
+          onResize: _canResizeSelection(state)
+              ? () => _openResizeDialog(context, state)
+              : null,
           onMerge: canMerge ? () => _mergeSelectedFreeSpace(state) : null,
           onDelete: hasSelection && !isSelectedFreeSpace
               ? () => _actionDelete(state)
@@ -1114,7 +1255,7 @@ class _PartitionControlPanel extends StatelessWidget {
           const SizedBox(height: 8),
           const _RequirementLine(
             text:
-                'Canli bolum kucultme ilk guvenli surumde kapali tutuluyor. Simdilik yeni bolum, silme, bicimlendirme ve mevcut bolumu yeniden kullanma akislarina odaklaniliyor.',
+                'NTFS, EXT4 ve BTRFS bolumleri bagli degilse guvenli sinirlarla kucultulebilir; kok, EFI ve SWAP kurallari yine zorunludur.',
           ),
         ],
       ),
@@ -1685,6 +1826,10 @@ String _plannedStatusDescription(
   InstallerState state,
   Map<String, dynamic> partition,
 ) {
+  if (partition['isResized'] == true) {
+    return 'Bölüm kurulum sırasında küçültülecek; dosya sistemi korunacak.';
+  }
+
   final mount = (partition['mount'] ?? 'unmounted').toString();
   if (_formatsOnInstall(partition)) {
     return mount == 'unmounted'

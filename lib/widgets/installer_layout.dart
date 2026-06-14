@@ -44,87 +44,223 @@ class _InstallerLayoutState extends State<InstallerLayout> {
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<InstallerState>(context);
-    final visuals = context.installerVisuals;
 
     if (_lastStepIndex != state.currentStep) {
       _transitionDirection = state.currentStep >= _lastStepIndex ? 1 : -1;
       _lastStepIndex = state.currentStep;
     }
-    final contentMaxWidth = state.steps[state.currentStep] == 'Disk'
-        ? 1400.0
-        : 1260.0;
 
     return MouseRegion(
       onHover: _handlePointer,
       onExit: (_) => _pointer.value = const Offset(0.5, 0.5),
       child: Scaffold(
-        body: Container(
-          decoration: BoxDecoration(color: visuals.backgroundBase),
-          child: Stack(
-            children: [
-              ValueListenableBuilder<Offset>(
-                valueListenable: _pointer,
-                builder: (context, pointer, child) {
-                  return _NebulaBackground(pointer: pointer);
-                },
-              ),
-              SafeArea(
-                child: Padding(
-                  padding: visuals.screenPadding,
-                  child: Column(
-                    children: [
-                      _NebulaTopBar(subtitle: state.t('app_subtitle')),
-                      const SizedBox(height: 24),
-                      _PhaseStepper(
-                        currentStep: state.currentStep,
-                        currentStepLabel: state.steps[state.currentStep],
-                        phaseLabels: [
-                          state.t('phase_initialization'),
-                          state.t('phase_configuration'),
-                          state.t('phase_storage'),
-                          state.t('phase_installation'),
-                          state.t('phase_finalization'),
-                        ],
-                      ),
-                      const SizedBox(height: 28),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.topCenter,
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: contentMaxWidth,
-                            ),
-                            child: AnimatedSwitcher(
-                              duration: context.installerMotion.slow,
-                              switchInCurve: context.installerMotion.enterCurve,
-                              switchOutCurve: context.installerMotion.exitCurve,
-                              transitionBuilder: (child, animation) {
-                                return _NebulaDissolveTransition(
-                                  animation: animation,
-                                  direction: _transitionDirection,
-                                  child: child,
-                                );
-                              },
-                              child: KeyedSubtree(
-                                key: ValueKey(state.steps[state.currentStep]),
-                                child: widget.child,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      const _NebulaFooter(),
-                    ],
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final metrics = _InstallerViewportMetrics.fromConstraints(
+              constraints,
+            );
+            final theme = _themeForViewport(context, metrics);
+            final media = MediaQuery.of(context);
+
+            return Theme(
+              data: theme,
+              child: MediaQuery(
+                data: media.copyWith(
+                  textScaler: media.textScaler.clamp(
+                    maxScaleFactor: metrics.maxTextScale,
                   ),
                 ),
+                child: Builder(
+                  builder: (context) {
+                    final visuals = context.installerVisuals;
+
+                    return Container(
+                      decoration: BoxDecoration(color: visuals.backgroundBase),
+                      child: Stack(
+                        children: [
+                          ValueListenableBuilder<Offset>(
+                            valueListenable: _pointer,
+                            builder: (context, pointer, child) {
+                              return _NebulaBackground(pointer: pointer);
+                            },
+                          ),
+                          SafeArea(child: _buildShell(context, state, metrics)),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
   }
+
+  ThemeData _themeForViewport(
+    BuildContext context,
+    _InstallerViewportMetrics metrics,
+  ) {
+    final base = Theme.of(context);
+    final visuals = base.extension<InstallerVisualTokens>()!;
+    final motion = base.extension<InstallerMotionTokens>()!;
+    final density = base.extension<InstallerDensityTokens>()!;
+
+    return base.copyWith(
+      extensions: [
+        visuals.copyWith(
+          panelRadius: metrics.panelRadius,
+          panelBlur: metrics.panelBlur,
+          screenPadding: metrics.screenPadding,
+        ),
+        motion,
+        density.copyWith(
+          spacingScale: metrics.spacingScale,
+          chromeScale: metrics.chromeScale,
+          compactChrome: metrics.compactChrome,
+          tinyViewport: metrics.tinyViewport,
+          showFooter: metrics.showFooter,
+          maxTextScale: metrics.maxTextScale,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildShell(
+    BuildContext context,
+    InstallerState state,
+    _InstallerViewportMetrics metrics,
+  ) {
+    final visuals = context.installerVisuals;
+    final density = context.installerDensity;
+    final contentMaxWidth = state.steps[state.currentStep] == 'Disk'
+        ? 1400.0
+        : 1260.0;
+
+    return Padding(
+      padding: visuals.screenPadding,
+      child: Column(
+        children: [
+          _NebulaTopBar(subtitle: state.t('app_subtitle')),
+          SizedBox(height: metrics.gap(20)),
+          _PhaseStepper(
+            currentStep: state.currentStep,
+            currentStepLabel: state.steps[state.currentStep],
+            phaseLabels: [
+              state.t('phase_initialization'),
+              state.t('phase_configuration'),
+              state.t('phase_storage'),
+              state.t('phase_installation'),
+              state.t('phase_finalization'),
+            ],
+          ),
+          SizedBox(height: metrics.gap(24)),
+          Expanded(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: contentMaxWidth),
+                child: AnimatedSwitcher(
+                  duration: context.installerMotion.slow,
+                  switchInCurve: context.installerMotion.enterCurve,
+                  switchOutCurve: context.installerMotion.exitCurve,
+                  transitionBuilder: (child, animation) {
+                    return _NebulaDissolveTransition(
+                      animation: animation,
+                      direction: _transitionDirection,
+                      child: child,
+                    );
+                  },
+                  child: KeyedSubtree(
+                    key: ValueKey(state.steps[state.currentStep]),
+                    child: widget.child,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (density.showFooter) ...[
+            SizedBox(height: metrics.gap(14)),
+            const _NebulaFooter(),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _InstallerViewportMetrics {
+  const _InstallerViewportMetrics({
+    required this.spacingScale,
+    required this.chromeScale,
+    required this.screenPadding,
+    required this.panelRadius,
+    required this.panelBlur,
+    required this.compactChrome,
+    required this.tinyViewport,
+    required this.showFooter,
+    required this.maxTextScale,
+  });
+
+  final double spacingScale;
+  final double chromeScale;
+  final EdgeInsets screenPadding;
+  final double panelRadius;
+  final double panelBlur;
+  final bool compactChrome;
+  final bool tinyViewport;
+  final bool showFooter;
+  final double maxTextScale;
+
+  factory _InstallerViewportMetrics.fromConstraints(
+    BoxConstraints constraints,
+  ) {
+    final width = constraints.maxWidth.isFinite ? constraints.maxWidth : 1280.0;
+    final height = constraints.maxHeight.isFinite
+        ? constraints.maxHeight
+        : 820.0;
+    final shortestScale = math.min(width / 1280.0, height / 820.0);
+    final compactChrome = width < 1160 || height < 780;
+    final tinyViewport = width < 900 || height < 640;
+    final spacingScale = shortestScale.clamp(0.72, 1.0).toDouble();
+    final chromeScale = shortestScale.clamp(0.78, 1.0).toDouble();
+    final horizontalPadding = tinyViewport
+        ? 10.0
+        : compactChrome
+        ? 16.0
+        : 28.0;
+    final verticalPadding = tinyViewport
+        ? 8.0
+        : compactChrome
+        ? 12.0
+        : 24.0;
+
+    return _InstallerViewportMetrics(
+      spacingScale: spacingScale,
+      chromeScale: chromeScale,
+      screenPadding: EdgeInsets.symmetric(
+        horizontal: horizontalPadding,
+        vertical: verticalPadding,
+      ),
+      panelRadius: tinyViewport
+          ? 18
+          : compactChrome
+          ? 22
+          : 28,
+      panelBlur: tinyViewport ? 6 : 12,
+      compactChrome: compactChrome,
+      tinyViewport: tinyViewport,
+      showFooter: width >= 760 && height >= 620,
+      maxTextScale: tinyViewport
+          ? 1.0
+          : compactChrome
+          ? 1.08
+          : 1.18,
+    );
+  }
+
+  double gap(double value) => value * spacingScale;
 }
 
 class _NebulaDissolveTransition extends StatelessWidget {
@@ -309,7 +445,7 @@ class _NebulaBackgroundState extends State<_NebulaBackground>
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 26),
-  )..repeat();
+  )..value = 0.0;
 
   @override
   void dispose() {
@@ -613,61 +749,77 @@ class _NebulaTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final visuals = context.installerVisuals;
+    final density = context.installerDensity;
     final onSurface = scheme.onSurface;
+    final logoSize = density.tinyViewport ? 30.0 : 42.0 * density.chromeScale;
 
     return NebulaPanel(
       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
       child: Row(
         children: [
-          Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.asset(
-                  'assets/branding/roasd-logo.png',
-                  width: 42,
-                  height: 42,
-                  fit: BoxFit.cover,
+          Expanded(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12 * density.chromeScale),
+                  child: Image.asset(
+                    'stitch_velvet_nebula_installer_redesign/product-logo.png',
+                    width: logoSize,
+                    height: logoSize,
+                    fit: BoxFit.cover,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Ro-Installer',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: onSurface,
-                    ),
+                SizedBox(width: 14 * density.spacingScale),
+                Flexible(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Ro-Installer',
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: onSurface,
+                        ),
+                      ),
+                      if (!density.tinyViewport)
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: visuals.mutedForeground),
+                        ),
+                    ],
                   ),
-                  Text(
-                    subtitle,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: visuals.mutedForeground,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.7),
-              ),
-              color: scheme.surface.withValues(alpha: 0.18),
-            ),
-            child: Text(
-              'v3.0.0',
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(color: scheme.primary),
+                ),
+              ],
             ),
           ),
+          if (!density.tinyViewport) ...[
+            const SizedBox(width: 12),
+            Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: 14 * density.chromeScale,
+                vertical: 10 * density.chromeScale,
+              ),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.7),
+                ),
+                color: scheme.surface.withValues(alpha: 0.18),
+              ),
+              child: Text(
+                'v2.4.0',
+                style: Theme.of(
+                  context,
+                ).textTheme.labelLarge?.copyWith(color: scheme.primary),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -735,12 +887,15 @@ class _PhaseStepperState extends State<_PhaseStepper>
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final visuals = context.installerVisuals;
+    final density = context.installerDensity;
     final activePhase = _phaseIndex();
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final showLabels = constraints.maxWidth > 1080;
-        final connectorMargin = showLabels ? 12.0 : 8.0;
+        final showLabels =
+            constraints.maxWidth > 1080 && !density.compactChrome;
+        final connectorMargin =
+            (showLabels ? 12.0 : 8.0) * density.spacingScale;
 
         return AnimatedBuilder(
           animation: _controller,
@@ -748,7 +903,9 @@ class _PhaseStepperState extends State<_PhaseStepper>
             final pulse = 0.6 + (_controller.value * 0.4);
 
             return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: EdgeInsets.symmetric(
+                horizontal: 10 * density.spacingScale,
+              ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(_PhaseStepper._phases.length * 2 - 1, (
@@ -764,7 +921,7 @@ class _PhaseStepperState extends State<_PhaseStepper>
                         margin: EdgeInsets.symmetric(
                           horizontal: connectorMargin,
                         ),
-                        height: 6,
+                        height: math.max(4, 6 * density.chromeScale),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(999),
                           color: scheme.outlineVariant.withValues(alpha: 0.22),
@@ -818,8 +975,9 @@ class _PhaseStepperState extends State<_PhaseStepper>
                       duration: context.installerMotion.medium,
                       curve: context.installerMotion.enterCurve,
                       padding: EdgeInsets.symmetric(
-                        horizontal: showLabels ? 14 : 10,
-                        vertical: 12,
+                        horizontal:
+                            (showLabels ? 14 : 10) * density.chromeScale,
+                        vertical: 12 * density.chromeScale,
                       ),
                       decoration: BoxDecoration(
                         color: isActive
@@ -846,7 +1004,7 @@ class _PhaseStepperState extends State<_PhaseStepper>
                                 : isActive
                                 ? Icons.radio_button_checked_rounded
                                 : phase.icon,
-                            size: 18,
+                            size: 18 * density.chromeScale,
                             color: isActive
                                 ? scheme.primary
                                 : isDone
@@ -856,7 +1014,7 @@ class _PhaseStepperState extends State<_PhaseStepper>
                                   ),
                           ),
                           if (showLabels) ...[
-                            const SizedBox(width: 8),
+                            SizedBox(width: 8 * density.spacingScale),
                             Text(
                               widget.phaseLabels[phaseIndex].toUpperCase(),
                               style: Theme.of(context).textTheme.labelSmall
@@ -902,7 +1060,7 @@ class _NebulaFooter extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            'Ro-Installer v3.0.0',
+            'Ro-Installer v2.4.0',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: visuals.footerForeground,
               letterSpacing: 1.4,

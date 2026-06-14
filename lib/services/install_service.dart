@@ -54,17 +54,23 @@ class InstallService {
     bool isMock = false,
     List<int> allowedExitCodes = const [0],
   }) async {
+    final stopwatch = Stopwatch()..start();
     final result = await _commandRunner.run(
       cmd,
       args,
       isMock: isMock,
       onLog: (event) => onLog(event.displayMessage),
     );
+    stopwatch.stop();
+    onLog(
+      '[SÜRE] ${result.displayCommandLine} -> exit=${result.exitCode} '
+      'duration=${_formatDuration(stopwatch.elapsed)}',
+    );
 
     if (!result.started) {
       onLog("═══════════════════════════════════════════");
       onLog("[İSTİSNA] Komut çalıştırılamadı: $cmd");
-      onLog("[İSTİSNA] Sebep: ${result.stderr}");
+      onLog("[İSTİSNA] Sebep: ${SecretRedactor.redactText(result.stderr)}");
       onLog(
         "[İSTİSNA] Komut sisteminizde kurulu olmayabilir (PATH kontrol edin).",
       );
@@ -73,12 +79,13 @@ class InstallService {
     }
 
     if (!allowedExitCodes.contains(result.exitCode)) {
-      final errorDetail = result.stderr.isNotEmpty
+      final rawErrorDetail = result.stderr.isNotEmpty
           ? result.stderr
           : (result.stdout.isNotEmpty ? result.stdout : 'Ek bilgi yok');
+      final errorDetail = SecretRedactor.redactText(rawErrorDetail);
       onLog("═══════════════════════════════════════════");
       onLog("[HATA] Komut başarısız oldu!");
-      onLog("[HATA] Komut: ${result.commandLine}");
+      onLog("[HATA] Komut: ${result.displayCommandLine}");
       onLog("[HATA] Çıkış Kodu: ${result.exitCode}");
       onLog("[HATA] Detay: $errorDetail");
       onLog("═══════════════════════════════════════════");
@@ -86,6 +93,28 @@ class InstallService {
     }
 
     return true;
+  }
+
+  String _formatDuration(Duration duration) {
+    final totalSeconds = duration.inSeconds;
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    final millis = duration.inMilliseconds % 1000;
+    if (minutes > 0) {
+      return '${minutes}m ${seconds.toString().padLeft(2, '0')}s';
+    }
+    if (seconds > 0) {
+      return '$seconds.${millis ~/ 100}s';
+    }
+    return '${duration.inMilliseconds}ms';
+  }
+
+  Duration? _stageElapsed(Map<String, dynamic> state, int index) {
+    final startedAt = state['_stage_${index}_startedAt'];
+    if (startedAt is! DateTime) {
+      return null;
+    }
+    return DateTime.now().difference(startedAt);
   }
 
   // Ana kurulum motoru (Orkestratör)
@@ -111,6 +140,7 @@ class InstallService {
     }
 
     void stageBanner(int index, String key, String fallback) {
+      state['_stage_${index}_startedAt'] = DateTime.now();
       final stageName = t(key, fallback);
       log('');
       log(
@@ -122,6 +152,7 @@ class InstallService {
     }
 
     void stageFailed(int index, StageResult result) {
+      final elapsed = _stageElapsed(state, index);
       log(
         t(
           'install_log_stage_failed',
@@ -129,15 +160,22 @@ class InstallService {
           {'index': index.toString(), 'message': result.message},
         ),
       );
+      if (elapsed != null) {
+        log('[SÜRE] AŞAMA $index başarısız oldu: ${_formatDuration(elapsed)}');
+      }
     }
 
     void stageDone(int index, StageResult result) {
+      final elapsed = _stageElapsed(state, index);
       log(
         t('install_log_stage_done', '✓ Aşama {index} tamamlandı: {message}', {
           'index': index.toString(),
           'message': result.message,
         }),
       );
+      if (elapsed != null) {
+        log('[SÜRE] AŞAMA $index tamamlandı: ${_formatDuration(elapsed)}');
+      }
     }
 
     try {

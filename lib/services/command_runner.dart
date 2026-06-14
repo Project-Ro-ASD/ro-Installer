@@ -49,6 +49,9 @@ class CommandResult {
   final bool started;
 
   String get commandLine => [command, ...args].join(' ').trim();
+
+  String get displayCommandLine =>
+      SecretRedactor.redactCommandLine(command, args);
 }
 
 typedef CommandLogCallback = void Function(CommandLogEvent event);
@@ -85,7 +88,55 @@ abstract class CommandRunner {
     List<String> args, {
     bool isMock = false,
     CommandLogCallback? onLog,
+    Duration? timeout,
+    String? stdinText,
   });
+}
+
+class SecretRedactor {
+  SecretRedactor._();
+
+  static String redactCommandLine(String command, List<String> args) {
+    return redactText([command, ...args].join(' ').trim());
+  }
+
+  static String redactText(String raw) {
+    var line = raw;
+
+    line = line.replaceAllMapped(
+      RegExp(
+        r'((?:^|\s)(?:password|passwd|passphrase|802-1x\.password)\s+)([^\s]+)',
+        caseSensitive: false,
+      ),
+      (m) => '${m.group(1)}***',
+    );
+
+    line = line.replaceAllMapped(
+      RegExp(
+        r'((?:--)?(?:password|passwd|passphrase)=)([^\s]+)',
+        caseSensitive: false,
+      ),
+      (m) => '${m.group(1)}***',
+    );
+
+    if (line.toLowerCase().contains('chpasswd')) {
+      line = line.replaceAllMapped(
+        RegExp(r'''(['"])[^'":\s]+:[^'"\s]+\1'''),
+        (m) => '${m.group(1)}***:***${m.group(1)}',
+      );
+      line = line.replaceAllMapped(
+        RegExp(r'''([a-z_][a-z0-9_-]*):([^\s'"]+)''', caseSensitive: false),
+        (m) => '***:***',
+      );
+    }
+
+    line = line.replaceAllMapped(
+      RegExp(r'''(root:)([^\s'"]+)''', caseSensitive: false),
+      (m) => '${m.group(1)}***',
+    );
+
+    return line;
+  }
 }
 
 /// Gerçek sistem komutları çalıştıran CommandRunner uygulaması.
@@ -99,13 +150,19 @@ class RealCommandRunner extends CommandRunner {
     List<String> args, {
     bool isMock = false,
     CommandLogCallback? onLog,
+    Duration? timeout,
+    String? stdinText,
   }) async {
+    final commandLine = _effectiveCommandLine(command, args);
+    final runCommand = commandLine.command;
+    final runArgs = commandLine.args;
+
     onLog?.call(
       CommandLogEvent(
         type: CommandLogType.command,
-        command: command,
-        args: List.unmodifiable(args),
-        message: [command, ...args].join(' ').trim(),
+        command: runCommand,
+        args: List.unmodifiable(runArgs),
+        message: SecretRedactor.redactCommandLine(runCommand, runArgs),
       ),
     );
 
@@ -120,8 +177,8 @@ class RealCommandRunner extends CommandRunner {
         ),
       );
       return CommandResult(
-        command: command,
-        args: List.unmodifiable(args),
+        command: runCommand,
+        args: List.unmodifiable(runArgs),
         exitCode: 0,
         stdout: '',
         stderr: '',
@@ -130,7 +187,11 @@ class RealCommandRunner extends CommandRunner {
     }
 
     try {
-      final process = await Process.start(command, args);
+      final process = await Process.start(runCommand, runArgs);
+      if (stdinText != null) {
+        process.stdin.write(stdinText);
+        await process.stdin.close();
+      }
       final stdoutBuffer = StringBuffer();
       final stderrBuffer = StringBuffer();
       final stdoutDone = Completer<void>();
@@ -140,53 +201,52 @@ class RealCommandRunner extends CommandRunner {
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen(
-        (line) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty) return;
-          stdoutBuffer.writeln(trimmed);
-          onLog?.call(
-            CommandLogEvent(
-              type: CommandLogType.stdout,
-              command: command,
-              args: List.unmodifiable(args),
-              message: trimmed,
-            ),
+            (line) {
+              final trimmed = line.trim();
+              if (trimmed.isEmpty) return;
+              stdoutBuffer.writeln(trimmed);
+              onLog?.call(
+                CommandLogEvent(
+                  type: CommandLogType.stdout,
+                  command: runCommand,
+                  args: List.unmodifiable(runArgs),
+                  message: SecretRedactor.redactText(trimmed),
+                ),
+              );
+            },
+            onDone: () => stdoutDone.complete(),
+            onError: (_) => stdoutDone.complete(),
+            cancelOnError: false,
           );
-        },
-        onDone: () => stdoutDone.complete(),
-        onError: (_) => stdoutDone.complete(),
-        cancelOnError: false,
-      );
 
       process.stderr
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen(
-        (line) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty) return;
-          stderrBuffer.writeln(trimmed);
-          onLog?.call(
-            CommandLogEvent(
-              type: CommandLogType.stderr,
-              command: command,
-              args: List.unmodifiable(args),
-              message: trimmed,
-            ),
+            (line) {
+              final trimmed = line.trim();
+              if (trimmed.isEmpty) return;
+              stderrBuffer.writeln(trimmed);
+              onLog?.call(
+                CommandLogEvent(
+                  type: CommandLogType.stderr,
+                  command: runCommand,
+                  args: List.unmodifiable(runArgs),
+                  message: SecretRedactor.redactText(trimmed),
+                ),
+              );
+            },
+            onDone: () => stderrDone.complete(),
+            onError: (_) => stderrDone.complete(),
+            cancelOnError: false,
           );
-        },
-        onDone: () => stderrDone.complete(),
-        onError: (_) => stderrDone.complete(),
-        cancelOnError: false,
-      );
 
-      final exitCode = await process.exitCode;
-      await stdoutDone.future;
-      await stderrDone.future;
+      final exitCode = await _waitForExit(process, timeout, stderrBuffer);
+      await _waitForStreams(stdoutDone, stderrDone);
 
       return CommandResult(
-        command: command,
-        args: List.unmodifiable(args),
+        command: runCommand,
+        args: List.unmodifiable(runArgs),
         exitCode: exitCode,
         stdout: stdoutBuffer.toString().trim(),
         stderr: stderrBuffer.toString().trim(),
@@ -194,8 +254,8 @@ class RealCommandRunner extends CommandRunner {
       );
     } catch (e) {
       return CommandResult(
-        command: command,
-        args: List.unmodifiable(args),
+        command: runCommand,
+        args: List.unmodifiable(runArgs),
         exitCode: -1,
         stdout: '',
         stderr: e.toString(),
@@ -203,4 +263,89 @@ class RealCommandRunner extends CommandRunner {
       );
     }
   }
+
+  Future<int> _waitForExit(
+    Process process,
+    Duration? timeout,
+    StringBuffer stderrBuffer,
+  ) async {
+    if (timeout == null) {
+      return process.exitCode;
+    }
+
+    try {
+      return await process.exitCode.timeout(timeout);
+    } on TimeoutException {
+      stderrBuffer.writeln(
+        'Command timed out after ${timeout.inSeconds}s; terminating process.',
+      );
+      process.kill(ProcessSignal.sigterm);
+      try {
+        await process.exitCode.timeout(const Duration(seconds: 2));
+      } on TimeoutException {
+        process.kill(ProcessSignal.sigkill);
+        try {
+          await process.exitCode.timeout(const Duration(seconds: 2));
+        } on TimeoutException {
+          // The caller still receives a timeout result; stream draining below
+          // is also bounded so the UI cannot remain blocked here.
+        }
+      }
+      return -124;
+    }
+  }
+
+  Future<void> _waitForStreams(
+    Completer<void> stdoutDone,
+    Completer<void> stderrDone,
+  ) async {
+    await Future.wait([
+      stdoutDone.future,
+      stderrDone.future,
+    ]).timeout(const Duration(seconds: 2), onTimeout: () => <void>[]);
+  }
+
+  _EffectiveCommandLine _effectiveCommandLine(
+    String command,
+    List<String> args,
+  ) {
+    if (!_shouldUseSudo(command)) {
+      return _EffectiveCommandLine(command, List.unmodifiable(args));
+    }
+    return _EffectiveCommandLine(
+      'sudo',
+      List.unmodifiable(['-n', command, ...args]),
+    );
+  }
+
+  bool _shouldUseSudo(String command) {
+    final sudoModeRaw = Platform.environment['RO_INSTALLER_COMMAND_SUDO']
+        ?.toLowerCase()
+        .trim();
+    final sudoMode = sudoModeRaw == '1' || sudoModeRaw == 'true';
+    if (!sudoMode || _effectiveUid == 0) {
+      return false;
+    }
+
+    final basename = command.split('/').last;
+    return basename != 'sudo' && basename != 'pkexec' && basename != 'id';
+  }
+
+  static final int _effectiveUid = _readEffectiveUid();
+
+  static int _readEffectiveUid() {
+    try {
+      final result = Process.runSync('id', ['-u']);
+      return int.tryParse(result.stdout.toString().trim()) ?? -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+}
+
+class _EffectiveCommandLine {
+  const _EffectiveCommandLine(this.command, this.args);
+
+  final String command;
+  final List<String> args;
 }

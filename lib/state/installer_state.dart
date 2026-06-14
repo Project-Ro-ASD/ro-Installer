@@ -19,6 +19,8 @@ class InstallerState extends ChangeNotifier {
   final String platformLocaleName;
 
   Timer? _networkTimer;
+  bool _isNetworkCheckRunning = false;
+  bool _isDisposed = false;
 
   void _initNetworkChecker() {
     // İlk çalıştırma
@@ -31,18 +33,39 @@ class InstallerState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _isDisposed = true;
     _networkTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> _checkNetworkPeriodically() async {
-    final wasEthernetConnected = isEthernetConnected;
-    isEthernetConnected = await NetworkService.instance.checkEthernet();
+  @override
+  void notifyListeners() {
+    if (_isDisposed) {
+      return;
+    }
+    super.notifyListeners();
+  }
 
-    if (wasEthernetConnected != isEthernetConnected) {
-      // Otomatik bağlantı ayarı
-      if (isEthernetConnected) networkStatus = 'connected';
-      notifyListeners();
+  Future<void> _checkNetworkPeriodically() async {
+    if (_isDisposed) {
+      return;
+    }
+    if (_isNetworkCheckRunning) {
+      return;
+    }
+    _isNetworkCheckRunning = true;
+
+    final wasEthernetConnected = isEthernetConnected;
+    final wasStatus = networkStatus;
+    try {
+      isEthernetConnected = await NetworkService.instance.checkEthernet();
+      _syncNetworkStatus();
+      if (wasEthernetConnected != isEthernetConnected ||
+          wasStatus != networkStatus) {
+        notifyListeners();
+      }
+    } finally {
+      _isNetworkCheckRunning = false;
     }
   }
 
@@ -51,29 +74,43 @@ class InstallerState extends ChangeNotifier {
     notifyListeners();
 
     wifiNetworks = await NetworkService.instance.scanWifi();
-
-    // Halihazırda bağlı Wi-Fi varsa statüyü connected yap
-    final isWifiConnected = wifiNetworks.any((net) => net['inUse'] == true);
-    if (isWifiConnected && networkStatus == 'offline') {
-      networkStatus = 'connected';
-    }
+    _syncNetworkStatus();
 
     isScanningWifi = false;
     notifyListeners();
   }
 
-  Future<bool> connectToWifi(String ssid, String password) async {
-    final success = await NetworkService.instance.connectWifi(
+  Future<bool> connectToWifi(
+    String ssid,
+    String password, {
+    String security = '',
+    String identity = '',
+    String anonymousIdentity = '',
+    bool enterprise = false,
+    String eapMethod = 'peap',
+    String phase2Auth = 'mschapv2',
+  }) async {
+    lastWifiConnectionError = '';
+    final result = await NetworkService.instance.connectWifiDetailed(
       ssid,
       password,
       isMock: isMockEnabled,
+      security: security,
+      identity: identity,
+      anonymousIdentity: anonymousIdentity,
+      enterprise: enterprise,
+      eapMethod: eapMethod,
+      phase2Auth: phase2Auth,
     );
-    if (success) {
+    if (result.success) {
       await scanWifiNetworks(); // Listeyi yenile
-      networkStatus = 'connected';
+      _syncNetworkStatus();
+      notifyListeners();
+    } else {
+      lastWifiConnectionError = result.message;
       notifyListeners();
     }
-    return success;
+    return result.success;
   }
 
   // Adımlar listesi (Dinamik - partitionMethod ve installType'a göre şekillenir)
@@ -123,15 +160,18 @@ class InstallerState extends ChangeNotifier {
   bool isEthernetConnected = false;
   List<Map<String, dynamic>> wifiNetworks = [];
   bool isScanningWifi = false;
+  String lastWifiConnectionError = '';
+  bool get hasActiveWifi => wifiNetworks.any((net) => net['inUse'] == true);
+  bool get hasActiveNetwork => isEthernetConnected || hasActiveWifi;
 
   // ---- 5. Account ----
-  String fullName = 'Geliştirici Test';
-  String username = 'roasd';
-  String password = '1234';
+  String fullName = '';
+  String username = '';
+  String password = '';
   bool isAdministrator = true;
 
   // ---- 6. Type ----
-  String installType = 'standard'; // Deneysel varsayılan
+  String installType = 'standard';
 
   // ---- 7. Disk ----
   String selectedDisk = '';
@@ -140,6 +180,7 @@ class InstallerState extends ChangeNotifier {
   String fileSystem = 'btrfs'; // Deneysel için btrfs
   String partitionMethod = 'full';
   double linuxDiskSizeGB = 60.0;
+  Map<String, dynamic> selectedFreeSpace = {};
 
   // Manuel Bölümlendirme Planı / Haritası
   List<Map<String, dynamic>> manualPartitions = [];
@@ -161,7 +202,25 @@ class InstallerState extends ChangeNotifier {
   bool isDetectingOS = false; // UI'da loading göstermek için
 
   // ---- 8. Kernel ----
-  String kernelType = 'stable'; // Deneysel varsayılan
+  Set<String> selectedKernelChannels = {'stable'};
+  bool isKernelSelected(String channel) =>
+      selectedKernelChannels.contains(channel);
+  bool get hasAnyKernelSelected => selectedKernelChannels.isNotEmpty;
+  List<String> get selectedKernelChannelsList {
+    final ordered = <String>[];
+    if (selectedKernelChannels.contains('stable')) {
+      ordered.add('stable');
+    }
+    if (selectedKernelChannels.contains('experimental')) {
+      ordered.add('experimental');
+    }
+    for (final channel in selectedKernelChannels) {
+      if (!ordered.contains(channel)) {
+        ordered.add(channel);
+      }
+    }
+    return ordered;
+  }
 
   // Navigasyon metodları
   void nextStep() {
@@ -295,16 +354,50 @@ class InstallerState extends ChangeNotifier {
 
   void updateInstallType(String type) {
     installType = type;
-    // Eğer standart kurulum seçilirse, deneysel kernel kapatılıp otomatik stable yapılır
+    // Standart akış yalnızca ro-kernel-stable politikasıyla devam eder.
     if (type == 'standard') {
-      kernelType = 'stable';
+      selectedKernelChannels = {'stable'};
+      if (partitionMethod == 'manual' || partitionMethod == 'free_space') {
+        partitionMethod = 'full';
+        selectedFreeSpace = {};
+      }
     }
     notifyListeners();
   }
 
   void updateKernel(String type) {
-    kernelType = type;
+    selectedKernelChannels = type == 'experimental'
+        ? {'stable', 'experimental'}
+        : {'stable'};
     notifyListeners();
+  }
+
+  bool setKernelSelected(String channel, bool selected) {
+    final alreadySelected = selectedKernelChannels.contains(channel);
+    if (selected) {
+      if (alreadySelected) {
+        return true;
+      }
+      selectedKernelChannels.add(channel);
+      notifyListeners();
+      return true;
+    }
+
+    if (!alreadySelected) {
+      return true;
+    }
+
+    if (selectedKernelChannels.length == 1) {
+      return false;
+    }
+
+    selectedKernelChannels.remove(channel);
+    notifyListeners();
+    return true;
+  }
+
+  void _syncNetworkStatus() {
+    networkStatus = hasActiveNetwork ? 'connected' : 'offline';
   }
 
   void updateAccount(String fName, String uName, String pass, bool isAdmin) {
@@ -328,7 +421,15 @@ class InstallerState extends ChangeNotifier {
   }
 
   void updatePartitionMethod(String method) {
-    partitionMethod = method;
+    final nextMethod =
+        installType != 'advanced' &&
+            (method == 'manual' || method == 'free_space')
+        ? 'full'
+        : method;
+    partitionMethod = nextMethod;
+    if (nextMethod != 'free_space') {
+      selectedFreeSpace = {};
+    }
     notifyListeners();
   }
 
@@ -340,11 +441,19 @@ class InstallerState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateFreeSpaceSelection(Map<String, dynamic>? freeSpace) {
+    selectedFreeSpace = freeSpace == null
+        ? {}
+        : Map<String, dynamic>.from(freeSpace);
+    notifyListeners();
+  }
+
   void selectDisk(Map<String, dynamic> diskObj) {
     final newDisk = diskObj['name'] as String;
     // Eğer önceden seçilen disk ile yenisi farklıysa eski disk bölümlerini iptal et (Sıfırla)
     if (selectedDisk != newDisk) {
       manualPartitions.clear();
+      selectedFreeSpace = {};
     }
     selectedDiskDetails = diskObj;
     selectedDisk = newDisk;

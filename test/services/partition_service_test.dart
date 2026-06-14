@@ -8,7 +8,13 @@ void main() {
       final fake = FakeCommandRunner();
       fake.addResponse(
         'lsblk',
-        ['-J', '-b', '-o', 'NAME,FSTYPE,SIZE,MOUNTPOINT,PARTFLAGS', '/dev/sda'],
+        [
+          '-J',
+          '-b',
+          '-o',
+          'NAME,FSTYPE,SIZE,START,MOUNTPOINTS,MOUNTPOINT,PARTFLAGS,TYPE,PTTYPE',
+          '/dev/sda',
+        ],
         stdout: '''
 {
   "blockdevices": [
@@ -53,7 +59,13 @@ void main() {
       final fake = FakeCommandRunner();
       fake.addResponse(
         'lsblk',
-        ['-J', '-b', '-o', 'NAME,FSTYPE,SIZE,MOUNTPOINT,PARTFLAGS', '/dev/sda'],
+        [
+          '-J',
+          '-b',
+          '-o',
+          'NAME,FSTYPE,SIZE,START,MOUNTPOINTS,MOUNTPOINT,PARTFLAGS,TYPE,PTTYPE',
+          '/dev/sda',
+        ],
         stdout: '''
 {
   "blockdevices": [
@@ -90,7 +102,13 @@ void main() {
       final fake = FakeCommandRunner();
       fake.addResponse(
         'lsblk',
-        ['-J', '-b', '-o', 'NAME,FSTYPE,SIZE,MOUNTPOINT,PARTFLAGS', '/dev/sda'],
+        [
+          '-J',
+          '-b',
+          '-o',
+          'NAME,FSTYPE,SIZE,START,MOUNTPOINTS,MOUNTPOINT,PARTFLAGS,TYPE,PTTYPE',
+          '/dev/sda',
+        ],
         stdout: '''
 {
   "blockdevices": [
@@ -116,7 +134,13 @@ void main() {
       final fake = FakeCommandRunner();
       fake.addResponse(
         'lsblk',
-        ['-J', '-b', '-o', 'NAME,FSTYPE,SIZE,MOUNTPOINT,PARTFLAGS', '/dev/sda'],
+        [
+          '-J',
+          '-b',
+          '-o',
+          'NAME,FSTYPE,SIZE,START,MOUNTPOINTS,MOUNTPOINT,PARTFLAGS,TYPE,PTTYPE',
+          '/dev/sda',
+        ],
         stdout: '''
 {
   "blockdevices": [
@@ -149,7 +173,13 @@ void main() {
       final fake = FakeCommandRunner();
       fake.addResponse(
         'lsblk',
-        ['-J', '-b', '-o', 'NAME,FSTYPE,SIZE,MOUNTPOINT,PARTFLAGS', '/dev/sda'],
+        [
+          '-J',
+          '-b',
+          '-o',
+          'NAME,FSTYPE,SIZE,START,MOUNTPOINTS,MOUNTPOINT,PARTFLAGS,TYPE,PTTYPE',
+          '/dev/sda',
+        ],
         exitCode: 1,
         stderr: 'error',
       );

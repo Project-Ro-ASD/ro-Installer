@@ -12,9 +12,10 @@ class DiskService {
 
   // EFI System Partition GPT Type UUID (Standart)
   static const String _efiPartTypeUUID = 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b';
-  static const List<String> _supportedShrinkFs = ['ntfs', 'ext4'];
+  static const List<String> _supportedShrinkFs = ['ntfs', 'ext4', 'btrfs'];
   static const int _minAlongsideLinuxBytes = 40 * 1024 * 1024 * 1024;
   static const int _minSourcePartitionBytes = 40 * 1024 * 1024 * 1024;
+  static const int _sourcePartitionExtraMarginBytes = 10 * 1024 * 1024 * 1024;
 
   Future<List<Map<String, dynamic>>> getDisks() async {
     List<Map<String, dynamic>> diskList = [];
@@ -170,6 +171,18 @@ class DiskService {
                   bitlockerDetected = true;
                 }
 
+                bool isMountedAsLive = false;
+                if (child.containsKey('mountpoints') &&
+                    child['mountpoints'] != null) {
+                  for (var mp in (child['mountpoints'] as List<dynamic>)) {
+                    if (mp != null &&
+                        (mp.toString().contains('/run/initramfs') ||
+                            mp.toString().contains('/live'))) {
+                      isMountedAsLive = true;
+                    }
+                  }
+                }
+
                 // NTFS algılama → Windows
                 if (normalizedFs == 'ntfs') {
                   foundNtfs = true;
@@ -178,17 +191,6 @@ class DiskService {
                 // Linux dosya sistemi algılama
                 if (['ext4', 'btrfs', 'xfs', 'ext3'].contains(normalizedFs)) {
                   // Sadece Live ortamda mount edilmemiş olanları say (aksi halde Live USB'nin kendi bölümünü yakalar)
-                  bool isMountedAsLive = false;
-                  if (child.containsKey('mountpoints') &&
-                      child['mountpoints'] != null) {
-                    for (var mp in (child['mountpoints'] as List<dynamic>)) {
-                      if (mp != null &&
-                          (mp.toString().contains('/run/initramfs') ||
-                              mp.toString().contains('/live'))) {
-                        isMountedAsLive = true;
-                      }
-                    }
-                  }
                   if (!isMountedAsLive) {
                     foundLinuxFs = true;
                   }
@@ -209,6 +211,7 @@ class DiskService {
                   'partType': partType,
                   'sizeBytes': partSize,
                   'isEfi': partType == _efiPartTypeUUID,
+                  'isMountedAsLive': isMountedAsLive,
                   'startSector': startSector,
                   'endSector': endSector,
                 });
@@ -268,9 +271,13 @@ class DiskService {
         } else if (!await _hasCommand('e2fsck')) {
           shrinkSafetyIssue = 'ext4_check_tool_missing';
         }
+      } else if (candidateType == 'btrfs') {
+        if (!await _hasCommand('btrfs')) {
+          shrinkSafetyIssue = 'btrfs_resize_tool_missing';
+        }
       }
 
-      if (shrinkSafetyIssue == null) {
+      if (shrinkSafetyIssue == null || shrinkSafetyIssue == 'ntfs_dirty') {
         canShrinkCandidateBeUsed = true;
       }
     }
@@ -289,8 +296,9 @@ class DiskService {
         sectorSize,
         partitionTable,
       );
+      final candidateSizeBytes = shrinkCandidate['sizeBytes'] as int;
       final shrinkableBytes =
-          (shrinkCandidate['sizeBytes'] as int) - _minSourcePartitionBytes;
+          candidateSizeBytes - _minimumSourcePartitionBytes(candidateSizeBytes);
       alongsideMaxLinuxBytes =
           gapAfterShrinkCandidateBytes +
           (shrinkableBytes > 0 ? shrinkableBytes : 0);
@@ -314,12 +322,15 @@ class DiskService {
     if (bitlockerDetected) {
       alongsideBlockers.add('bitlocker_enabled');
     }
+    if (shrinkSafetyIssue == 'ntfs_dirty') {
+      alongsideBlockers.add('ntfs_dirty');
+    }
     if (alongsideMaxLinuxBytes < _minAlongsideLinuxBytes) {
       if (shrinkCandidate == null &&
           largestFreeContiguousBytes < _minAlongsideLinuxBytes) {
         alongsideBlockers.add('no_shrink_candidate');
       }
-      if (shrinkSafetyIssue != null) {
+      if (shrinkSafetyIssue != null && shrinkSafetyIssue != 'ntfs_dirty') {
         alongsideBlockers.add(shrinkSafetyIssue);
       } else {
         alongsideBlockers.add('alongside_minimum_not_met');
@@ -394,7 +405,8 @@ class DiskService {
             .where(
               (part) =>
                   _supportedShrinkFs.contains(part['fsType']) &&
-                  part['isEfi'] != true,
+                  part['isEfi'] != true &&
+                  part['isMountedAsLive'] != true,
             )
             .toList()
           ..sort(
@@ -415,10 +427,7 @@ class DiskService {
     }
 
     if (detectedOS == 'Linux') {
-      return candidates.cast<Map<String, dynamic>>().firstWhere(
-        (part) => part['fsType'] == 'ext4',
-        orElse: () => candidates.first,
-      );
+      return candidates.first;
     }
 
     return candidates.first;
@@ -562,5 +571,13 @@ class DiskService {
       return 0;
     }
     return gapSectors * sectorSize;
+  }
+
+  int _minimumSourcePartitionBytes(int currentSizeBytes) {
+    final percentReserve = (currentSizeBytes * 0.10).round();
+    final baseReserve = percentReserve > _minSourcePartitionBytes
+        ? percentReserve
+        : _minSourcePartitionBytes;
+    return baseReserve + _sourcePartitionExtraMarginBytes;
   }
 }

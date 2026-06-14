@@ -42,6 +42,10 @@ endif()
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_14)
   target_compile_options(${TARGET} PRIVATE -Wall -Werror)
+  # RPM/Fedora ortamina eklenen -specs bayraklari clang tarafinda
+  # "unused-command-line-argument" uretir; bu uyariyi hata olmaktan cikar.
+  target_compile_options(${TARGET} PRIVATE "$<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument>")
+  target_compile_options(${TARGET} PRIVATE "$<$<CXX_COMPILER_ID:Clang>:-Wno-unused-command-line-argument>")
   target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
   target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
 endfunction()

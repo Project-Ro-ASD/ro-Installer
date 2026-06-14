@@ -33,32 +33,46 @@ class KernelScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = Provider.of<InstallerState>(context);
     final theme = Theme.of(context);
+    void showSelectionRequired() {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(state.t('kernel_select_at_least_one'))),
+      );
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 1040;
         final dense = constraints.maxHeight < 900;
-        final online = state.networkStatus == 'connected';
+        final online = state.hasActiveNetwork;
+        final stableSelected = state.isKernelSelected('stable');
+        final experimentalSelected = state.isKernelSelected('experimental');
+        final selectedChannelsLabel = <String>[
+          if (stableSelected) state.t('kernel_channel_stable'),
+          if (experimentalSelected) state.t('kernel_channel_experimental'),
+        ].join(' + ');
+        final channelSummaryLabel = selectedChannelsLabel.isEmpty
+            ? state.t('unknown')
+            : selectedChannelsLabel;
 
         final stableCard = _KernelCard(
           title: state.t('kernel_stable_title'),
           description: state.t('kernel_stable_desc'),
           accent: theme.colorScheme.primary,
           icon: Icons.verified_rounded,
-          selected: state.kernelType == 'stable',
+          selected: stableSelected,
           channelLabel: state.t('kernel_channel_stable'),
           featureA: state.t('kernel_s_feat1'),
           featureB: state.t('kernel_s_feat2'),
-          buttonLabel: _buttonLabel(
-            state,
-            false,
-            true,
-            state.kernelType == 'stable',
-          ),
-          statusLabel: state.kernelType == 'stable'
+          buttonLabel: _buttonLabel(state, false, true, stableSelected),
+          statusLabel: stableSelected
               ? state.t('kernel_status_active')
               : state.t('kernel_status_available'),
-          onSelect: () => state.updateKernel('stable'),
+          onSelect: () {
+            final ok = state.setKernelSelected('stable', !stableSelected);
+            if (!ok) {
+              showSelectionRequired();
+            }
+          },
           dense: dense,
         );
 
@@ -67,26 +81,27 @@ class KernelScreen extends StatelessWidget {
           description: state.t('kernel_exp_desc'),
           accent: const Color(0xFFFF906A),
           icon: Icons.science_rounded,
-          selected: state.kernelType == 'experimental' && online,
+          selected: experimentalSelected,
           channelLabel: state.t('kernel_channel_experimental'),
           featureA: state.t('kernel_e_feat1'),
           featureB: state.t('kernel_e_feat2'),
-          buttonLabel: _buttonLabel(
-            state,
-            true,
-            online,
-            state.kernelType == 'experimental' && online,
-          ),
+          buttonLabel: _buttonLabel(state, true, online, experimentalSelected),
           statusLabel: !online
               ? state.t('kernel_status_offline_gated')
-              : state.kernelType == 'experimental'
+              : experimentalSelected
               ? state.t('kernel_status_active')
               : state.t('kernel_status_available'),
           disabled: !online,
           disabledMessage: state.t('kernel_network_required_message'),
           onSelect: () {
             if (online) {
-              state.updateKernel('experimental');
+              final ok = state.setKernelSelected(
+                'experimental',
+                !experimentalSelected,
+              );
+              if (!ok) {
+                showSelectionRequired();
+              }
             }
           },
           dense: dense,
@@ -129,6 +144,11 @@ class KernelScreen extends StatelessWidget {
                             : state.t('kernel_path_standard'),
                         color: theme.colorScheme.primary,
                         icon: Icons.tune_rounded,
+                      ),
+                      NebulaStatusChip(
+                        label: channelSummaryLabel,
+                        color: theme.colorScheme.primary,
+                        icon: Icons.layers_rounded,
                       ),
                       NebulaStatusChip(
                         label: state.t('install_est'),
@@ -193,7 +213,7 @@ class KernelScreen extends StatelessWidget {
                 NebulaPrimaryButton(
                   label: state.t('install_init'),
                   icon: Icons.rocket_launch_rounded,
-                  onPressed: state.nextStep,
+                  onPressed: state.hasAnyKernelSelected ? state.nextStep : null,
                 ),
               ],
             ),

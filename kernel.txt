@@ -1,0 +1,173 @@
+Kernel live ISO uyumluluk raporu
+
+Tarih: 2026-04-30
+Kaynaklar:
+- /home/smurat/Ro-ASD/Installer/ro-Installer/scripts/02-build-iso.sh
+- /home/smurat/Ro-ASD/Installer/ro-Installer/outputs/logs/02-build-iso-20260430-163842.log
+- ro-kernel-stable RPM icerigi
+- Fedora EROFS live media degisikligi: https://fedoraproject.org/wiki/Changes/EROFSforLiveMedia
+- Linux kernel EROFS dokumani: https://www.kernel.org/doc/html/latest/filesystems/erofs.html
+- dracut dmsquash-live kaynagi: https://kernel.googlesource.com/pub/scm/boot/dracut/dracut/+/master/modules.d/90dmsquash-live/dmsquash-live-root.sh
+
+Ozet
+
+RPM build basarili. Hata ISO icindeki live rootfs ozellestirilirken custom kernel icin live initrd uretilmesi asamasinda cikiyor.
+
+Hata noktasi:
+- scripts/02-build-iso.sh:686
+- dracut -f --no-hostonly --add 'dmsquash-live' --add-drivers 'i915 xe simpledrm' /var/tmp/ro-live-initrd.img <kernel-version>
+
+Ana hata:
+- dracut[E]: Module 'dmsquash-live' depends on module 'overlayfs', which can't be installed
+- dracut[E]: Module 'dmsquash-live' cannot be installed.
+
+Bu nedenle bugunku dogrudan blokaj:
+- CONFIG_OVERLAY_FS kapali
+
+Tam eksik/hatali liste
+
+1. CONFIG_OVERLAY_FS kapali
+- Durum: # CONFIG_OVERLAY_FS is not set
+- Etki: dracut, dmsquash-live modulu icin overlayfs bekliyor. Bu olmadigi icin live initrd olusmuyor.
+- Oncelik: kritik
+- Cozum: CONFIG_OVERLAY_FS=y onerilir. CONFIG_OVERLAY_FS=m de olabilir ama live ortam icin =y daha guvenli.
+
+2. CONFIG_EROFS_FS kapali
+- Durum: # CONFIG_EROFS_FS is not set
+- Etki: kaynak Fedora 43 KDE Live ISO icindeki LiveOS imaji erofs. Logta "Detected LiveOS image filesystem type: erofs" goruluyor. Overlayfs duzeltilse bile bir sonraki boot/mount asamasinda erofs destegi gerekecek.
+- Oncelik: kritik
+- Cozum: CONFIG_EROFS_FS=y
+- Not: image mkfs.erofs -zlz4hc ile yeniden uretildigi icin EROFS compression/LZ4 destegi de acik olmali.
+
+3. CONFIG_SQUASHFS kapali
+- Durum: # CONFIG_SQUASHFS is not set
+- Etki: Fedora 43 EROFS kullansa da live medya ve dracut live zincirinde SquashFS destegi beklenen bir bilesen. Stock Fedora kernelinde bulunuyor, custom kernelde yok.
+- Oncelik: yuksek
+- Cozum: CONFIG_SQUASHFS=y veya CONFIG_SQUASHFS=m
+
+4. CONFIG_DM_SNAPSHOT kapali
+- Durum: # CONFIG_DM_SNAPSHOT is not set
+- Etki: live overlay tarafinda device-mapper snapshot fallback secenegi kayboluyor.
+- Oncelik: orta-yuksek
+- Cozum: CONFIG_DM_SNAPSHOT=m
+
+5. CONFIG_DM_THIN_PROVISIONING kapali
+- Durum: # CONFIG_DM_THIN_PROVISIONING is not set
+- Etki: rd.live.overlay.thin benzeri senaryolar icin gerekli olabilir. Bugunku ana hata degil.
+- Oncelik: orta
+- Cozum: gerekiyorsa CONFIG_DM_THIN_PROVISIONING=m
+
+6. CONFIG_USB_UAS kapali
+- Durum: # CONFIG_USB_UAS is not set
+- Etki: USB enclosure veya bazi harici depolama cihazlarindan boot senaryolarinda faydali olabilir. Bugunku ana hata degil.
+- Oncelik: dusuk-orta
+- Cozum: CONFIG_USB_UAS=y veya CONFIG_USB_UAS=m
+
+7. modules.order ve modules.* metadata davranisi sorunlu
+- Belirti: logda depmod, modules.order dosyasini acamadigina dair warning basiyor.
+- Sebep: kernel.spec icinde %install sonuna dogru modules.dep, modules.order ve benzeri dosyalar buildroot'tan siliniyor; sonra %files modules bolumunde bunlar ghost olarak tanimlaniyor.
+- Etki: bu warning tek basina ana hata degil, ama dracut/depmod akisini gereksiz kirilgan hale getiriyor.
+- Oncelik: orta
+- Cozum:
+  - Canli ISO/chroot icinde dracut calismadan once modules.dep ve modules.order dosyalarinin gercekten var olmasini sagla
+  - Gerekirse packaging mantigini Fedora stock kernel davranisina yaklastir
+  - Bu madde overlayfs/erofs kadar kritik degil ama duzeltilmeli
+
+Dogru gorunen mevcut bilesenler
+
+Asagidakiler mevcut ve dogrudan eksik degil:
+- CONFIG_BLK_DEV_LOOP=y
+- CONFIG_ISO9660_FS=y
+- CONFIG_EXT4_FS=y
+- CONFIG_VFAT_FS=y
+- CONFIG_USB_STORAGE=y
+- CONFIG_SCSI=y
+- CONFIG_BLK_DEV_SR=y
+- CONFIG_NLS_CODEPAGE_437=y
+- CONFIG_NLS_ASCII=y
+- CONFIG_BLK_DEV_DM=m
+- dm-mod.ko mevcut
+
+Yerel RPM incelemesinde bulunmayan moduller
+
+Custom kernel RPM setinde su moduller bulunmadi:
+- overlay.ko
+- erofs ile ilgili moduller
+- squashfs ile ilgili moduller
+- dm-snapshot.ko
+- uas.ko
+
+Fedora stock kernel ile hedef davranis
+
+Fedora 43 canli medya senaryosu icin pratik hedef:
+- overlayfs destegi olmali
+- erofs destegi olmali
+- squashfs destegi olmali
+- live root acilisi icin gerekli loop/scsi/iso9660/vfat/nls/device-mapper zinciri calismali
+
+Onerilen minimum duzeltme seti
+
+Asgari olarak sunlari ac:
+- CONFIG_OVERLAY_FS=y
+- CONFIG_EROFS_FS=y
+- EROFS icin gerekli compression/LZ4 destegi acik
+- CONFIG_SQUASHFS=y
+- CONFIG_DM_SNAPSHOT=m
+- CONFIG_DM_THIN_PROVISIONING=m
+
+Istege bagli ama tavsiye edilen:
+- CONFIG_USB_UAS=y
+
+Sonuc
+
+Bugunku hatanin birinci dereceden nedeni CONFIG_OVERLAY_FS kapali olmasi. Ancak yalnizca bunu acmak yeterli degil; Fedora 43 live image erofs kullandigi icin CONFIG_EROFS_FS de mutlaka acilmali. Live medya acisindan daha saglikli bir custom kernel icin squashfs ve dm-snapshot destegi de eklenmeli.
+
+Ek not: 2026-05-02 siyah ekran incelemesi
+
+Yeni Ro kernel RPM 6.19.13-100.fc43.ro_stable.x86_64 ile live root aciliyor,
+fakat grafik oturum siyah ekranda kalabiliyor.
+
+QEMU vmware ekran karti ile serial logta gorulen belirleyici hata:
+- vmwgfx: unsupported hypervisor
+- vmwgfx: Hardware has no pitchlock
+- vmwgfx: probe failed with error -38
+
+Bu nedenle QEMU testlerinde vmware/vmwgfx yerine virtio ekran karti tercih
+edilmeli:
+- scripts/qemu-boot-iso.sh --video virtio
+
+Ayni kernel config incelemesinde gorulen ikinci kritik eksik:
+- # CONFIG_USER_NS is not set
+
+Fedora 43/systemd ortaminda upower ve irqbalance gibi servisler PrivateUsers
+kullandigi icin bu ayar kapaliyken su hata olusuyor:
+- Failed to set up user namespacing: Invalid argument
+- status=217/USER
+
+Bu hata tek basina kernel panic degil, ama grafik oturum etrafinda coredump
+firtinasi olusturup live masaustu acilisini kirilgan hale getiriyor.
+
+Yeni minimum kernel tavsiyesine sunlar da eklenmeli:
+- CONFIG_USER_NS=y
+- CONFIG_DRM_VIRTIO_GPU=y
+- CONFIG_DRM_VIRTIO_GPU_KMS=y
+- CONFIG_DRM_QXL=m
+- CONFIG_DRM_BOCHS=m
+- CONFIG_DRM_CIRRUS_QEMU=m
+- CONFIG_DRM_VMWGFX=m
+- CONFIG_DRM_FBDEV_EMULATION=y
+- CONFIG_FRAMEBUFFER_CONSOLE=y
+- CONFIG_FB_EFI=y
+
+Gercek bilgisayarlar icin zaten acik tutulmasi gereken ana DRM aileleri:
+- CONFIG_DRM_I915=m
+- CONFIG_DRM_XE=m
+- CONFIG_DRM_AMDGPU=m
+- CONFIG_DRM_RADEON=m
+- CONFIG_DRM_NOUVEAU=m
+
+ISO tarafinda uygulanan gecici mitigasyon:
+- live SDDM greeter X11 + Qt software backend ile baslatiliyor
+- upower/irqbalance icin live ortamda PrivateUsers=no drop-in yaziliyor
+- default GRUB girdilerinden quiet/rhgb kaldirilip plymouth kapatiliyor
+- serial loglu debug/text/safe graphics girdileri ekleniyor

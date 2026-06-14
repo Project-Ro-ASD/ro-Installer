@@ -29,6 +29,7 @@ void main() async {
   final autoProfilePath =
       Platform.environment['RO_INSTALLER_AUTO_PROFILE']?.trim() ?? '';
   final isAutoInstallMode = autoProfilePath.isNotEmpty;
+  final useCommandSudo = _envFlag('RO_INSTALLER_COMMAND_SUDO');
   // ═══════════════════════════════════════════════════
   // ROOT YETKİ KONTROLÜ
   // Disk yazma, mount, mkfs, sgdisk gibi tüm komutlar
@@ -41,17 +42,17 @@ void main() async {
   final uid =
       int.tryParse(Platform.environment['UID'] ?? idResult.stdout.trim()) ?? -1;
 
-  if (uid != 0) {
-    if (isAutoInstallMode) {
-      debugPrint(
-        '[ro-Installer] Otomatik profil modu root yetkisiyle doğrudan çalıştırılmalıdır.',
-      );
-      debugPrint(
-        '[ro-Installer] Önerilen kullanım: sudo env RO_INSTALLER_AUTO_PROFILE=... /path/to/ro_installer',
-      );
-      exit(1);
-    }
+  if (uid != 0 && isAutoInstallMode) {
+    debugPrint(
+      '[ro-Installer] Otomatik profil modu root yetkisiyle doğrudan çalıştırılmalıdır.',
+    );
+    debugPrint(
+      '[ro-Installer] Önerilen kullanım: sudo env RO_INSTALLER_AUTO_PROFILE=... /path/to/ro_installer',
+    );
+    exit(1);
+  }
 
+  if (uid != 0 && !useCommandSudo) {
     // Root değiliz — pkexec ile yeniden başlat
     debugPrint(
       '[ro-Installer] Root yetkisi gerekiyor (UID: $uid). pkexec ile yükseltiliyor...',
@@ -76,9 +77,15 @@ void main() async {
     exit(result.exitCode);
   }
 
-  debugPrint(
-    '[ro-Installer] Root yetkisi doğrulandı (UID: $uid). Başlatılıyor...',
-  );
+  if (uid == 0) {
+    debugPrint(
+      '[ro-Installer] Root yetkisi doğrulandı (UID: $uid). Başlatılıyor...',
+    );
+  } else {
+    debugPrint(
+      '[ro-Installer] Live sudo komut modu etkin (UID: $uid). GUI kullanıcı oturumunda başlatılıyor...',
+    );
+  }
 
   if (isAutoInstallMode) {
     final exitCode = await _runAutoInstall(
@@ -326,25 +333,5 @@ bool _envFlag(String key) {
 }
 
 String _sanitizeAutoInstallLog(String raw) {
-  var line = raw;
-
-  line = line.replaceAllMapped(
-    RegExp(r'(password\s+)(\S+)', caseSensitive: false),
-    (m) => '${m.group(1)}***',
-  );
-
-  line = line.replaceAllMapped(
-    RegExp(
-      r"(printf '%s\\n' )'([^':\s]+):([^'\s]+)'(\s+\|\s+chpasswd)",
-      caseSensitive: false,
-    ),
-    (m) => "${m.group(1)}'***:***'${m.group(4)}",
-  );
-
-  line = line.replaceAllMapped(
-    RegExp('(root:)([^\\s\\\'"]+)', caseSensitive: false),
-    (m) => '${m.group(1)}***',
-  );
-
-  return line;
+  return SecretRedactor.redactText(raw);
 }

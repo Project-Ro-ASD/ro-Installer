@@ -31,7 +31,7 @@ StageContext makeContext(
 
 void main() {
   group('FormattingStage — full disk', () {
-    test('EFI → FAT32, Root → BTRFS biçimlendirilir', () async {
+    test('EFI, SWAP ve Root bölümleri biçimlendirilir', () async {
       final fake = FakeCommandRunner();
       final state = {
         'selectedDisk': '/dev/sda',
@@ -47,8 +47,8 @@ void main() {
 
       // mkfs.fat -F32 /dev/sda1
       expect(fake.wasCalledWith('mkfs.fat', ['-F32', '/dev/sda1']), true);
-      // mkfs.btrfs -f /dev/sda2
-      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda2']), true);
+      expect(fake.wasCalledWith('mkswap', ['/dev/sda2']), true);
+      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda3']), true);
     });
 
     test('EXT4 dosya sistemi doğru formatlanır', () async {
@@ -64,7 +64,7 @@ void main() {
       final result = await stage.execute(ctx);
 
       expect(result.success, true);
-      expect(fake.wasCalledWith('mkfs.ext4', ['-F', '/dev/sda2']), true);
+      expect(fake.wasCalledWith('mkfs.ext4', ['-F', '/dev/sda3']), true);
     });
 
     test('XFS dosya sistemi doğru formatlanır', () async {
@@ -80,10 +80,10 @@ void main() {
       final result = await stage.execute(ctx);
 
       expect(result.success, true);
-      expect(fake.wasCalledWith('mkfs.xfs', ['-f', '/dev/sda2']), true);
+      expect(fake.wasCalledWith('mkfs.xfs', ['-f', '/dev/sda3']), true);
     });
 
-    test('NVMe disk için p1/p2 bölüm adları kullanılır', () async {
+    test('NVMe disk için p1/p2/p3 bölüm adları kullanılır', () async {
       final fake = FakeCommandRunner();
       final state = {
         'selectedDisk': '/dev/nvme0n1',
@@ -96,9 +96,9 @@ void main() {
       final result = await stage.execute(ctx);
 
       expect(result.success, true);
-      // NVMe: /dev/nvme0n1p1 ve /dev/nvme0n1p2
       expect(fake.wasCalledWith('mkfs.fat', ['-F32', '/dev/nvme0n1p1']), true);
-      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/nvme0n1p2']), true);
+      expect(fake.wasCalledWith('mkswap', ['/dev/nvme0n1p2']), true);
+      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/nvme0n1p3']), true);
     });
 
     test('mkfs.fat başarısız olursa stage durur', () async {

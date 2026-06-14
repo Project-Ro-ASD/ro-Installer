@@ -83,6 +83,70 @@ class InstallArtifactCollector {
       isMock: isMock,
       localizer: localizer,
     );
+    await _runDiagCmd(
+      'cat /mnt/etc/crypttab',
+      t('artifact_title_crypttab', 'CRYPTTAB YAPILANDIRMASI'),
+      onLog,
+      isMock: isMock,
+      localizer: localizer,
+    );
+    await _runDiagCmdArgs(
+      'grep',
+      [
+        '-R',
+        '-n',
+        '-E',
+        'root=UUID|rootflags|resume=UUID|nomodeset|nouveau|i915|xe|blacklist|ro\\.live',
+        '/mnt/etc/kernel/cmdline',
+        '/mnt/boot/loader/entries',
+      ],
+      t('artifact_title_boot_args', 'BOOT ARGÜMAN ÖZETİ'),
+      onLog,
+      isMock: isMock,
+      localizer: localizer,
+    );
+    await _runDiagCmdArgs(
+      'find',
+      ['/mnt/boot', '-maxdepth', '1', '-type', 'f', '-name', 'config-*', '-print'],
+      t('artifact_title_kernel_configs', 'KERNEL CONFIG DOSYALARI'),
+      onLog,
+      isMock: isMock,
+      localizer: localizer,
+    );
+    await _runDiagCmd(
+      'ls -la /mnt/lib/modules',
+      t('artifact_title_kernel_modules', 'KERNEL MODÜL DİZİNLERİ'),
+      onLog,
+      isMock: isMock,
+      localizer: localizer,
+    );
+    await _runDiagCmdArgs(
+      'chroot',
+      ['/mnt', 'sh', '-c', 'modinfo -p nouveau 2>/dev/null || true'],
+      t('artifact_title_nouveau_params', 'NOUVEAU MODÜL PARAMETRELERİ'),
+      onLog,
+      isMock: isMock,
+      localizer: localizer,
+    );
+    await _runDiagCmdArgs(
+      'chroot',
+      [
+        '/mnt',
+        'sh',
+        '-c',
+        r'''
+for img in /boot/initramfs-*.img; do
+  [ -e "$img" ] || continue
+  echo "== $img =="
+  lsinitrd "$img" 2>/dev/null | grep -E "nouveau|nvidia|firmware|gsp" || true
+done
+''',
+      ],
+      t('artifact_title_initramfs_gpu', 'INITRAMFS GPU/FIRMWARE İPUÇLARI'),
+      onLog,
+      isMock: isMock,
+      localizer: localizer,
+    );
 
     onLog('═════════════════════════════════════════════════════════════');
     onLog(
@@ -101,12 +165,31 @@ class InstallArtifactCollector {
     bool isMock = false,
     InstallLocalizer localizer = const InstallLocalizer(),
   }) async {
-    onLog('\n--- $title ---');
-    onLog('\$ $cmdLine');
-
     final parts = cmdLine.split(' ');
     final cmd = parts.first;
     final args = parts.length > 1 ? parts.sublist(1) : <String>[];
+    await _runDiagCmdArgs(
+      cmd,
+      args,
+      title,
+      onLog,
+      displayLine: cmdLine,
+      isMock: isMock,
+      localizer: localizer,
+    );
+  }
+
+  Future<void> _runDiagCmdArgs(
+    String cmd,
+    List<String> args,
+    String title,
+    void Function(String) onLog, {
+    String? displayLine,
+    bool isMock = false,
+    InstallLocalizer localizer = const InstallLocalizer(),
+  }) async {
+    onLog('\n--- $title ---');
+    onLog('\$ ${displayLine ?? [cmd, ...args].join(' ')}');
 
     final result = await _commandRunner.run(cmd, args, isMock: isMock);
 
@@ -121,11 +204,11 @@ class InstallArtifactCollector {
     }
 
     if (result.stdout.isNotEmpty) {
-      onLog(result.stdout.trim());
+      onLog(SecretRedactor.redactText(result.stdout.trim()));
     }
 
     if (result.stderr.isNotEmpty) {
-      onLog('[STDERR] ${result.stderr.trim()}');
+      onLog('[STDERR] ${SecretRedactor.redactText(result.stderr.trim())}');
     }
 
     if (result.stdout.isEmpty && result.stderr.isEmpty) {
