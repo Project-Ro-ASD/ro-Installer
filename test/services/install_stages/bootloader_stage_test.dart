@@ -380,61 +380,31 @@ void main() {
       },
     );
 
-    test(
-      '/boot ayrı bölüm değilse btrfs olmayan kurulumda /boot/grub2 yolunu kullanır',
-      () async {
-        final fake = FakeCommandRunner();
-        fake.addResponse('findmnt', [
-          '-rn',
-          '-o',
-          'SOURCE',
-          '/mnt/boot/efi',
-        ], stdout: '/dev/sda1');
-        fake.addResponse('findmnt', [
-          '-rn',
-          '-o',
-          'UUID',
-          '/mnt',
-        ], stdout: 'root-uuid-1234');
-        fake.addResponse('findmnt', [
-          '-rn',
-          '-o',
-          'SOURCE',
-          '/mnt',
-        ], stdout: '/dev/sda2');
-        fake.addResponse('findmnt', [
-          '-rn',
-          '-o',
-          'SOURCE',
-          '/mnt/boot',
-        ], exitCode: 1);
-        fake.addResponse('findmnt', [
-          '-rn',
-          '-o',
-          'UUID',
-          '/mnt/boot',
-        ], exitCode: 1);
+    test('btrfs olmayan root dosya sistemi reddedilir', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse('findmnt', [
+        '-rn',
+        '-o',
+        'SOURCE',
+        '/mnt/boot/efi',
+      ], stdout: '/dev/sda1');
+      fake.addResponse('findmnt', [
+        '-rn',
+        '-o',
+        'UUID',
+        '/mnt',
+      ], stdout: 'root-uuid-1234');
 
-        final ctx = makeContext(<String, dynamic>{
-          'fileSystem': 'ext4',
-          'partitionMethod': 'full',
-        }, fake);
-        final stage = const BootloaderStage();
-        final result = await stage.execute(ctx);
+      final ctx = makeContext(<String, dynamic>{
+        'fileSystem': 'ext4',
+        'partitionMethod': 'full',
+      }, fake);
+      final stage = const BootloaderStage();
+      final result = await stage.execute(ctx);
 
-        expect(result.success, true);
-
-        final stubCommand = fake.commandLog.firstWhere(
-          (c) =>
-              c.command == 'sh' &&
-              c.args.join(' ').contains('/mnt/boot/efi/EFI/fedora/grub.cfg'),
-        );
-        expect(
-          stubCommand.args.join(' '),
-          contains(r'set prefix=($dev)/boot/grub2'),
-        );
-      },
-    );
+      expect(result.success, false);
+      expect(result.message, contains('yalnızca Btrfs'));
+    });
 
     test('kernel-install başarısız olursa stage hata ile durur', () async {
       final fake = FakeCommandRunner();

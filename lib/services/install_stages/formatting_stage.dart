@@ -1,4 +1,7 @@
 import 'dart:convert';
+
+import '../../models/storage_plan.dart';
+import '../storage_topology_guard.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
 
@@ -6,7 +9,7 @@ import 'stage_result.dart';
 ///
 /// Bölümleri dosya sistemiyle biçimlendirir:
 /// - EFI → FAT32
-/// - Root → BTRFS / EXT4 / XFS (kullanıcı seçimine göre)
+/// - Root → BTRFS
 /// - SWAP → linux-swap
 /// - Manuel modda: Kullanıcının planladığı bölümler biçimlendirilir
 class FormattingStage {
@@ -16,6 +19,18 @@ class FormattingStage {
     final selectedDisk = ctx.state['selectedDisk'] as String;
     final partitionMethod = ctx.state['partitionMethod'] as String;
     final String rootFs = ctx.state['fileSystem'] ?? 'btrfs';
+    if (rootFs != 'btrfs') {
+      return StageResult.fail(
+        'Ro-ASD yalnızca Btrfs dosya sistemiyle kurulabilir: $rootFs',
+      );
+    }
+    final topologyFailure = await _validateUnsupportedStorageTopology(
+      ctx,
+      selectedDisk,
+    );
+    if (topologyFailure != null) {
+      return topologyFailure;
+    }
 
     ctx.log('════════════════════════════════════════════');
     ctx.log(
@@ -23,15 +38,23 @@ class FormattingStage {
     );
     ctx.log('════════════════════════════════════════════');
 
+    late final StoragePlan storagePlan;
+    try {
+      storagePlan = StoragePlanBuilder.fromState(ctx.state);
+      ctx.state['_formatStoragePlan'] = jsonEncode(storagePlan.toJson());
+    } on StoragePlanException catch (e) {
+      return StageResult.fail(e.message);
+    }
+
     switch (partitionMethod) {
       case 'full':
-        return _formatFullDisk(ctx, selectedDisk, rootFs);
+        return _formatFullDisk(ctx, selectedDisk, rootFs, storagePlan);
       case 'alongside':
-        return _formatAlongside(ctx, selectedDisk, rootFs);
+        return _formatAlongside(ctx, selectedDisk, rootFs, storagePlan);
       case 'free_space':
-        return _formatAlongside(ctx, selectedDisk, rootFs);
+        return _formatAlongside(ctx, selectedDisk, rootFs, storagePlan);
       case 'manual':
-        return _formatManualPartitions(ctx);
+        return _formatManualPartitions(ctx, storagePlan);
       default:
         return StageResult.fail(
           'Bilinmeyen bölümleme yöntemi: $partitionMethod',
@@ -44,6 +67,7 @@ class FormattingStage {
     StageContext ctx,
     String selectedDisk,
     String rootFs,
+    StoragePlan storagePlan,
   ) async {
     ctx.progress(
       0.2,
@@ -57,6 +81,12 @@ class FormattingStage {
     final rootPart = _partitionPath(selectedDisk, 3);
 
     // EFI bölümünü FAT32 olarak biçimlendir
+    var planFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'format_efi',
+      target: efiPart,
+    );
+    if (planFailure != null) return planFailure;
     if (!await ctx.runCmd(
       'mkfs.fat',
       ['-F32', efiPart],
@@ -66,11 +96,23 @@ class FormattingStage {
       return StageResult.fail('EFI bölümü biçimlendirilemedi: $efiPart');
     }
 
+    planFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'format_swap',
+      target: swapPart,
+    );
+    if (planFailure != null) return planFailure;
     if (!await ctx.runCmd('mkswap', [swapPart], ctx.log, isMock: ctx.isMock)) {
       return StageResult.fail('SWAP bölümü biçimlendirilemedi: $swapPart');
     }
 
     // Root bölümünü seçilen dosya sistemiyle biçimlendir
+    planFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'format_btrfs_root',
+      target: rootPart,
+    );
+    if (planFailure != null) return planFailure;
     if (!await _formatPartition(ctx, rootPart, rootFs)) {
       return StageResult.fail('Root bölümü biçimlendirilemedi: $rootPart');
     }
@@ -92,6 +134,7 @@ class FormattingStage {
     StageContext ctx,
     String selectedDisk,
     String rootFs,
+    StoragePlan storagePlan,
   ) async {
     ctx.progress(
       0.25,
@@ -183,11 +226,23 @@ class FormattingStage {
     ctx.log('Bulunan bölümler → SWAP: $swapPart, ROOT: $rootPart');
 
     // SWAP biçimlendir
+    var planFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'create_swap',
+      target: selectedDisk,
+    );
+    if (planFailure != null) return planFailure;
     if (!await ctx.runCmd('mkswap', [swapPart], ctx.log, isMock: ctx.isMock)) {
       return StageResult.fail('SWAP bölümü biçimlendirilemedi: $swapPart');
     }
 
     // Root biçimlendir
+    planFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'create_btrfs_root',
+      target: selectedDisk,
+    );
+    if (planFailure != null) return planFailure;
     if (!await _formatPartition(ctx, rootPart, rootFs)) {
       return StageResult.fail('Root bölümü biçimlendirilemedi: $rootPart');
     }
@@ -206,7 +261,10 @@ class FormattingStage {
   }
 
   /// Manuel modda kullanıcının planladığı bölümleri biçimlendirir
-  Future<StageResult> _formatManualPartitions(StageContext ctx) async {
+  Future<StageResult> _formatManualPartitions(
+    StageContext ctx,
+    StoragePlan storagePlan,
+  ) async {
     final manualPartitions = ctx.state['manualPartitions'] as List<dynamic>;
 
     ctx.progress(
@@ -233,6 +291,17 @@ class FormattingStage {
 
       final fsType = _normalizeFsType((p['type'] ?? '').toString());
 
+      final planFailure = _requirePlannedDestructiveOperation(
+        storagePlan,
+        type: 'format_partition',
+        target: partName,
+        details: {
+          'mount': (p['mount'] ?? 'unmounted').toString(),
+          'fsType': (p['type'] ?? '').toString(),
+          'formatOnInstall': true,
+        },
+      );
+      if (planFailure != null) return planFailure;
       if (!await _formatPartition(ctx, partName, fsType)) {
         return StageResult.fail(
           'Bölüm biçimlendirilemedi: $partName ($fsType)',
@@ -271,28 +340,12 @@ class FormattingStage {
           ctx.log,
           isMock: ctx.isMock,
         );
-      case 'ext4':
-        return ctx.runCmd(
-          'mkfs.ext4',
-          ['-F', partition],
-          ctx.log,
-          isMock: ctx.isMock,
-        );
-      case 'xfs':
-        return ctx.runCmd(
-          'mkfs.xfs',
-          ['-f', partition],
-          ctx.log,
-          isMock: ctx.isMock,
-        );
       case 'linux-swap':
       case 'swap':
         return ctx.runCmd('mkswap', [partition], ctx.log, isMock: ctx.isMock);
       default:
-        ctx.log(
-          'UYARI: Bilinmeyen dosya sistemi türü: $fsType — biçimlendirme atlanıyor.',
-        );
-        return true;
+        ctx.log('HATA: Desteklenmeyen dosya sistemi türü: $fsType');
+        return false;
     }
   }
 
@@ -302,9 +355,55 @@ class FormattingStage {
         return 'fat32';
       case 'swap':
         return 'linux-swap';
-      default:
+      case 'btrfs':
+      case 'fat32':
+      case 'linux-swap':
         return fsType;
+      default:
+        return 'unsupported';
     }
+  }
+
+  StageResult? _requirePlannedDestructiveOperation(
+    StoragePlan storagePlan, {
+    required String type,
+    required String target,
+    Map<String, dynamic> details = const <String, dynamic>{},
+  }) {
+    if (storagePlan.hasOperation(
+      type,
+      target,
+      destructiveOnly: true,
+      details: details,
+    )) {
+      return null;
+    }
+    return StageResult.fail(
+      'Storage plan dışı destructive format işlemi engellendi: $type -> $target',
+    );
+  }
+
+  Future<StageResult?> _validateUnsupportedStorageTopology(
+    StageContext ctx,
+    String selectedDisk,
+  ) async {
+    var report = unsupportedStorageTopologyFromState(ctx.state);
+    if (!report.hasBlockers && !ctx.isMock) {
+      report = await detectUnsupportedStorageTopologyOnDisk(
+        ctx.commandRunner,
+        selectedDisk,
+      );
+    }
+    if (report.inspectionFailed) {
+      return StageResult.fail(
+        'Disk topolojisi dogrulanamadi; format islemi baslatilmadi: '
+        '${report.inspectionError}',
+      );
+    }
+    if (!report.hasBlockers) {
+      return null;
+    }
+    return StageResult.fail(unsupportedStorageTopologyMessage(report));
   }
 
   String _partitionPath(String disk, int partitionNumber) {

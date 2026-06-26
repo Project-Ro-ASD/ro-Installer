@@ -751,6 +751,14 @@ EOF
     ], 'Ro kernel paket korumasi yazilamadi.');
     if (failure != null) return failure;
 
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      _roReleasePolicyScript(channels),
+    ], 'Ro-ASD release policy kaniti yazilamadi.');
+    if (failure != null) return failure;
+
     if (stableSelected) {
       failure = await _verifyInstalledPackages(
         ctx,
@@ -892,6 +900,39 @@ EOF
     }
     buffer.writeln('EOF');
     return buffer.toString();
+  }
+
+  String _roReleasePolicyScript(Set<String> channels) {
+    final sortedChannels = channels.toList()..sort();
+    final selectedChannels = sortedChannels.join(',');
+    final stableRequired = channels.contains('stable') ? '1' : '0';
+    final experimentalEnabled = channels.contains('experimental') ? '1' : '0';
+
+    return '''
+set -e
+mkdir -p /etc/ro-asd
+cat > /etc/ro-asd/release-policy.conf <<'EOF'
+policy_version=1
+system_role=installed-target
+kernel_policy=ro-kernel-only
+selected_kernel_channels=$selectedChannels
+stable_kernel_required=$stableRequired
+experimental_kernel_enabled=$experimentalEnabled
+stable_kernel_source=copr:hynkzz/ro-kernel-stable
+experimental_kernel_source=copr:hynkzz/ro-Kernel-Experimental
+fedora_stock_kernel_policy=removed-and-excluded
+ro_repo_package_gpgcheck=1
+ro_repo_metadata_gpgcheck=1
+ro_repo_gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd
+copr_kernel_package_gpgcheck=1
+copr_kernel_metadata_gpgcheck=0
+copr_kernel_metadata_reason=copr_metadata_signatures_not_available
+safe_graphics_policy=live-only
+target_cmdline_policy=no-live-or-debug-gpu-args
+boot_fallback_policy=live-grub-diagnostic-entries-target-clean-cmdline
+EOF
+chmod 0644 /etc/ro-asd/release-policy.conf
+''';
   }
 
   Future<StageResult?> _requireCommand(
@@ -1266,8 +1307,6 @@ EOF
 
   int _fsckPass(String fsType, String mountPoint) {
     switch (fsType) {
-      case 'ext4':
-        return mountPoint == '/' ? 1 : 2;
       case 'vfat':
         return mountPoint == '/boot/efi' ? 2 : 0;
       default:

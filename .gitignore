@@ -52,16 +52,40 @@ app.*.map.json
 
 # Local VM test artifacts
 /outputs/
+/iso-release/
 /iso-realese/
 /rpm-outputs/
 *.iso
 *.rpm
 *.src.rpm
+/*.tar.gz
+/*.tar.gz.sha256
+/.copr-srpm-tmp/
 /*.qcow2
 /*.fd
 
 # Local hardware/debug captures
 /gerçeksistemdenloglar/*.txt
+
+# Local planning and historical notes
+/docs/road.md
+/docs/road-plan.md
+/docs/old/
+/COPR.md
+/durum.md
+/eksikler.md
+/implementation_plan.md
+/kernel-black-screen-diagnostics.md
+/optimizasyon.md
+/plan.md
+/test.md
+/docs/git-yukleme-notu.md
+/docs/grafik-driver-politikasi.md
+/docs/profesyonel-installer-ana-plani.md
+/docs/ro-apps-packaging-notu.md
+/docs/siyah-ekran-kernel-notlari.md
+/docs/sonraki-adim-notu.md
+/docs/yeni-makine-qemu-rehberi.md
 
 # Generated design prototype exports kept locally for reference
 /stitch_velvet_nebula_installer_redesign/

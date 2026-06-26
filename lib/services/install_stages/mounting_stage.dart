@@ -5,7 +5,6 @@ import 'stage_result.dart';
 ///
 /// Biçimlendirilmiş bölümleri /mnt hedefine bağlar:
 /// - BTRFS ise: @ ve @home subvolume'ları oluşturur ve bağlar
-/// - EXT4/XFS ise: doğrudan bağlar
 /// - EFI bölümünü /mnt/boot/efi'ye bağlar
 /// - SWAP varsa aktif eder
 class MountingStage {
@@ -15,6 +14,11 @@ class MountingStage {
     final selectedDisk = ctx.state['selectedDisk'] as String;
     final partitionMethod = ctx.state['partitionMethod'] as String;
     final String rootFs = ctx.state['fileSystem'] ?? 'btrfs';
+    if (rootFs != 'btrfs') {
+      return StageResult.fail(
+        'Ro-ASD yalnızca Btrfs root dosya sistemini destekler: $rootFs',
+      );
+    }
 
     ctx.log('════════════════════════════════════════════');
     ctx.log('[AŞAMA 4] Bağlama Başlatılıyor (Hedef: /mnt)');
@@ -147,6 +151,11 @@ class MountingStage {
 
     final rootName = (rootPart['name'] ?? '').toString();
     final rootFs = _normalizeFsType((rootPart['type'] ?? '').toString());
+    if (rootFs != 'btrfs') {
+      return StageResult.fail(
+        'Manuel kurulumda root bölümü Btrfs olmalıdır: $rootName ($rootFs)',
+      );
+    }
     final hasDedicatedHome = manualPartitions.any(
       (p) => p['isFreeSpace'] != true && p['mount'] == '/home',
     );

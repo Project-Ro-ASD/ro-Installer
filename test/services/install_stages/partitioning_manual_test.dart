@@ -116,12 +116,22 @@ sda3 part
         },
         {
           'name': 'New Partition 1',
-          'type': 'ext4',
+          'type': 'btrfs',
           'mount': '/',
           'isFreeSpace': false,
           'isPlanned': true,
           'formatOnInstall': true,
           'sizeBytes': 50000000000,
+        },
+        {
+          'name': 'Free Space',
+          'type': 'unallocated',
+          'mount': 'unmounted',
+          'isFreeSpace': true,
+          'isPlanned': true,
+          'formatOnInstall': false,
+          'sizeBytes': 85899345920,
+          'deletedPartitionNames': ['/dev/sda2'],
         },
       ];
 

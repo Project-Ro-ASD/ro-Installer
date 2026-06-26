@@ -199,6 +199,8 @@ class InstallerState extends ChangeNotifier {
   int shrinkCandidateSizeBytes = 0;
   int alongsideMaxLinuxSizeBytes = 0;
   List<String> alongsideBlockers = [];
+  List<String> unsupportedStorageBlockers = [];
+  List<String> unsupportedStorageDetails = [];
   bool isDetectingOS = false; // UI'da loading göstermek için
 
   // ---- 8. Kernel ----
@@ -470,6 +472,8 @@ class InstallerState extends ChangeNotifier {
     shrinkCandidateSizeBytes = 0;
     alongsideMaxLinuxSizeBytes = 0;
     alongsideBlockers = [];
+    unsupportedStorageBlockers = [];
+    unsupportedStorageDetails = [];
 
     // Boyutu Byte'dan GB'a çeviriyoruz
     final sizeBytes = diskObj['size'];
@@ -511,6 +515,14 @@ class InstallerState extends ChangeNotifier {
       alongsideBlockers = (details['alongsideBlockers'] as List<dynamic>? ?? [])
           .map((entry) => entry.toString())
           .toList();
+      unsupportedStorageBlockers =
+          (details['unsupportedStorageBlockers'] as List<dynamic>? ?? [])
+              .map((entry) => entry.toString())
+              .toList();
+      unsupportedStorageDetails =
+          (details['unsupportedStorageDetails'] as List<dynamic>? ?? [])
+              .map((entry) => entry.toString())
+              .toList();
       final maxGb = alongsideMaxLinuxSizeBytes > 0
           ? alongsideMaxLinuxSizeBytes / (1024 * 1024 * 1024)
           : totalDiskSizeGB;
@@ -531,6 +543,8 @@ class InstallerState extends ChangeNotifier {
       shrinkCandidateSizeBytes = 0;
       alongsideMaxLinuxSizeBytes = 0;
       alongsideBlockers = [];
+      unsupportedStorageBlockers = [];
+      unsupportedStorageDetails = [];
     }
 
     isDetectingOS = false;

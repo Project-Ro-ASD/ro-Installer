@@ -64,7 +64,7 @@ flutter:
   assets:
     - assets/images/
     - assets/i18n/
-    - stitch_velvet_nebula_installer_redesign/product-logo.png
+    - assets/branding/roasd-logo.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

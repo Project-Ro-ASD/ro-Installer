@@ -33,12 +33,10 @@ void main() {
   group('DiskPreparationStage', () {
     test('mount edilmiş hedef partitionları tek tek ayırır', () async {
       final fake = FakeCommandRunner(defaultSuccess: false);
-      fake.addResponse('lsblk', [
-        '-J',
-        '-o',
-        'NAME,TYPE,MOUNTPOINTS',
-        '/dev/sda',
-      ], stdout: '''
+      fake.addResponse(
+        'lsblk',
+        ['-J', '-o', 'NAME,TYPE,MOUNTPOINTS', '/dev/sda'],
+        stdout: '''
 {
   "blockdevices": [
     {
@@ -53,7 +51,8 @@ void main() {
     }
   ]
 }
-''');
+''',
+      );
       fake.addResponse('umount', ['-f', '/dev/sda3']);
       fake.addResponse('umount', ['-f', '/dev/sda1']);
       fake.addResponse('swapoff', ['-a']);
@@ -73,12 +72,10 @@ void main() {
 
     test('mount yoksa sadece lsblk ve swapoff çalışır', () async {
       final fake = FakeCommandRunner(defaultSuccess: false);
-      fake.addResponse('lsblk', [
-        '-J',
-        '-o',
-        'NAME,TYPE,MOUNTPOINTS',
-        '/dev/sda',
-      ], stdout: '''
+      fake.addResponse(
+        'lsblk',
+        ['-J', '-o', 'NAME,TYPE,MOUNTPOINTS', '/dev/sda'],
+        stdout: '''
 {
   "blockdevices": [
     {
@@ -91,7 +88,8 @@ void main() {
     }
   ]
 }
-''');
+''',
+      );
       fake.addResponse('swapoff', ['-a']);
 
       final ctx = makeContext({'selectedDisk': '/dev/sda'}, fake);
@@ -103,12 +101,10 @@ void main() {
 
     test('NVMe disk adıyla da çalışır', () async {
       final fake = FakeCommandRunner(defaultSuccess: false);
-      fake.addResponse('lsblk', [
-        '-J',
-        '-o',
-        'NAME,TYPE,MOUNTPOINTS',
-        '/dev/nvme0n1',
-      ], stdout: '''
+      fake.addResponse(
+        'lsblk',
+        ['-J', '-o', 'NAME,TYPE,MOUNTPOINTS', '/dev/nvme0n1'],
+        stdout: '''
 {
   "blockdevices": [
     {
@@ -121,7 +117,8 @@ void main() {
     }
   ]
 }
-''');
+''',
+      );
       fake.addResponse('umount', ['-f', '/dev/nvme0n1p1']);
       fake.addResponse('swapoff', ['-a']);
       final ctx = makeContext({'selectedDisk': '/dev/nvme0n1'}, fake);

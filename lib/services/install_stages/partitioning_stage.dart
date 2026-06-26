@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../../models/storage_plan.dart';
+import '../storage_topology_guard.dart';
 import '../../utils/manual_partition_sizing.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
@@ -44,15 +46,36 @@ class PartitioningStage {
     );
     ctx.log('════════════════════════════════════════════');
 
+    final contractFailure = _validateBtrfsOnlyContract(ctx.state);
+    if (contractFailure != null) {
+      return StageResult.fail(contractFailure);
+    }
+    final topologyFailure = await _validateUnsupportedStorageTopology(
+      ctx,
+      selectedDisk,
+    );
+    if (topologyFailure != null) {
+      return topologyFailure;
+    }
+    late final StoragePlan storagePlan;
+    try {
+      storagePlan = StoragePlanBuilder.fromState(ctx.state);
+      final storagePlanJson = jsonEncode(storagePlan.toJson());
+      ctx.state['_storagePlan'] = storagePlanJson;
+      ctx.log('Storage plan hazirlandi: $storagePlanJson');
+    } on StoragePlanException catch (e) {
+      return StageResult.fail(e.message);
+    }
+
     switch (partitionMethod) {
       case 'full':
-        return _fullDiskPartition(ctx, selectedDisk);
+        return _fullDiskPartition(ctx, selectedDisk, storagePlan);
       case 'alongside':
-        return _alongsidePartition(ctx, selectedDisk);
+        return _alongsidePartition(ctx, selectedDisk, storagePlan);
       case 'free_space':
-        return _freeSpacePartition(ctx, selectedDisk);
+        return _freeSpacePartition(ctx, selectedDisk, storagePlan);
       case 'manual':
-        return _manualPartition(ctx, selectedDisk);
+        return _manualPartition(ctx, selectedDisk, storagePlan);
       default:
         return StageResult.fail(
           'Bilinmeyen bölümleme yöntemi: $partitionMethod',
@@ -65,6 +88,7 @@ class PartitioningStage {
   Future<StageResult> _fullDiskPartition(
     StageContext ctx,
     String selectedDisk,
+    StoragePlan storagePlan,
   ) async {
     ctx.progress(
       0.05,
@@ -73,12 +97,20 @@ class PartitioningStage {
     );
 
     // Wipefs ile disk imzalarını temizle
-    await ctx.runCmd(
+    final wipePlanFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'wipe_disk',
+      target: selectedDisk,
+    );
+    if (wipePlanFailure != null) return wipePlanFailure;
+    if (!await ctx.runCmd(
       'wipefs',
       ['-a', selectedDisk],
       ctx.log,
       isMock: ctx.isMock,
-    );
+    )) {
+      return StageResult.fail('Disk imzaları temizlenemedi: $selectedDisk');
+    }
 
     ctx.progress(
       0.1,
@@ -105,6 +137,25 @@ class PartitioningStage {
     final hasSgdisk = await _hasCommand(ctx, 'sgdisk');
 
     if (hasSgdisk) {
+      final createEfiPlanFailure = _requirePlannedDestructiveOperation(
+        storagePlan,
+        type: 'create_efi',
+        target: selectedDisk,
+      );
+      if (createEfiPlanFailure != null) return createEfiPlanFailure;
+      final createSwapPlanFailure = _requirePlannedDestructiveOperation(
+        storagePlan,
+        type: 'create_swap',
+        target: selectedDisk,
+      );
+      if (createSwapPlanFailure != null) return createSwapPlanFailure;
+      final createRootPlanFailure = _requirePlannedDestructiveOperation(
+        storagePlan,
+        type: 'create_btrfs_root',
+        target: selectedDisk,
+      );
+      if (createRootPlanFailure != null) return createRootPlanFailure;
+
       if (!await ctx.runCmd(
         'sgdisk',
         ['-Z', selectedDisk],
@@ -162,6 +213,25 @@ class PartitioningStage {
         '[UYARI] sgdisk bulunamadi, full kurulum icin parted fallback kullaniliyor.',
       );
 
+      final createEfiPlanFailure = _requirePlannedDestructiveOperation(
+        storagePlan,
+        type: 'create_efi',
+        target: selectedDisk,
+      );
+      if (createEfiPlanFailure != null) return createEfiPlanFailure;
+      final createSwapPlanFailure = _requirePlannedDestructiveOperation(
+        storagePlan,
+        type: 'create_swap',
+        target: selectedDisk,
+      );
+      if (createSwapPlanFailure != null) return createSwapPlanFailure;
+      final createRootPlanFailure = _requirePlannedDestructiveOperation(
+        storagePlan,
+        type: 'create_btrfs_root',
+        target: selectedDisk,
+      );
+      if (createRootPlanFailure != null) return createRootPlanFailure;
+
       if (!await ctx.runCmd(
         'parted',
         ['-s', selectedDisk, 'mklabel', 'gpt'],
@@ -217,8 +287,8 @@ class PartitioningStage {
     }
 
     // Kernel'ın yeni bölüm tablosunu okuması için bekle
-    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
-    await Future.delayed(Duration(seconds: ctx.isMock ? 0 : 3));
+    final rescanFailure = await _rescanDisk(ctx, selectedDisk);
+    if (rescanFailure != null) return rescanFailure;
 
     ctx.state['_resolvedSwapPart'] = _partitionPath(selectedDisk, 2);
     ctx.state['_resolvedRootPart'] = _partitionPath(selectedDisk, 3);
@@ -235,6 +305,7 @@ class PartitioningStage {
   Future<StageResult> _alongsidePartition(
     StageContext ctx,
     String selectedDisk,
+    StoragePlan storagePlan,
   ) async {
     if (!await _hasCommand(ctx, 'sgdisk')) {
       return StageResult.fail(
@@ -273,9 +344,10 @@ class PartitioningStage {
       'stage_progress_partition_backup_table',
       'Güvenlik: Mevcut bölüm tablosu yedekleniyor...',
     );
+    final backupPath = _gptBackupPath(ctx, 'alongside', selectedDisk);
     if (!await ctx.runCmd(
       'sgdisk',
-      ['--backup=/tmp/gpt_backup_alongside.bin', selectedDisk],
+      ['--backup=$backupPath', selectedDisk],
       ctx.log,
       isMock: ctx.isMock,
     )) {
@@ -409,6 +481,8 @@ class PartitioningStage {
         );
         final shrinkResult = await _shrinkAlongsideCandidate(
           ctx,
+          storagePlan: storagePlan,
+          planOperationType: 'shrink_source_partition',
           selectedDisk: selectedDisk,
           partitionPath: shrinkCandidatePartition,
           partitionFs: shrinkCandidateFs,
@@ -416,6 +490,7 @@ class PartitioningStage {
           currentSizeBytes: candidateSizeBytes,
           newPartitionSizeBytes: newCandidateSizeBytes,
           newPartitionEndSector: newCandidateEnd,
+          backupPath: backupPath,
         );
         if (!shrinkResult.success) {
           return shrinkResult;
@@ -432,6 +507,12 @@ class PartitioningStage {
       'stage_progress_partition_create_swap',
       'Yeni SWAP bolumu olusturuluyor...',
     );
+    final createSwapPlanFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'create_swap',
+      target: selectedDisk,
+    );
+    if (createSwapPlanFailure != null) return createSwapPlanFailure;
     if (!await ctx.runCmd(
       'sgdisk',
       [
@@ -446,7 +527,7 @@ class PartitioningStage {
       ctx.log,
       isMock: ctx.isMock,
     )) {
-      await _restoreAlongsideBackup(ctx, selectedDisk);
+      await _restoreAlongsideBackup(ctx, selectedDisk, backupPath: backupPath);
       return StageResult.fail('SWAP bolumu olusturulamadi.');
     }
 
@@ -455,6 +536,12 @@ class PartitioningStage {
       'stage_progress_partition_create_root',
       'Yeni kok dizin bolumu olusturuluyor...',
     );
+    final createRootPlanFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'create_btrfs_root',
+      target: selectedDisk,
+    );
+    if (createRootPlanFailure != null) return createRootPlanFailure;
     if (!await ctx.runCmd(
       'sgdisk',
       [
@@ -469,12 +556,13 @@ class PartitioningStage {
       ctx.log,
       isMock: ctx.isMock,
     )) {
-      await _restoreAlongsideBackup(ctx, selectedDisk);
+      await _restoreAlongsideBackup(ctx, selectedDisk, backupPath: backupPath);
       return StageResult.fail('Root bölümü oluşturulamadı.');
     }
 
     // Kernel'ın yeni bölüm tablosunu okuması için bekle
-    await _rescanDisk(ctx, selectedDisk);
+    final rescanFailure = await _rescanDisk(ctx, selectedDisk);
+    if (rescanFailure != null) return rescanFailure;
 
     ctx.log(
       'Alongside yerlesimi → SWAP: ${resolvedLayout.swapStartSector}-${resolvedLayout.swapEndSector}, ROOT: ${resolvedLayout.rootStartSector}-${resolvedLayout.rootEndSector}',
@@ -509,6 +597,7 @@ class PartitioningStage {
       'ntfs_hibernated_or_fast_startup',
       'ntfs_check_failed',
       'ntfs_resize_tool_missing',
+      'unsupported_storage_topology',
     };
     for (final blocker in hardBlockers) {
       if (blockers.contains(blocker)) {
@@ -579,6 +668,7 @@ class PartitioningStage {
   Future<StageResult> _freeSpacePartition(
     StageContext ctx,
     String selectedDisk,
+    StoragePlan storagePlan,
   ) async {
     if (!await _hasCommand(ctx, 'sgdisk')) {
       return StageResult.fail(
@@ -624,13 +714,20 @@ class PartitioningStage {
         'Ayrilmis alana kurulum icin gecerli bir bos alan secilmedi.',
       );
     }
+    final allocationPlanFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'allocate_selected_free_space',
+      target: selectedDisk,
+      details: {'startSector': freeStart, 'endSector': freeEnd},
+    );
+    if (allocationPlanFailure != null) return allocationPlanFailure;
 
     ctx.progress(
       0.05,
       'stage_progress_partition_backup_table',
       'Güvenlik: Mevcut bölüm tablosu yedekleniyor...',
     );
-    const backupPath = '/tmp/gpt_backup_free_space.bin';
+    final backupPath = _gptBackupPath(ctx, 'free-space', selectedDisk);
     if (!await ctx.runCmd(
       'sgdisk',
       ['--backup=$backupPath', selectedDisk],
@@ -684,6 +781,12 @@ class PartitioningStage {
       'stage_progress_partition_create_swap',
       'Ayrılmış alanda yeni SWAP bölümü oluşturuluyor...',
     );
+    final createSwapPlanFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'create_swap',
+      target: selectedDisk,
+    );
+    if (createSwapPlanFailure != null) return createSwapPlanFailure;
     if (!await ctx.runCmd(
       'sgdisk',
       [
@@ -707,6 +810,12 @@ class PartitioningStage {
       'stage_progress_partition_create_root',
       'Ayrılmış alanda yeni kök dizin bölümü oluşturuluyor...',
     );
+    final createRootPlanFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: 'create_btrfs_root',
+      target: selectedDisk,
+    );
+    if (createRootPlanFailure != null) return createRootPlanFailure;
     if (!await ctx.runCmd(
       'sgdisk',
       [
@@ -725,11 +834,8 @@ class PartitioningStage {
       return StageResult.fail('Root bölümü oluşturulamadı.');
     }
 
-    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
-    if (!ctx.isMock) {
-      await ctx.runCmd('udevadm', ['settle'], ctx.log, isMock: ctx.isMock);
-      await Future.delayed(const Duration(seconds: 2));
-    }
+    final rescanFailure = await _rescanDisk(ctx, selectedDisk);
+    if (rescanFailure != null) return rescanFailure;
 
     ctx.state['_resolvedSwapStartSector'] = layout.swapStartSector;
     ctx.state['_resolvedRootStartSector'] = layout.rootStartSector;
@@ -749,6 +855,7 @@ class PartitioningStage {
   Future<StageResult> _manualPartition(
     StageContext ctx,
     String selectedDisk,
+    StoragePlan storagePlan,
   ) async {
     if (!await _hasCommand(ctx, 'sgdisk')) {
       return StageResult.fail(
@@ -768,7 +875,7 @@ class PartitioningStage {
       'Manuel plan diske uygulanıyor...',
     );
 
-    const manualBackupPath = '/tmp/gpt_backup_manual.bin';
+    final manualBackupPath = _gptBackupPath(ctx, 'manual', selectedDisk);
     if (!await ctx.runCmd(
       'sgdisk',
       ['--backup=$manualBackupPath', selectedDisk],
@@ -797,17 +904,42 @@ class PartitioningStage {
       }
     }
 
-    // 2. Silinmesi gerekenleri bul ve SİL
+    // 2. Açık silme planı olan bölümleri bul ve SİL.
     final plannedNames = manualPartitions
-        .map((p) => p['name'] as String)
-        .toList();
+        .where((p) => p is Map<String, dynamic> && p['isFreeSpace'] != true)
+        .map((p) => (p['name'] ?? '').toString())
+        .where((name) => name.isNotEmpty)
+        .toSet();
+    final deletedNames = <String>{};
+    for (final rawPart in manualPartitions) {
+      if (rawPart is! Map<String, dynamic>) continue;
+      final rawDeleted = rawPart['deletedPartitionNames'];
+      if (rawDeleted is Iterable) {
+        deletedNames.addAll(
+          rawDeleted
+              .map((entry) => entry.toString())
+              .where((entry) => entry.isNotEmpty),
+        );
+      }
+    }
     for (var currentName in originalPartNames) {
       if (!plannedNames.contains(currentName)) {
+        if (!deletedNames.contains(currentName)) {
+          return StageResult.fail(
+            'Mevcut bölüm açık silme planı olmadan plandan eksildi: $currentName',
+          );
+        }
         // Bölüm numarasını bul (sda1 -> 1, nvme0n1p2 -> 2)
         final match = RegExp(r'(\d+)$').firstMatch(currentName);
         if (match != null) {
           final partNum = match.group(1)!;
           ctx.log('Bölüm siliniyor: $currentName (No: $partNum)');
+          final deletePlanFailure = _requirePlannedDestructiveOperation(
+            storagePlan,
+            type: 'delete_partition',
+            target: currentName,
+          );
+          if (deletePlanFailure != null) return deletePlanFailure;
           if (!await ctx.runCmd(
             'sgdisk',
             ['-d', partNum, selectedDisk],
@@ -821,8 +953,8 @@ class PartitioningStage {
     }
 
     // Disk tablosunu güncelle
-    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
-    if (!ctx.isMock) await Future.delayed(const Duration(seconds: 1));
+    final deleteRescanFailure = await _rescanDisk(ctx, selectedDisk);
+    if (deleteRescanFailure != null) return deleteRescanFailure;
 
     final sectorSize = await _readSectorSize(ctx, selectedDisk);
     final alignSectors = (kManualPartitionAlignmentBytes / sectorSize).ceil();
@@ -878,6 +1010,8 @@ class PartitioningStage {
       );
       final resizeResult = await _shrinkAlongsideCandidate(
         ctx,
+        storagePlan: storagePlan,
+        planOperationType: 'resize_partition',
         selectedDisk: selectedDisk,
         partitionPath: name,
         partitionFs: _normalizeManualFsType((p['type'] ?? '').toString()),
@@ -907,6 +1041,7 @@ class PartitioningStage {
       if (name.startsWith('New Partition') || name == 'New Partition') {
         final requestedSizeBytes = p['sizeBytes'] as int;
         final requestedSizeMB = requestedSizeBytes ~/ (1024 * 1024);
+        final createPlanDetails = _manualPartitionPlanDetails(p);
 
         final diskLayout = await _readDiskLayout(ctx, selectedDisk, sectorSize);
         if (diskLayout == null) {
@@ -981,6 +1116,13 @@ class PartitioningStage {
         );
 
         // Bölümü diske yaz
+        final createPlanFailure = _requirePlannedDestructiveOperation(
+          storagePlan,
+          type: 'create_partition',
+          target: name,
+          details: createPlanDetails,
+        );
+        if (createPlanFailure != null) return createPlanFailure;
         if (!await ctx.runCmd(
           'sgdisk',
           [
@@ -996,13 +1138,8 @@ class PartitioningStage {
           return StageResult.fail('Bolum olusturulamadi: ${actualSizeMB}MB');
         }
 
-        await ctx.runCmd(
-          'partprobe',
-          [selectedDisk],
-          ctx.log,
-          isMock: ctx.isMock,
-        );
-        if (!ctx.isMock) await Future.delayed(const Duration(seconds: 2));
+        final createRescanFailure = await _rescanDisk(ctx, selectedDisk);
+        if (createRescanFailure != null) return createRescanFailure;
 
         // Yeni oluşan bölümün gerçek (/dev/sdX) adını bul
         final newPartsResult = await ctx.commandRunner.run('lsblk', [
@@ -1267,6 +1404,8 @@ class PartitioningStage {
 
   Future<StageResult> _shrinkAlongsideCandidate(
     StageContext ctx, {
+    required StoragePlan storagePlan,
+    required String planOperationType,
     required String selectedDisk,
     required String partitionPath,
     required String partitionFs,
@@ -1274,7 +1413,7 @@ class PartitioningStage {
     required int currentSizeBytes,
     required int newPartitionSizeBytes,
     required int newPartitionEndSector,
-    String backupPath = '/tmp/gpt_backup_alongside.bin',
+    required String backupPath,
   }) async {
     if (newPartitionSizeBytes >= currentSizeBytes) {
       return StageResult.ok(
@@ -1284,6 +1423,12 @@ class PartitioningStage {
         ),
       );
     }
+    final shrinkPlanFailure = _requirePlannedDestructiveOperation(
+      storagePlan,
+      type: planOperationType,
+      target: partitionPath,
+    );
+    if (shrinkPlanFailure != null) return shrinkPlanFailure;
 
     final fsTargetBytes = newPartitionSizeBytes > _filesystemSafetyMarginBytes
         ? newPartitionSizeBytes - _filesystemSafetyMarginBytes
@@ -1312,50 +1457,6 @@ class PartitioningStage {
         );
         return StageResult.fail(
           'NTFS dosya sistemi kucultulemedi: $partitionPath',
-        );
-      }
-    } else if (partitionFs == 'ext4') {
-      if (!await _hasCommand(ctx, 'e2fsck') ||
-          !await _hasCommand(ctx, 'resize2fs')) {
-        return StageResult.fail(
-          'EXT4 shrink araci eksik. e2fsck ve resize2fs gerekli.',
-        );
-      }
-      ctx.progress(
-        0.12,
-        'stage_progress_partition_check_ext4',
-        'EXT4 dosya sistemi denetleniyor...',
-      );
-      if (!await ctx.runCmd(
-        'e2fsck',
-        ['-f', '-p', partitionPath],
-        ctx.log,
-        isMock: ctx.isMock,
-        allowedExitCodes: const [0, 1, 2],
-      )) {
-        return StageResult.fail(
-          'EXT4 dosya sistemi denetimi basarisiz: $partitionPath',
-        );
-      }
-      final resizeKiB = fsTargetBytes ~/ 1024;
-      ctx.progress(
-        0.13,
-        'stage_progress_partition_resize_ext4',
-        'EXT4 dosya sistemi küçültülüyor...',
-      );
-      if (!await ctx.runCmd(
-        'resize2fs',
-        [partitionPath, '${resizeKiB}K'],
-        ctx.log,
-        isMock: ctx.isMock,
-      )) {
-        await _restoreAlongsideBackup(
-          ctx,
-          selectedDisk,
-          backupPath: backupPath,
-        );
-        return StageResult.fail(
-          'EXT4 dosya sistemi kucultulemedi: $partitionPath',
         );
       }
     } else if (partitionFs == 'btrfs') {
@@ -1413,7 +1514,8 @@ class PartitioningStage {
       'stage_progress_partition_rescan_disk',
       'Disk bölümleri yeniden taranıyor...',
     );
-    await _rescanDisk(ctx, selectedDisk);
+    final rescanFailure = await _rescanDisk(ctx, selectedDisk);
+    if (rescanFailure != null) return rescanFailure;
 
     ctx.log(
       'Shrink tamamlandi: $partitionPath → yeni boyut ${newPartitionSizeBytes ~/ (1024 * 1024 * 1024)} GB',
@@ -1561,6 +1663,15 @@ class PartitioningStage {
     return value.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
   }
 
+  String _gptBackupPath(StageContext ctx, String scope, String selectedDisk) {
+    if (ctx.isMock) {
+      return '/tmp/ro-installer-gpt-$scope-mock.bin';
+    }
+    final safeDisk = _safePathComponent(selectedDisk);
+    final stamp = DateTime.now().toUtc().microsecondsSinceEpoch;
+    return '/tmp/ro-installer-gpt-$scope-$safeDisk-$stamp.bin';
+  }
+
   Set<String> _readStringSet(Object? rawValue) {
     if (rawValue is Iterable) {
       return rawValue.map((value) => value.toString()).toSet();
@@ -1569,6 +1680,101 @@ class PartitioningStage {
       return {rawValue};
     }
     return <String>{};
+  }
+
+  String? _validateBtrfsOnlyContract(Map<String, dynamic> state) {
+    final rootFs = (state['fileSystem'] ?? 'btrfs').toString();
+    if (rootFs != 'btrfs') {
+      return 'Ro-ASD yalnızca Btrfs root dosya sistemini destekler: $rootFs';
+    }
+
+    final partitionMethod = (state['partitionMethod'] ?? '').toString();
+    if (partitionMethod != 'manual') {
+      return null;
+    }
+
+    final manualPartitions =
+        state['manualPartitions'] as List<dynamic>? ?? const [];
+    for (final rawPart in manualPartitions) {
+      if (rawPart is! Map<String, dynamic> || rawPart['isFreeSpace'] == true) {
+        continue;
+      }
+      final mount = (rawPart['mount'] ?? 'unmounted').toString();
+      final type = (rawPart['type'] ?? '').toString();
+      if (mount == '/boot/efi') {
+        if (type != 'fat32' && type != 'vfat') {
+          return 'Manuel kurulumda EFI bölümü FAT32 olmalıdır: ${rawPart['name']}';
+        }
+        continue;
+      }
+      if (mount == '[SWAP]') {
+        if (type != 'linux-swap' && type != 'swap') {
+          return 'Manuel kurulumda swap bölümü linux-swap olmalıdır: ${rawPart['name']}';
+        }
+        continue;
+      }
+      if (mount != 'unmounted' && type != 'btrfs') {
+        return 'Manuel kurulumda mount edilen bölümler Btrfs olmalıdır: ${rawPart['name']} ($type)';
+      }
+    }
+    return null;
+  }
+
+  Future<StageResult?> _validateUnsupportedStorageTopology(
+    StageContext ctx,
+    String selectedDisk,
+  ) async {
+    var report = unsupportedStorageTopologyFromState(ctx.state);
+    if (!report.hasBlockers && !ctx.isMock) {
+      report = await detectUnsupportedStorageTopologyOnDisk(
+        ctx.commandRunner,
+        selectedDisk,
+      );
+    }
+    if (report.inspectionFailed) {
+      return StageResult.fail(
+        'Disk topolojisi dogrulanamadi; destructive islem baslatilmadi: '
+        '${report.inspectionError}',
+      );
+    }
+    if (!report.hasBlockers) {
+      return null;
+    }
+    return StageResult.fail(unsupportedStorageTopologyMessage(report));
+  }
+
+  StageResult? _requirePlannedDestructiveOperation(
+    StoragePlan storagePlan, {
+    required String type,
+    required String target,
+    Map<String, dynamic> details = const <String, dynamic>{},
+  }) {
+    if (storagePlan.hasOperation(
+      type,
+      target,
+      destructiveOnly: true,
+      details: details,
+    )) {
+      return null;
+    }
+    return StageResult.fail(
+      'Storage plan dışı destructive disk işlemi engellendi: $type -> $target',
+    );
+  }
+
+  Map<String, dynamic> _manualPartitionPlanDetails(Map<String, dynamic> part) {
+    final formatOnInstall = part.containsKey('formatOnInstall')
+        ? part['formatOnInstall'] == true
+        : part['isPlanned'] == true;
+    return {
+      'mount': (part['mount'] ?? 'unmounted').toString(),
+      'fsType': (part['type'] ?? '').toString(),
+      'formatOnInstall': formatOnInstall,
+      'isResized': part['isResized'] == true,
+      if (part['sizeBytes'] != null) 'sizeBytes': part['sizeBytes'],
+      if (part['startSector'] != null) 'startSector': part['startSector'],
+      if (part['endSector'] != null) 'endSector': part['endSector'],
+    };
   }
 
   String _alongsideBlockerMessage(String code) {
@@ -1593,6 +1799,8 @@ class PartitioningStage {
         return 'ntfsresize bulunamadi. NTFS bolumu guvenli sekilde kucultulemez.';
       case 'ntfs_check_failed':
         return 'NTFS on kontrolu basarisiz oldu. Bolum kucultme islemi baslatilmadi.';
+      case 'unsupported_storage_topology':
+        return 'Bu disk LUKS/LVM/RAID/multipath veya nested block-device yapisi iceriyor. Stable kurulum bu topolojide disk yazma islemi baslatmaz.';
       default:
         return 'Yanina kurulum on kontrolu basarisiz: $code';
     }
@@ -1723,18 +1931,40 @@ class PartitioningStage {
     return '${(ms / 1000).toStringAsFixed(1)}s';
   }
 
-  Future<void> _rescanDisk(StageContext ctx, String selectedDisk) async {
-    await ctx.runCmd('partprobe', [selectedDisk], ctx.log, isMock: ctx.isMock);
+  Future<StageResult?> _rescanDisk(
+    StageContext ctx,
+    String selectedDisk,
+  ) async {
+    if (!await ctx.runCmd(
+      'partprobe',
+      [selectedDisk],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      return StageResult.fail(
+        'Disk bolum tablosu yeniden okunamadi: $selectedDisk',
+      );
+    }
     if (!ctx.isMock) {
-      await ctx.runCmd('udevadm', ['settle'], ctx.log, isMock: ctx.isMock);
+      if (!await ctx.runCmd(
+        'udevadm',
+        ['settle'],
+        ctx.log,
+        isMock: ctx.isMock,
+      )) {
+        return StageResult.fail(
+          'udev yeni bolumleri kararlı hale getiremedi: $selectedDisk',
+        );
+      }
       await Future.delayed(const Duration(seconds: 2));
     }
+    return null;
   }
 
   Future<void> _restoreAlongsideBackup(
     StageContext ctx,
     String selectedDisk, {
-    String backupPath = '/tmp/gpt_backup_alongside.bin',
+    required String backupPath,
   }) async {
     ctx.log('UYARI: GPT yedegi geri yukleniyor...');
     await ctx.runCmd(

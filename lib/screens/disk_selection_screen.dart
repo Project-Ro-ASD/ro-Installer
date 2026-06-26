@@ -373,6 +373,14 @@ class _InstallationPlanPanel extends StatelessWidget {
               height: 1.45,
             ),
           ),
+          if (state.installType == 'advanced') ...[
+            SizedBox(height: dense ? 12 : 14),
+            _MethodNotice(
+              title: state.t('install_type_advanced'),
+              messages: [state.t('type_adv_desc')],
+              color: Colors.orangeAccent,
+            ),
+          ],
           SizedBox(height: dense ? 14 : 18),
           _CompactMethodGrid(
             state: state,
@@ -1830,6 +1838,9 @@ _MethodAvailability _methodAvailability(InstallerState state, String code) {
     if (!state.hasExistingEfi) {
       reasons.add(state.t('disk_blocker_missing_efi'));
     }
+    if (state.unsupportedStorageBlockers.isNotEmpty) {
+      reasons.add(state.t('disk_blocker_unsupported_storage_topology'));
+    }
     if (state.largestFreeContiguousBytes < 40 * 1024 * 1024 * 1024) {
       reasons.add(state.t('disk_blocker_no_free_space'));
     }
@@ -1944,16 +1955,14 @@ List<String> _localizedAlongsideCodes(
         reasons.add(state.t('disk_blocker_no_shrink_candidate'));
       case 'bitlocker_enabled':
         reasons.add(state.t('disk_blocker_bitlocker_enabled'));
+      case 'unsupported_storage_topology':
+        reasons.add(state.t('disk_blocker_unsupported_storage_topology'));
       case 'ntfs_hibernated_or_fast_startup':
         reasons.add(state.t('disk_blocker_ntfs_hibernated_or_fast_startup'));
       case 'ntfs_dirty':
         reasons.add(state.t('disk_blocker_ntfs_dirty'));
       case 'ntfs_resize_tool_missing':
         reasons.add(state.t('disk_blocker_ntfs_resize_tool_missing'));
-      case 'ext4_resize_tool_missing':
-        reasons.add(state.t('disk_blocker_ext4_resize_tool_missing'));
-      case 'ext4_check_tool_missing':
-        reasons.add(state.t('disk_blocker_ext4_check_tool_missing'));
       case 'btrfs_resize_tool_missing':
         reasons.add(state.t('disk_blocker_btrfs_resize_tool_missing'));
       case 'ntfs_check_failed':
@@ -2065,7 +2074,7 @@ Color _partitionSegmentColor(
   if (type == 'linux-swap') {
     return Colors.orangeAccent.withValues(alpha: 0.76);
   }
-  if (type == 'btrfs' || type == 'ext4' || type == 'xfs') {
+  if (type == 'btrfs') {
     return theme.colorScheme.primary.withValues(alpha: 0.74);
   }
   return theme.colorScheme.outline.withValues(alpha: 0.5);

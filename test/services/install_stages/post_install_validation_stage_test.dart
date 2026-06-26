@@ -98,10 +98,7 @@ void main() {
       fake.addResponse('sh', ['-c', postInstallSwapResumeValidationScript]);
     }
 
-    void addNoGpuDebugArgResponse(
-      FakeCommandRunner fake, {
-      int exitCode = 0,
-    }) {
+    void addNoGpuDebugArgResponse(FakeCommandRunner fake, {int exitCode = 0}) {
       fake.addResponse('sh', [
         '-c',
         postInstallNoGpuDebugArgsValidationScript,
@@ -112,7 +109,7 @@ void main() {
       FakeCommandRunner fake, {
       String rootUuid = 'root-uuid-1234',
       String efiUuid = 'efi-uuid-5678',
-      bool btrfs = false,
+      bool btrfs = true,
       int blsRootExitCode = 0,
     }) {
       fake.addResponse('findmnt', [
@@ -408,7 +405,7 @@ void main() {
       ], exitCode: 1);
 
       final ctx = makeContext({
-        'fileSystem': 'ext4',
+        'fileSystem': 'btrfs',
         'partitionMethod': 'full',
       }, fake);
 
@@ -463,7 +460,7 @@ void main() {
       addNoGpuDebugArgResponse(fake, exitCode: 1);
 
       final ctx = makeContext({
-        'fileSystem': 'ext4',
+        'fileSystem': 'btrfs',
         'partitionMethod': 'full',
       }, fake);
 
@@ -492,7 +489,7 @@ void main() {
       addLiveUserCleanupResponses(fake, sddmExitCode: 1);
 
       final ctx = makeContext({
-        'fileSystem': 'ext4',
+        'fileSystem': 'btrfs',
         'partitionMethod': 'full',
       }, fake);
 
@@ -540,7 +537,7 @@ void main() {
       ], exitCode: 1);
 
       final ctx = makeContext({
-        'fileSystem': 'ext4',
+        'fileSystem': 'btrfs',
         'partitionMethod': 'full',
       }, fake);
 
@@ -563,7 +560,7 @@ void main() {
       addNoFedoraKernelResponse(fake, exitCode: 1);
 
       final ctx = makeContext({
-        'fileSystem': 'ext4',
+        'fileSystem': 'btrfs',
         'partitionMethod': 'full',
       }, fake);
 
@@ -632,10 +629,14 @@ void main() {
           'if grep -R -E "rd.live.image|inst.stage2|CDLABEL|root=live:" /mnt/etc/kernel/cmdline /mnt/boot/loader/entries >/dev/null 2>&1; then exit 1; else exit 0; fi',
         ]);
         addNoGpuDebugArgResponse(fake);
+        fake.addResponse('sh', [
+          '-c',
+          'grep -q "rootflags=subvol=@" /mnt/etc/kernel/cmdline',
+        ]);
         addSwapResumeResponses(fake);
 
         final ctx = makeContext({
-          'fileSystem': 'ext4',
+          'fileSystem': 'btrfs',
           'partitionMethod': 'full',
           'selectedKernelChannels': ['stable', 'experimental'],
         }, fake);
@@ -664,7 +665,7 @@ void main() {
         addExperimentalKernelResponse(fake, exitCode: 1);
 
         final ctx = makeContext({
-          'fileSystem': 'ext4',
+          'fileSystem': 'btrfs',
           'partitionMethod': 'full',
           'selectedKernelChannels': ['stable', 'experimental'],
         }, fake);
@@ -701,7 +702,7 @@ void main() {
       addBootloaderPackageResponse(fake, exitCode: 1);
 
       final ctx = makeContext({
-        'fileSystem': 'ext4',
+        'fileSystem': 'btrfs',
         'partitionMethod': 'full',
       }, fake);
 
@@ -731,7 +732,7 @@ void main() {
       addRoDesktopAppsResponses(fake, exitCode: 1);
 
       final ctx = makeContext({
-        'fileSystem': 'ext4',
+        'fileSystem': 'btrfs',
         'partitionMethod': 'full',
       }, fake);
 
@@ -752,7 +753,7 @@ void main() {
       fake.addResponse('test', ['-f', '/mnt/etc/locale.conf'], exitCode: 1);
 
       final ctx = makeContext(const {
-        'fileSystem': 'ext4',
+        'fileSystem': 'btrfs',
         'partitionMethod': 'full',
       }, fake);
 

@@ -299,6 +299,7 @@ Future<int> _runAutoInstall(
     if (exportResult.success) {
       pushLog('Oturum kaydi yazildi: ${exportResult.logPath}');
       pushLog('Oturum ozeti yazildi: ${exportResult.summaryPath}');
+      pushLog('Oturum manifesti yazildi: ${exportResult.manifestPath}');
     } else {
       pushLog('Oturum disa aktarimi basarisiz: ${exportResult.error}');
     }

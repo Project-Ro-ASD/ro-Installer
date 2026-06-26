@@ -35,6 +35,8 @@ test -f /etc/yum.repos.d/ro-repo.repo
 test -f /etc/yum.repos.d/ro-repo-noarch.repo
 test -f /etc/yum.repos.d/ro-kernel-stable-copr.repo
 test -f /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+test -f /etc/ro-asd/release-policy.conf
+test -f /etc/dnf/protected.d/ro-kernel.conf
 grep -q 'https://project-ro-asd.github.io/Ro-Repo/$basearch/' /etc/yum.repos.d/ro-repo.repo
 grep -q 'https://project-ro-asd.github.io/Ro-Repo/noarch/' /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
@@ -45,10 +47,26 @@ grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q 'hynkzz/ro-kernel-stable' /etc/yum.repos.d/ro-kernel-stable-copr.repo
 grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
+grep -q '^repo_gpgcheck=0$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
 grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-kernel-stable/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
 grep -q 'hynkzz/ro-Kernel-Experimental' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
 grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+grep -q '^repo_gpgcheck=0$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
 grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-Kernel-Experimental/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+grep -q '^policy_version=1$' /etc/ro-asd/release-policy.conf
+grep -q '^system_role=installed-target$' /etc/ro-asd/release-policy.conf
+grep -q '^kernel_policy=ro-kernel-only$' /etc/ro-asd/release-policy.conf
+grep -Eq '^selected_kernel_channels=(stable|experimental|experimental,stable|stable,experimental)$' /etc/ro-asd/release-policy.conf
+grep -q '^fedora_stock_kernel_policy=removed-and-excluded$' /etc/ro-asd/release-policy.conf
+grep -q '^ro_repo_package_gpgcheck=1$' /etc/ro-asd/release-policy.conf
+grep -q '^ro_repo_metadata_gpgcheck=1$' /etc/ro-asd/release-policy.conf
+grep -q '^copr_kernel_package_gpgcheck=1$' /etc/ro-asd/release-policy.conf
+grep -q '^copr_kernel_metadata_gpgcheck=0$' /etc/ro-asd/release-policy.conf
+grep -q '^copr_kernel_metadata_reason=copr_metadata_signatures_not_available$' /etc/ro-asd/release-policy.conf
+grep -q '^safe_graphics_policy=live-only$' /etc/ro-asd/release-policy.conf
+grep -q '^target_cmdline_policy=no-live-or-debug-gpu-args$' /etc/ro-asd/release-policy.conf
+grep -Eq '^ro-kernel-(stable|experimental)' /etc/dnf/protected.d/ro-kernel.conf
+grep -q '^excludepkgs=kernel kernel-core kernel-modules kernel-modules-core kernel-modules-extra kernel-devel kernel-devel-matched kernel-debug kernel-debug-core kernel-debug-modules kernel-debug-modules-core kernel-debug-modules-extra kernel-debug-devel kernel-uki kernel-uki-core kernel-uki-modules kernel-uki-modules-core kernel-uki-modules-extra$' /etc/dnf/dnf.conf
 ''';
 
 const postInstallRoDesktopAppsValidationScript = r'''
@@ -510,10 +528,12 @@ class PostInstallValidationStage {
       );
     }
 
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      postInstallNoGpuDebugArgsValidationScript,
-    ], 'Live/debug grafik boot parametreleri hedef sisteme sızmış görünüyor.');
+    failure = await _requireCommand(
+      ctx,
+      'sh',
+      ['-c', postInstallNoGpuDebugArgsValidationScript],
+      'Live/debug grafik boot parametreleri hedef sisteme sızmış görünüyor.',
+    );
     if (failure != null) return failure;
 
     if (rootFs == 'btrfs') {

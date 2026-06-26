@@ -258,6 +258,8 @@ class _InstallingScreenState extends State<InstallingScreen>
       'shrinkCandidateFs': state.shrinkCandidateFs,
       'shrinkCandidateSizeBytes': state.shrinkCandidateSizeBytes,
       'largestFreeContiguousBytes': state.largestFreeContiguousBytes,
+      'unsupportedStorageBlockers': state.unsupportedStorageBlockers,
+      'unsupportedStorageDetails': state.unsupportedStorageDetails,
       'selectedKernelChannels': state.selectedKernelChannelsList,
     };
 
@@ -308,6 +310,8 @@ class _InstallingScreenState extends State<InstallingScreen>
         'hasExistingEfi': state.hasExistingEfi,
         'shrinkCandidatePartition': state.shrinkCandidatePartition,
         'shrinkCandidateFs': state.shrinkCandidateFs,
+        'unsupportedStorageBlockers': state.unsupportedStorageBlockers,
+        'unsupportedStorageDetails': state.unsupportedStorageDetails,
         'selectedKernelChannels': state.selectedKernelChannelsList,
       },
     );
@@ -315,6 +319,7 @@ class _InstallingScreenState extends State<InstallingScreen>
     if (exportResult.success) {
       _pushLog('[LOG] Oturum kaydı yazıldı: ${exportResult.logPath}');
       _pushLog('[LOG] Oturum özeti yazıldı: ${exportResult.summaryPath}');
+      _pushLog('[LOG] Oturum manifesti yazıldı: ${exportResult.manifestPath}');
     } else {
       _pushLog('[LOG] Oturum dışa aktarımı başarısız: ${exportResult.error}');
     }
@@ -1262,7 +1267,7 @@ class _BrandFocusCard extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(14),
                     child: Image.asset(
-                      'stitch_velvet_nebula_installer_redesign/product-logo.png',
+                      'assets/branding/roasd-logo.png',
                       fit: BoxFit.contain,
                     ),
                   ),

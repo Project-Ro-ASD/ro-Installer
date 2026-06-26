@@ -129,5 +129,6 @@ class DiskPreparationStage {
     return false;
   }
 
-  String _devPath(String name) => name.startsWith('/dev/') ? name : '/dev/$name';
+  String _devPath(String name) =>
+      name.startsWith('/dev/') ? name : '/dev/$name';
 }

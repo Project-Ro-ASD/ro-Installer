@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'command_runner.dart';
+import 'storage_topology_guard.dart';
 
 class DiskService {
   DiskService({CommandRunner? commandRunner})
@@ -12,7 +13,7 @@ class DiskService {
 
   // EFI System Partition GPT Type UUID (Standart)
   static const String _efiPartTypeUUID = 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b';
-  static const List<String> _supportedShrinkFs = ['ntfs', 'ext4', 'btrfs'];
+  static const List<String> _supportedShrinkFs = ['ntfs', 'btrfs'];
   static const int _minAlongsideLinuxBytes = 40 * 1024 * 1024 * 1024;
   static const int _minSourcePartitionBytes = 40 * 1024 * 1024 * 1024;
   static const int _sourcePartitionExtraMarginBytes = 10 * 1024 * 1024 * 1024;
@@ -108,6 +109,8 @@ class DiskService {
     int gapAfterShrinkCandidateBytes = 0;
     bool bitlockerDetected = false;
     final alongsideBlockers = <String>[];
+    final unsupportedStorageBlockers = <String>{};
+    final unsupportedStorageDetails = <String>[];
     final partitions = <Map<String, dynamic>>[];
 
     try {
@@ -118,7 +121,7 @@ class DiskService {
         '-J',
         '-b',
         '-o',
-        'NAME,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
+        'NAME,TYPE,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
         diskName,
       ]);
 
@@ -135,10 +138,14 @@ class DiskService {
             partitionTable = (disk['pttype'] ?? 'unknown')
                 .toString()
                 .toLowerCase();
+            final unsupportedTopology = collectUnsupportedStorageTopology(
+              devices,
+            );
+            unsupportedStorageBlockers.addAll(unsupportedTopology.blockers);
+            unsupportedStorageDetails.addAll(unsupportedTopology.details);
 
             if (disk.containsKey('children')) {
               final children = disk['children'] as List<dynamic>;
-
               bool foundNtfs = false;
               bool foundLinuxFs = false;
 
@@ -265,12 +272,6 @@ class DiskService {
         shrinkSafetyIssue = 'bitlocker_enabled';
       } else if (candidateType == 'ntfs') {
         shrinkSafetyIssue = await _checkNtfsSafety(candidatePath);
-      } else if (candidateType == 'ext4') {
-        if (!await _hasCommand('resize2fs')) {
-          shrinkSafetyIssue = 'ext4_resize_tool_missing';
-        } else if (!await _hasCommand('e2fsck')) {
-          shrinkSafetyIssue = 'ext4_check_tool_missing';
-        }
       } else if (candidateType == 'btrfs') {
         if (!await _hasCommand('btrfs')) {
           shrinkSafetyIssue = 'btrfs_resize_tool_missing';
@@ -322,6 +323,9 @@ class DiskService {
     if (bitlockerDetected) {
       alongsideBlockers.add('bitlocker_enabled');
     }
+    if (unsupportedStorageBlockers.isNotEmpty) {
+      alongsideBlockers.add('unsupported_storage_topology');
+    }
     if (shrinkSafetyIssue == 'ntfs_dirty') {
       alongsideBlockers.add('ntfs_dirty');
     }
@@ -351,6 +355,8 @@ class DiskService {
       'shrinkCandidateSizeBytes': shrinkCandidateSizeBytes,
       'alongsideMaxLinuxSizeBytes': alongsideMaxLinuxBytes,
       'alongsideBlockers': alongsideBlockers,
+      'unsupportedStorageBlockers': unsupportedStorageBlockers.toList()..sort(),
+      'unsupportedStorageDetails': unsupportedStorageDetails,
     };
   }
 

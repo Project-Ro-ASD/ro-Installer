@@ -125,7 +125,7 @@ void main() {
           },
           {
             'name': '/dev/sda5',
-            'type': 'ext4',
+            'type': 'btrfs',
             'mount': '/home',
             'isFreeSpace': false,
             'isPlanned': true,

@@ -264,9 +264,9 @@ void main() {
             (cmd) =>
                 cmd.command == 'chroot' &&
                 cmd.args.join(' ').contains('/etc/yum.repos.d/ro-repo.repo') &&
-                cmd.args.join(' ').contains(
-                  'https://project-ro-asd.github.io/Ro-Repo',
-                ) &&
+                cmd.args
+                    .join(' ')
+                    .contains('https://project-ro-asd.github.io/Ro-Repo') &&
                 cmd.args.join(' ').contains('gpgcheck=1') &&
                 cmd.args.join(' ').contains('repo_gpgcheck=1') &&
                 cmd.args.join(' ').contains('RPM-GPG-KEY-ro-asd'),
@@ -512,7 +512,7 @@ void main() {
             },
             {
               'name': '/dev/vda5',
-              'type': 'ext4',
+              'type': 'btrfs',
               'mount': '/home',
               'isFreeSpace': false,
               'isPlanned': true,
@@ -557,7 +557,10 @@ void main() {
         );
         final fstabScript = fstabWrite.args.join(' ');
 
-        expect(fstabScript, contains('UUID=MOCK-VDA5 /home ext4 defaults 0 2'));
+        expect(
+          fstabScript,
+          contains('UUID=MOCK-VDA5 /home btrfs defaults 0 0'),
+        );
         expect(
           fstabScript,
           isNot(

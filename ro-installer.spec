@@ -13,20 +13,22 @@ BuildRequires:  cmake
 BuildRequires:  ninja-build
 BuildRequires:  gtk3-devel
 BuildRequires:  pkgconfig(gtk+-3.0)
+BuildRequires:  python3
+BuildRequires:  ripgrep
 
 Requires:       gtk3
 Requires:       libX11
 Requires:       polkit
 Requires:       util-linux
-Requires:       e2fsprogs
 Requires:       btrfs-progs
-Requires:       xfsprogs
 Requires:       dosfstools
 Requires:       gdisk
 Requires:       %{_sbindir}/sgdisk
 Requires:       parted
+Requires:       %{_sbindir}/ntfsresize
 Requires:       rsync
 Requires:       NetworkManager
+Requires:       %{_bindir}/udevadm
 Requires:       dracut
 Requires:       efibootmgr
 Requires:       grub2-common
@@ -34,8 +36,10 @@ Requires:       grub2-efi-x64
 Requires:       shim-x64
 
 %description
-Ro-ASD isletim sistemi icin gelistirilmis resmi sistem yukleyicisi.
-Flutter ile yazilmis grafiksel bir kurulum sihirbazi sunar.
+Ro-Installer is the graphical and profile-driven system installer for Ro-ASD,
+a Fedora KDE based Linux distribution. It provides staged disk preparation,
+partitioning, formatting, file copy, chroot configuration, bootloader setup,
+and post-install validation.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -45,6 +49,9 @@ export CFLAGS="${CFLAGS:-} -Wno-error=unused-command-line-argument -Wno-unused-c
 export CXXFLAGS="${CXXFLAGS:-} -Wno-error=unused-command-line-argument -Wno-unused-command-line-argument"
 flutter pub get
 flutter build linux --release
+
+%check
+bash scripts/check-stable.sh
 
 %install
 install -d %{buildroot}%{_libdir}/ro-installer
@@ -64,6 +71,7 @@ install -Dm755 linux/ro-installer-launcher.sh \
     %{buildroot}%{_libexecdir}/ro-installer-launcher.sh
 
 %files
+%license LICENSE
 %doc README.md
 %{_libdir}/ro-installer/
 %{_bindir}/ro-installer
@@ -76,3 +84,4 @@ install -Dm755 linux/ro-installer-launcher.sh \
 * Mon Apr 27 2026 Ro-ASD Team <contact@roasd.org> - 2.4.0-1
 - RPM paketleme dosyasi eklendi.
 - gdisk ve sgdisk bagimliliklari zorunlu hale getirildi.
+- ntfsresize ve udevadm runtime bagimliliklari paket seviyesinde netlestirildi.

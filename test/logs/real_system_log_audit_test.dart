@@ -5,15 +5,15 @@ import 'package:test/test.dart';
 void main() {
   group('real system log audit', () {
     const logDir = 'gerçeksistemdenloglar';
+    const analysisPath =
+        'docs/old/gerçeksistemdenloglar/kernel-black-screen-analysis-20260505.md';
 
     test('kernel black screen corpus contains expected regression signals', () {
       final dir = Directory(logDir);
       expect(dir.existsSync(), true);
       expect(dir.listSync().whereType<File>().length, greaterThanOrEqualTo(4));
 
-      final analysis = File(
-        '$logDir/kernel-black-screen-analysis-20260505.md',
-      ).readAsStringSync();
+      final analysis = File(analysisPath).readAsStringSync();
       expect(analysis, contains('NVIDIA GA102'));
       expect(analysis, contains('nomodeset'));
       expect(analysis, contains('nouveau.config=NvGspRm=1'));

@@ -2,18 +2,21 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'command_runner.dart';
+import 'install_artifact_collector.dart';
 
 class InstallLogExportResult {
   const InstallLogExportResult({
     required this.success,
     this.logPath,
     this.summaryPath,
+    this.manifestPath,
     this.error,
   });
 
   final bool success;
   final String? logPath;
   final String? summaryPath;
+  final String? manifestPath;
   final String? error;
 }
 
@@ -36,6 +39,9 @@ class InstallLogExportService {
       final stamp = _timestampForName(startedAt);
       final logFile = File('${targetDir.path}/install-$stamp.log');
       final summaryFile = File('${targetDir.path}/install-$stamp.summary.json');
+      final manifestFile = File(
+        '${targetDir.path}/install-$stamp.manifest.json',
+      );
 
       final sanitizedStatus = statusHistory
           .map(_sanitizeLine)
@@ -82,8 +88,33 @@ class InstallLogExportService {
         'logFile': logFile.path,
       };
 
+      final manifest = {
+        'schemaVersion': 1,
+        'artifactKind': 'ro-installer-install-session',
+        'sessionStamp': stamp,
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
+        'result': success ? 'success' : 'failed',
+        'files': {
+          'technicalLog': logFile.path,
+          'summary': summaryFile.path,
+          'manifest': manifestFile.path,
+        },
+        'collectionContract': {
+          'version': InstallArtifactCollector.diagnosticContractVersion,
+          'redaction': 'SecretRedactor.redactText',
+          'technicalLogSections': InstallArtifactCollector.diagnosticSectionIds,
+        },
+        'context': sanitizedContext,
+        'statusHistoryLineCount': sanitizedStatus.length,
+        'technicalLogLineCount': sanitizedTechnical.length,
+      };
+
       await summaryFile.writeAsString(
         const JsonEncoder.withIndent('  ').convert(summary),
+        flush: true,
+      );
+      await manifestFile.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(manifest),
         flush: true,
       );
 
@@ -91,6 +122,7 @@ class InstallLogExportService {
         success: true,
         logPath: logFile.path,
         summaryPath: summaryFile.path,
+        manifestPath: manifestFile.path,
       );
     } catch (e) {
       return InstallLogExportResult(success: false, error: e.toString());

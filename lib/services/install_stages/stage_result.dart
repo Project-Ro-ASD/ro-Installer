@@ -3,10 +3,7 @@
 /// [success] aşamanın başarıyla tamamlanıp tamamlanmadığını belirtir.
 /// [message] aşama hakkında kısa açıklama veya hata mesajı içerir.
 class StageResult {
-  const StageResult({
-    required this.success,
-    this.message = '',
-  });
+  const StageResult({required this.success, this.message = ''});
 
   final bool success;
   final String message;

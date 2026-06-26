@@ -764,7 +764,7 @@ class _NebulaTopBar extends StatelessWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12 * density.chromeScale),
                   child: Image.asset(
-                    'stitch_velvet_nebula_installer_redesign/product-logo.png',
+                    'assets/branding/roasd-logo.png',
                     width: logoSize,
                     height: logoSize,
                     fit: BoxFit.cover,

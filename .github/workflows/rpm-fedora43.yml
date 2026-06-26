@@ -1,0 +1,97 @@
+name: RPM Fedora 43
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rpm-fedora43-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-rpm:
+    name: Build ro-installer RPM on Fedora 43
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:43
+
+    steps:
+      - name: Install Fedora 43 build dependencies
+        run: |
+          dnf -y --setopt=install_weak_deps=False install \
+            git \
+            rpm-build \
+            rsync \
+            tar \
+            gzip \
+            findutils \
+            coreutils \
+            gawk \
+            sed \
+            grep \
+            flutter \
+            clang \
+            cmake \
+            ninja-build \
+            gtk3-devel \
+            pkgconf-pkg-config \
+            python3 \
+            ripgrep
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Build RPM
+        run: scripts/01-build-rpm.sh --no-chain --source-mode git --require-clean-git
+
+      - name: Show build manifest
+        if: always()
+        run: |
+          if [ -f rpm-outputs/latest-rpm-manifest.txt ]; then
+            cat "$(cat rpm-outputs/latest-rpm-manifest.txt)"
+          fi
+
+      - name: Upload RPM artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ro-installer-rpm-fedora43
+          if-no-files-found: error
+          path: |
+            rpm-outputs/*.rpm
+            rpm-outputs/*.sha256
+            rpm-outputs/*.build-manifest.txt
+            rpm-outputs/*.source-files.txt
+            rpm-outputs/latest-rpm-path.txt
+            rpm-outputs/latest-rpm-manifest.txt
+            outputs/logs/01-build-rpm-*.log
+
+      - name: Attach RPM to GitHub Release
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name || github.ref_name }}
+          files: |
+            rpm-outputs/*.rpm
+            rpm-outputs/*.sha256
+            rpm-outputs/*.build-manifest.txt
+            rpm-outputs/*.source-files.txt
+            rpm-outputs/latest-rpm-path.txt
+            rpm-outputs/latest-rpm-manifest.txt
+            outputs/logs/01-build-rpm-*.log

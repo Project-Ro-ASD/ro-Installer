@@ -11,10 +11,7 @@ void main() {
         'username': 'tester',
         'password': 'secure123',
         'storage': {
-          'encryption': {
-            'enabled': false,
-            'type': 'none',
-          },
+          'encryption': {'enabled': false, 'type': 'none'},
         },
       });
 
@@ -23,6 +20,60 @@ void main() {
       expect(profile.encryption.enabled, false);
       expect(profile.toStateMap()['encryptionEnabled'], false);
       expect(profile.toStateMap()['encryptionType'], 'none');
+    });
+
+    test(
+      'Btrfs disi fileSystem profilde sessizce degistirilmez ve reddedilir',
+      () {
+        final profile = InstallProfile.fromJson({
+          'selectedDisk': '/dev/vda',
+          'partitionMethod': 'full',
+          'fileSystem': 'ext4',
+          'username': 'tester',
+          'password': 'secure123',
+        });
+
+        final errors = profile.validate();
+
+        expect(profile.fileSystem, 'ext4');
+        expect(profile.toStateMap()['fileSystem'], 'ext4');
+        expect(
+          errors,
+          contains('Geçersiz dosya sistemi: yalnizca btrfs desteklenir.'),
+        );
+      },
+    );
+
+    test('manuel profilde mount edilen Btrfs disi bolum reddedilir', () {
+      final profile = InstallProfile.fromJson({
+        'selectedDisk': '/dev/vda',
+        'partitionMethod': 'manual',
+        'username': 'tester',
+        'password': 'secure123',
+        'manualPartitions': [
+          {
+            'name': '/dev/vda1',
+            'type': 'fat32',
+            'mount': '/boot/efi',
+            'isPlanned': true,
+            'isFreeSpace': false,
+          },
+          {
+            'name': '/dev/vda2',
+            'type': 'ext4',
+            'mount': '/',
+            'isPlanned': true,
+            'isFreeSpace': false,
+          },
+        ],
+      });
+
+      expect(
+        profile.validate(),
+        contains(
+          'Manuel profilde mount edilen bölümler Btrfs olmalıdır: /dev/vda2 (ext4)',
+        ),
+      );
     });
 
     test('LUKS etkin profil stage desteği tamamlanana kadar reddedilir', () {

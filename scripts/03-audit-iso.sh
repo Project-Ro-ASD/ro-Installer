@@ -39,6 +39,7 @@ Checks the Ro-ASD live ISO for the boot regressions that are easy to miss:
 - GRUB live root parameters, safe graphics fallback, and GPU driver policy
 - initrd dracut live modules
 - Ro live kernel config and Intel/NVIDIA firmware manifests
+- build, enabled repo, and installed package manifests
 EOF
 }
 
@@ -52,10 +53,22 @@ if [[ $# -gt 0 ]]; then
 fi
 
 if [[ -z "${ISO_PATH}" ]]; then
-  latest_file="${REPO_ROOT}/iso-realese/latest-iso-path.txt"
-  if [[ -f "${latest_file}" ]]; then
-    ISO_PATH="$(<"${latest_file}")"
-  fi
+  for latest_file in \
+    "${REPO_ROOT}/iso-release/latest-iso-path.txt" \
+    "${REPO_ROOT}/iso-realese/latest-iso-path.txt"; do
+    if [[ -f "${latest_file}" ]]; then
+      candidate="$(<"${latest_file}")"
+      if [[ -f "${candidate}" ]]; then
+        ISO_PATH="${candidate}"
+        break
+      fi
+      rebased="$(dirname "${latest_file}")/$(basename "${candidate}")"
+      if [[ -f "${rebased}" ]]; then
+        ISO_PATH="${rebased}"
+        break
+      fi
+    fi
+  done
 fi
 
 if [[ -z "${ISO_PATH}" || ! -f "${ISO_PATH}" ]]; then
@@ -66,6 +79,7 @@ need_cmd xorriso || true
 need_cmd dd || true
 need_cmd mdir || true
 need_cmd lsinitrd || true
+need_cmd sha256sum || true
 
 if (( failures > 0 )); then
   exit 1
@@ -255,6 +269,91 @@ optional_missing="${tmpdir}/ro-optional-apps-missing.txt"
 xorriso -osirrox on -indev "${ISO_PATH}" -extract /ro-optional-apps-missing.txt "${optional_missing}" -end >/dev/null 2>&1 || true
 if [[ -s "${optional_missing}" ]]; then
   warn "Optional Ro desktop apps missing from this ISO: $(paste -sd' ' "${optional_missing}")"
+fi
+
+build_manifest="${tmpdir}/ro-build-manifest.txt"
+xorriso -osirrox on -indev "${ISO_PATH}" -extract /ro-build-manifest.txt "${build_manifest}" -end >/dev/null 2>&1 || true
+if [[ -s "${build_manifest}" ]]; then
+  for key in \
+    manifest_version \
+    build_timestamp_utc \
+    git_commit \
+    git_dirty \
+    source_iso_sha256 \
+    rpm_sha256 \
+    beta_tag \
+    volume_id \
+    image_mode \
+    ro_live_kernel_version \
+    release_policy_sha256; do
+    value="$(read_manifest_value "${build_manifest}" "${key}")"
+    [[ -n "${value}" ]] || fail "Build manifest missing ${key}."
+  done
+else
+  fail "Build manifest missing from ISO root."
+fi
+
+release_policy="${tmpdir}/ro-release-policy.txt"
+xorriso -osirrox on -indev "${ISO_PATH}" -extract /ro-release-policy.txt "${release_policy}" -end >/dev/null 2>&1 || true
+if [[ -s "${release_policy}" ]]; then
+  for key in \
+    policy_version \
+    system_role \
+    kernel_policy \
+    selected_kernel_channels \
+    fedora_stock_kernel_policy \
+    ro_repo_package_gpgcheck \
+    ro_repo_metadata_gpgcheck \
+    copr_kernel_package_gpgcheck \
+    copr_kernel_metadata_gpgcheck \
+    copr_kernel_metadata_reason \
+    safe_graphics_policy \
+    target_cmdline_policy; do
+    value="$(read_manifest_value "${release_policy}" "${key}")"
+    [[ -n "${value}" ]] || fail "Release policy missing ${key}."
+  done
+  [[ "$(read_manifest_value "${release_policy}" system_role)" == "live-iso" ]] || fail "Release policy has unexpected system_role."
+  [[ "$(read_manifest_value "${release_policy}" kernel_policy)" == "ro-kernel-only" ]] || fail "Release policy must require ro-kernel-only."
+  [[ "$(read_manifest_value "${release_policy}" selected_kernel_channels)" == "stable" ]] || fail "Live ISO release policy must use stable kernel channel."
+  [[ "$(read_manifest_value "${release_policy}" ro_repo_package_gpgcheck)" == "1" ]] || fail "Release policy must require Ro repo package GPG."
+  [[ "$(read_manifest_value "${release_policy}" ro_repo_metadata_gpgcheck)" == "1" ]] || fail "Release policy must require Ro repo metadata GPG."
+  [[ "$(read_manifest_value "${release_policy}" copr_kernel_package_gpgcheck)" == "1" ]] || fail "Release policy must require COPR package GPG."
+  [[ "$(read_manifest_value "${release_policy}" copr_kernel_metadata_gpgcheck)" == "0" ]] || fail "Release policy must record COPR metadata GPG as disabled."
+  [[ "$(read_manifest_value "${release_policy}" copr_kernel_metadata_reason)" == "copr_metadata_signatures_not_available" ]] || fail "Release policy must explain COPR metadata GPG exception."
+  expected_policy_sha=""
+  if [[ -s "${build_manifest}" ]]; then
+    expected_policy_sha="$(read_manifest_value "${build_manifest}" release_policy_sha256)"
+  fi
+  if [[ -n "${expected_policy_sha}" ]]; then
+    actual_policy_sha="$(sha256sum "${release_policy}" | awk '{print $1}')"
+    [[ "${actual_policy_sha}" == "${expected_policy_sha}" ]] || fail "Release policy sha256 does not match build manifest."
+  else
+    fail "Build manifest missing release_policy_sha256."
+  fi
+else
+  fail "Release policy missing from ISO root."
+fi
+
+rpm_manifest="${tmpdir}/ro-live-rpm-manifest.txt"
+xorriso -osirrox on -indev "${ISO_PATH}" -extract /ro-live-rpm-manifest.txt "${rpm_manifest}" -end >/dev/null 2>&1 || true
+if [[ -s "${rpm_manifest}" ]]; then
+  grep -Eq '^ro-installer-' "${rpm_manifest}" || fail "RPM manifest missing ro-installer package."
+  grep -Eq '^ro-kernel-stable-core-' "${rpm_manifest}" || fail "RPM manifest missing ro-kernel-stable-core package."
+  grep -Eq '^ro-kernel-stable-modules-' "${rpm_manifest}" || fail "RPM manifest missing ro-kernel-stable-modules package."
+  grep -Eq '^ro-assist-' "${rpm_manifest}" || fail "RPM manifest missing ro-assist package."
+  grep -Eq '^ro-control-' "${rpm_manifest}" || fail "RPM manifest missing ro-control package."
+else
+  fail "RPM manifest missing from ISO root."
+fi
+
+repo_manifest="${tmpdir}/ro-live-repolist.txt"
+xorriso -osirrox on -indev "${ISO_PATH}" -extract /ro-live-repolist.txt "${repo_manifest}" -end >/dev/null 2>&1 || true
+if [[ -s "${repo_manifest}" ]]; then
+  grep -Fq 'ro-repo' "${repo_manifest}" || fail "Repo manifest missing ro-repo."
+  grep -Fq 'ro-repo-noarch' "${repo_manifest}" || fail "Repo manifest missing ro-repo-noarch."
+  grep -Fq 'ro-kernel-stable' "${repo_manifest}" || fail "Repo manifest missing ro-kernel-stable COPR."
+else
+  fail "Repo manifest missing from ISO root."
 fi
 
 if (( failures > 0 )); then

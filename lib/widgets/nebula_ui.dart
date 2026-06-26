@@ -687,7 +687,7 @@ class _NebulaDropdownMenu<T> extends StatelessWidget {
         ).animate(unfold),
         child: SizeTransition(
           sizeFactor: unfold,
-          axisAlignment: -1,
+          alignment: Alignment.topCenter,
           child: ScaleTransition(
             scale: Tween<double>(begin: 0.96, end: 1.0).animate(unfold),
             alignment: Alignment.topCenter,

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:test/test.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
 import 'package:ro_installer/services/install_stages/partitioning_stage.dart';
@@ -45,7 +47,13 @@ void main() {
 
         // Komut sırası doğrulaması
         final cmds = fake.commandNames
-            .where((cmd) => cmd != 'sh' && cmd != 'grep' && cmd != 'blockdev')
+            .where(
+              (cmd) =>
+                  cmd != 'sh' &&
+                  cmd != 'grep' &&
+                  cmd != 'blockdev' &&
+                  cmd != 'lsblk',
+            )
             .toList();
         expect(cmds[0], 'wipefs');
         expect(cmds[1], 'sgdisk'); // -Z (sıfırlama)
@@ -78,8 +86,61 @@ void main() {
         // Root bölümü: kalan alan
         expect(sgdiskCommands[3].args, contains('3:0:0'));
         expect(sgdiskCommands[3].args, contains('3:8300'));
+
+        final storagePlan =
+            jsonDecode(state['_storagePlan'] as String) as Map<String, dynamic>;
+        final destructiveTypes =
+            (storagePlan['destructiveOperations'] as List<dynamic>)
+                .map((entry) => (entry as Map<String, dynamic>)['type'])
+                .toList();
+        expect(destructiveTypes, [
+          'wipe_disk',
+          'create_efi',
+          'create_swap',
+          'create_btrfs_root',
+          'format_efi',
+          'format_swap',
+          'format_btrfs_root',
+        ]);
       },
     );
+
+    test('unsupported storage topology disk yazmadan reddedilir', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse(
+        'lsblk',
+        ['-J', '-o', 'NAME,TYPE,FSTYPE', '/dev/sda'],
+        stdout: '''
+{
+  "blockdevices": [
+    {
+      "name": "sda",
+      "type": "disk",
+      "fstype": null,
+      "children": [
+        {
+          "name": "sda2",
+          "type": "part",
+          "fstype": "LVM2_member",
+          "children": [
+            {"name": "fedora-root", "type": "lvm", "fstype": "btrfs"}
+          ]
+        }
+      ]
+    }
+  ]
+}''',
+      );
+      final state = {'selectedDisk': '/dev/sda', 'partitionMethod': 'full'};
+      final ctx = makeContext(state, fake);
+
+      final result = await const PartitioningStage().execute(ctx);
+
+      expect(result.success, false);
+      expect(result.message, contains('LVM'));
+      expect(fake.wasCommandCalled('wipefs'), false);
+      expect(fake.wasCalledWith('sgdisk', ['-Z', '/dev/sda']), false);
+    });
 
     test('sgdisk sıfırlama başarısız olursa stage durur', () async {
       final fake = FakeCommandRunner();
@@ -99,6 +160,25 @@ void main() {
 
       expect(result.success, false);
       expect(result.message, contains('sıfırlanamadı'));
+    });
+
+    test('partprobe başarısız olursa stage tamamlandı sayılmaz', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse(
+        'partprobe',
+        ['/dev/sda'],
+        exitCode: 1,
+        stderr: 'kernel busy',
+      );
+
+      final state = {'selectedDisk': '/dev/sda', 'partitionMethod': 'full'};
+      final ctx = makeContext(state, fake);
+
+      final result = await const PartitioningStage().execute(ctx);
+
+      expect(result.success, false);
+      expect(result.message, contains('yeniden okunamadi'));
+      expect(fake.wasCalledWith('sgdisk', ['-Z', '/dev/sda']), true);
     });
 
     test('NVMe disk için bölüm adları doğru oluşturulur (p1, p2)', () async {
@@ -648,10 +728,15 @@ void main() {
 
       expect(result.success, false);
       expect(
-        fake.wasCalledWith('sgdisk', [
-          '--load-backup=/tmp/gpt_backup_alongside.bin',
-          '/dev/sda',
-        ]),
+        fake.commandLog.any(
+          (cmd) =>
+              cmd.command == 'sgdisk' &&
+              cmd.args.length == 2 &&
+              cmd.args[0].startsWith(
+                '--load-backup=/tmp/ro-installer-gpt-alongside-_dev_sda-',
+              ) &&
+              cmd.args[1] == '/dev/sda',
+        ),
         true,
       );
       expect(fake.wasCommandCalled('parted'), false);
@@ -844,10 +929,11 @@ Label: none  uuid: 11111111-2222-3333-4444-555555555555
 
       expect(result.success, false);
       expect(
-        fake.wasCalledWith('sgdisk', [
-          '--backup=/tmp/gpt_backup_free_space.bin',
-          '/dev/sda',
-        ]),
+        fake.commandLog.any(
+          (cmd) =>
+              cmd.command == 'sgdisk' &&
+              cmd.args.any((arg) => arg.startsWith('--backup=')),
+        ),
         false,
       );
     });
@@ -928,11 +1014,20 @@ sda3 part
         },
         {
           'name': 'New Partition',
-          'type': 'ext4',
+          'type': 'btrfs',
           'mount': '/',
           'isFreeSpace': false,
           'isPlanned': true,
           'sizeBytes': 50000000000,
+        },
+        {
+          'name': 'Free Space',
+          'type': 'unallocated',
+          'mount': 'unmounted',
+          'isFreeSpace': true,
+          'isPlanned': true,
+          'sizeBytes': 85899345920,
+          'deletedPartitionNames': ['/dev/sda2'],
         },
       ];
       final state = {
@@ -960,7 +1055,45 @@ sda3 part
       expect(fake.wasCommandCalled('partprobe'), true);
     });
 
-    test('resize planli mevcut EXT4 bolumu gercekten kucultur', () async {
+    test(
+      'plandan eksilen mevcut bolum acik delete marker yoksa silinmez',
+      () async {
+        final fake = FakeCommandRunner();
+        fake.addResponse(
+          'lsblk',
+          ['-rn', '-o', 'NAME,TYPE', '/dev/sda'],
+          stdout: '''
+sda disk
+sda1 part
+sda2 part
+''',
+        );
+
+        final state = {
+          'selectedDisk': '/dev/sda',
+          'partitionMethod': 'manual',
+          'manualPartitions': [
+            {
+              'name': '/dev/sda1',
+              'type': 'fat32',
+              'mount': '/boot/efi',
+              'isFreeSpace': false,
+              'isPlanned': false,
+              'sizeBytes': 500000000,
+            },
+          ],
+        };
+        final ctx = makeContext(state, fake, isMock: true);
+
+        final result = await const PartitioningStage().execute(ctx);
+
+        expect(result.success, false);
+        expect(result.message, contains('açık silme planı olmadan'));
+        expect(fake.wasCalledWith('sgdisk', ['-d', '2', '/dev/sda']), false);
+      },
+    );
+
+    test('resize planli mevcut BTRFS bolumu gercekten kucultur', () async {
       final fake = FakeCommandRunner();
       fake.addResponse(
         'lsblk',
@@ -998,7 +1131,7 @@ sda2 part
           "type": "part",
           "size": 85899345920,
           "start": 1050624,
-          "fstype": "ext4"
+          "fstype": "btrfs"
         }
       ]
     }
@@ -1018,7 +1151,7 @@ sda2 part
         },
         {
           'name': '/dev/sda2',
-          'type': 'ext4',
+          'type': 'btrfs',
           'mount': 'unmounted',
           'isFreeSpace': false,
           'isPlanned': true,
@@ -1033,14 +1166,49 @@ sda2 part
         'partitionMethod': 'manual',
         'manualPartitions': manualParts,
       };
+      fake.addResponse(
+        'btrfs',
+        [
+          'filesystem',
+          'show',
+          '--raw',
+          '/tmp/ro-installer-btrfs-shrink-_dev_sda2',
+        ],
+        stdout: '''
+Label: none  uuid: 11111111-2222-3333-4444-555555555555
+        Total devices 1 FS bytes used 40000000000
+        devid    1 size 85899345920 used 50000000000 path /dev/sda2
+''',
+      );
+      fake.addResponse('btrfs', [
+        'inspect-internal',
+        'min-dev-size',
+        '/tmp/ro-installer-btrfs-shrink-_dev_sda2',
+      ], stdout: '50000000000 bytes');
       final ctx = makeContext(state, fake);
 
       final stage = const PartitioningStage();
       final result = await stage.execute(ctx);
 
       expect(result.success, true);
-      expect(fake.wasCalledWith('e2fsck', ['-f', '-p', '/dev/sda2']), true);
-      expect(fake.wasCalledWith('resize2fs', ['/dev/sda2', '62849024K']), true);
+      expect(
+        fake.wasCalledWith('mount', [
+          '-o',
+          'subvolid=5',
+          '/dev/sda2',
+          '/tmp/ro-installer-btrfs-shrink-_dev_sda2',
+        ]),
+        true,
+      );
+      expect(
+        fake.wasCalledWith('btrfs', [
+          'filesystem',
+          'resize',
+          '64357400576',
+          '/tmp/ro-installer-btrfs-shrink-_dev_sda2',
+        ]),
+        true,
+      );
       expect(
         fake.wasCalledWith('parted', [
           '-s',

@@ -17,7 +17,7 @@ class ManualPartitionScreen extends StatefulWidget {
 
 class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
   static const int _minResizeSourceBytes = 40 * 1024 * 1024 * 1024;
-  static const Set<String> _resizableFilesystems = {'ntfs', 'ext4', 'btrfs'};
+  static const Set<String> _resizableFilesystems = {'ntfs', 'btrfs'};
 
   int? _selectedIndex;
   bool _isLoading = true;
@@ -60,22 +60,14 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
   }
 
   String _filesystemForMount(String mount, {String fallback = 'btrfs'}) {
-    final normalizedFallback = _normalizeFilesystemType(fallback);
     switch (mount) {
       case '/boot/efi':
         return 'fat32';
       case '[SWAP]':
         return 'linux-swap';
+      case 'unmounted':
+        return _normalizeFilesystemType(fallback);
       default:
-        if ([
-          'btrfs',
-          'ext4',
-          'xfs',
-          'fat32',
-          'linux-swap',
-        ].contains(normalizedFallback)) {
-          return normalizedFallback;
-        }
         return 'btrfs';
     }
   }
@@ -394,6 +386,13 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
     if (part['isFreeSpace'] == true) {
       return;
     }
+    final deletedName = (part['name'] ?? '').toString();
+    final deletedPartitionNames = <String>[
+      ...((part['deletedPartitionNames'] as List<dynamic>? ?? const [])
+          .map((entry) => entry.toString())
+          .where((entry) => entry.isNotEmpty)),
+      if (deletedName.isNotEmpty && deletedName != 'Free Space') deletedName,
+    ];
 
     setState(() {
       part['isFreeSpace'] = true;
@@ -404,13 +403,27 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
       part['flags'] = '';
       part['isPlanned'] = true;
       part['formatOnInstall'] = false;
+      part['deletedPartitionNames'] = deletedPartitionNames.toSet().toList();
 
       for (var i = 0; i < state.manualPartitions.length - 1; i++) {
         if (state.manualPartitions[i]['isFreeSpace'] == true &&
             state.manualPartitions[i + 1]['isFreeSpace'] == true) {
+          final deleted = <String>{
+            ...((state.manualPartitions[i]['deletedPartitionNames']
+                        as List<dynamic>? ??
+                    const [])
+                .map((entry) => entry.toString())
+                .where((entry) => entry.isNotEmpty)),
+            ...((state.manualPartitions[i + 1]['deletedPartitionNames']
+                        as List<dynamic>? ??
+                    const [])
+                .map((entry) => entry.toString())
+                .where((entry) => entry.isNotEmpty)),
+          };
           state.manualPartitions[i]['sizeBytes'] =
               (state.manualPartitions[i]['sizeBytes'] as int) +
               (state.manualPartitions[i + 1]['sizeBytes'] as int);
+          state.manualPartitions[i]['deletedPartitionNames'] = deleted.toList();
           state.manualPartitions.removeAt(i + 1);
           i--;
         }
@@ -717,6 +730,16 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
     var bootSize = 0;
     var bootType = '';
 
+    void showError(String message) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+
     for (final partition in state.manualPartitions) {
       if (partition['isFreeSpace'] == true) {
         continue;
@@ -749,17 +772,9 @@ class _ManualPartitionScreenState extends State<ManualPartitionScreen> {
       } else if (mount == '[SWAP]') {
         hasSwap = true;
         swapType = type;
+      } else if (mount != 'unmounted' && type != 'btrfs') {
+        return showError(state.t('part_err_root_fs'));
       }
-    }
-
-    void showError(String message) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.redAccent,
-          duration: const Duration(seconds: 4),
-        ),
-      );
     }
 
     if (!hasRoot) {
@@ -1858,20 +1873,10 @@ _PartitionTone _partitionTone(Map<String, dynamic>? partition) {
   }
 
   switch ((partition['type'] ?? '').toString()) {
-    case 'ext4':
-      return const _PartitionTone(
-        icon: Icons.folder_open_rounded,
-        color: Color(0xFFFFA24D),
-      );
     case 'btrfs':
       return const _PartitionTone(
         icon: Icons.layers_rounded,
         color: Color(0xFF74A9FF),
-      );
-    case 'xfs':
-      return const _PartitionTone(
-        icon: Icons.speed_rounded,
-        color: Color(0xFF62D6FF),
       );
     case 'fat32':
     case 'vfat':

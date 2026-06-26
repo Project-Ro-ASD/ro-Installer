@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:test/test.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
 import 'package:ro_installer/services/install_stages/formatting_stage.dart';
@@ -49,9 +51,42 @@ void main() {
       expect(fake.wasCalledWith('mkfs.fat', ['-F32', '/dev/sda1']), true);
       expect(fake.wasCalledWith('mkswap', ['/dev/sda2']), true);
       expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda3']), true);
+      final storagePlan =
+          jsonDecode(state['_formatStoragePlan'] as String)
+              as Map<String, dynamic>;
+      final destructiveTypes =
+          (storagePlan['destructiveOperations'] as List<dynamic>)
+              .map((entry) => (entry as Map<String, dynamic>)['type'])
+              .toList();
+      expect(destructiveTypes, containsAll(['format_efi', 'format_swap']));
     });
 
-    test('EXT4 dosya sistemi doğru formatlanır', () async {
+    test(
+      'unsupported storage topology format komutu baslatmadan reddedilir',
+      () async {
+        final fake = FakeCommandRunner();
+        final state = {
+          'selectedDisk': '/dev/sda',
+          'partitionMethod': 'full',
+          'fileSystem': 'btrfs',
+          'unsupportedStorageBlockers': ['unsupported_raid'],
+          'unsupportedStorageDetails': [
+            'unsupported_raid:/dev/sda2:type=part:fs=linux_raid_member',
+          ],
+        };
+        final ctx = makeContext(state, fake);
+
+        final result = await const FormattingStage().execute(ctx);
+
+        expect(result.success, false);
+        expect(result.message, contains('RAID'));
+        expect(fake.wasCommandCalled('mkfs.fat'), false);
+        expect(fake.wasCommandCalled('mkswap'), false);
+        expect(fake.wasCommandCalled('mkfs.btrfs'), false);
+      },
+    );
+
+    test('Btrfs dışı root dosya sistemi reddedilir', () async {
       final fake = FakeCommandRunner();
       final state = {
         'selectedDisk': '/dev/sda',
@@ -63,11 +98,12 @@ void main() {
       final stage = const FormattingStage();
       final result = await stage.execute(ctx);
 
-      expect(result.success, true);
-      expect(fake.wasCalledWith('mkfs.ext4', ['-F', '/dev/sda3']), true);
+      expect(result.success, false);
+      expect(result.message, contains('yalnızca Btrfs'));
+      expect(fake.wasCommandCalled('mkfs.fat'), false);
     });
 
-    test('XFS dosya sistemi doğru formatlanır', () async {
+    test('XFS root dosya sistemi reddedilir', () async {
       final fake = FakeCommandRunner();
       final state = {
         'selectedDisk': '/dev/sda',
@@ -79,8 +115,9 @@ void main() {
       final stage = const FormattingStage();
       final result = await stage.execute(ctx);
 
-      expect(result.success, true);
-      expect(fake.wasCalledWith('mkfs.xfs', ['-f', '/dev/sda3']), true);
+      expect(result.success, false);
+      expect(result.message, contains('yalnızca Btrfs'));
+      expect(fake.wasCommandCalled('mkfs.fat'), false);
     });
 
     test('NVMe disk için p1/p2/p3 bölüm adları kullanılır', () async {
@@ -143,7 +180,7 @@ void main() {
           },
           {
             'name': '/dev/sda2',
-            'type': 'ext4',
+            'type': 'btrfs',
             'mount': '/',
             'isPlanned': true,
             'isFreeSpace': false,
@@ -166,7 +203,7 @@ void main() {
 
       expect(result.success, true);
       expect(fake.wasCalledWith('mkfs.fat', ['-F32', '/dev/sda1']), true);
-      expect(fake.wasCalledWith('mkfs.ext4', ['-F', '/dev/sda2']), true);
+      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda2']), true);
       expect(fake.wasCalledWith('mkswap', ['/dev/sda3']), true);
     });
 
@@ -187,7 +224,7 @@ void main() {
           },
           {
             'name': '/dev/sda2',
-            'type': 'ext4',
+            'type': 'btrfs',
             'mount': '/',
             'isPlanned': true,
             'isFreeSpace': false,
@@ -204,8 +241,37 @@ void main() {
       // sda1 formatlanmamalı (isPlanned=false)
       expect(fake.wasCommandCalled('mkfs.ntfs'), false);
       // sda2 formatlanmalı
-      expect(fake.wasCalledWith('mkfs.ext4', ['-F', '/dev/sda2']), true);
+      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda2']), true);
     });
+
+    test(
+      'manual modda desteklenmeyen planlı dosya sistemi reddedilir',
+      () async {
+        final fake = FakeCommandRunner();
+        final state = {
+          'selectedDisk': '/dev/sda',
+          'partitionMethod': 'manual',
+          'fileSystem': 'btrfs',
+          'manualPartitions': [
+            {
+              'name': '/dev/sda2',
+              'type': 'ext4',
+              'mount': '/',
+              'isPlanned': true,
+              'isFreeSpace': false,
+              'formatOnInstall': true,
+            },
+          ],
+        };
+        final ctx = makeContext(state, fake);
+
+        final result = await const FormattingStage().execute(ctx);
+
+        expect(result.success, false);
+        expect(result.message, contains('Btrfs'));
+        expect(fake.wasCommandCalled('mkfs.ext4'), false);
+      },
+    );
 
     test('formatOnInstall=false olan atanmis bolumler korunur', () async {
       final fake = FakeCommandRunner();

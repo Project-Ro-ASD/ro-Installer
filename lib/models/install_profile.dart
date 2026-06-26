@@ -127,7 +127,7 @@ class InstallProfile {
       schemaVersion: (json['schemaVersion'] as num?)?.toInt() ?? 1,
       selectedDisk: json['selectedDisk'] as String? ?? '',
       partitionMethod: json['partitionMethod'] as String? ?? 'full',
-      fileSystem: 'btrfs',
+      fileSystem: (json['fileSystem'] as String?)?.toLowerCase() ?? 'btrfs',
       username: json['username'] as String? ?? 'user',
       password: json['password'] as String? ?? '',
       timezone:
@@ -204,9 +204,7 @@ class InstallProfile {
     'selectedLanguage': selectedLanguage,
     'selectedLocale': selectedLocale,
     'selectedKernelChannels': selectedKernelChannels,
-    'storage': {
-      'encryption': encryption.toJson(),
-    },
+    'storage': {'encryption': encryption.toJson()},
   };
 
   /// Stage'lerin beklediği state Map'ine dönüştürür.
@@ -316,6 +314,33 @@ class InstallProfile {
       if (!hasRoot) {
         errors.add('Manuel modda root (/) bölümü tanımlanmalıdır.');
       }
+      for (final partition in manualPartitions) {
+        if (partition['isFreeSpace'] == true) {
+          continue;
+        }
+        final name = (partition['name'] ?? 'isimsiz bolum').toString();
+        final mount = (partition['mount'] ?? 'unmounted').toString();
+        final type = (partition['type'] ?? '').toString();
+        if (mount == '/boot/efi') {
+          if (type != 'fat32' && type != 'vfat') {
+            errors.add('Manuel profilde EFI bölümü FAT32 olmalıdır: $name');
+          }
+          continue;
+        }
+        if (mount == '[SWAP]') {
+          if (type != 'linux-swap' && type != 'swap') {
+            errors.add(
+              'Manuel profilde swap bölümü linux-swap olmalıdır: $name',
+            );
+          }
+          continue;
+        }
+        if (mount != 'unmounted' && type != 'btrfs') {
+          errors.add(
+            'Manuel profilde mount edilen bölümler Btrfs olmalıdır: $name ($type)',
+          );
+        }
+      }
     }
 
     return errors;
@@ -372,10 +397,7 @@ class InstallProfileEncryption {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-    'enabled': enabled,
-    'type': type,
-  };
+  Map<String, dynamic> toJson() => {'enabled': enabled, 'type': type};
 }
 
 List<String> _parseKernelChannels(Object? raw) {

@@ -122,7 +122,7 @@ void main() {
         '-J',
         '-b',
         '-o',
-        'NAME,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
+        'NAME,TYPE,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
         '/dev/sda',
       ], stdout: fixture('lsblk_disk_with_windows.json'));
       // sgdisk print yanıtı da ekle
@@ -154,7 +154,7 @@ void main() {
           '-J',
           '-b',
           '-o',
-          'NAME,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
+          'NAME,TYPE,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
           '/dev/sda',
         ],
         stdout: '''
@@ -190,7 +190,7 @@ void main() {
             '-J',
             '-b',
             '-o',
-            'NAME,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
+            'NAME,TYPE,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
             '/dev/nvme0n1',
           ],
           stdout: '''
@@ -252,6 +252,86 @@ void main() {
       },
     );
 
+    test(
+      'LUKS veya nested blok aygıt algılanırsa unsupported topology taşınır',
+      () async {
+        final fake = FakeCommandRunner();
+        fake.addResponse(
+          'lsblk',
+          [
+            '-J',
+            '-b',
+            '-o',
+            'NAME,TYPE,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
+            '/dev/sda',
+          ],
+          stdout: '''
+{
+  "blockdevices": [
+    {
+      "name": "sda",
+      "type": "disk",
+      "size": 214748364800,
+      "pttype": "gpt",
+      "children": [
+        {
+          "name": "sda1",
+          "type": "part",
+          "fstype": "vfat",
+          "size": 536870912,
+          "start": 2048,
+          "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+          "mountpoints": [null]
+        },
+        {
+          "name": "sda2",
+          "type": "part",
+          "fstype": "crypto_LUKS",
+          "size": 128849018880,
+          "start": 1050624,
+          "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+          "mountpoints": [null],
+          "children": [
+            {
+              "name": "cryptroot",
+              "type": "crypt",
+              "fstype": "btrfs",
+              "size": 128840000000,
+              "mountpoints": [null]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}''',
+        );
+        fake.addResponseForCommand('sgdisk', stdout: '', exitCode: 0);
+
+        final service = DiskService(commandRunner: fake);
+        final details = await service.detectDiskDetails('/dev/sda');
+        final blockers =
+            (details['unsupportedStorageBlockers'] as List<dynamic>)
+                .map((entry) => entry.toString())
+                .toList();
+
+        expect(
+          blockers,
+          containsAll(['unsupported_luks', 'unsupported_nested']),
+        );
+        expect(
+          (details['alongsideBlockers'] as List<dynamic>).map(
+            (entry) => entry.toString(),
+          ),
+          contains('unsupported_storage_topology'),
+        );
+        expect(
+          (details['unsupportedStorageDetails'] as List<dynamic>).join('\n'),
+          contains('/dev/sda2'),
+        );
+      },
+    );
+
     test('dirty NTFS shrink adayi olarak kalir ama uyarı kodu taşır', () async {
       final fake = FakeCommandRunner();
       fake.addResponse(
@@ -260,7 +340,7 @@ void main() {
           '-J',
           '-b',
           '-o',
-          'NAME,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
+          'NAME,TYPE,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
           '/dev/sda',
         ],
         stdout: '''
@@ -328,7 +408,7 @@ void main() {
           '-J',
           '-b',
           '-o',
-          'NAME,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
+          'NAME,TYPE,FSTYPE,SIZE,START,PARTTYPE,PTTYPE,MOUNTPOINTS',
           '/dev/sda',
         ],
         stdout: '''

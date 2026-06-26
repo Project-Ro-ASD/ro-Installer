@@ -21,6 +21,8 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 RUN_DIR="${RUN_ROOT}/${STAMP}"
 DISK_IMAGE="${RUN_DIR}/test-disk.qcow2"
 SERIAL_LOG="${RUN_DIR}/serial.log"
+QEMU_LOG="${RUN_DIR}/qemu.log"
+RUN_MANIFEST="${RUN_DIR}/run-manifest.txt"
 QMP_SOCKET="${RUN_DIR}/qmp.sock"
 OVMF_VARS_COPY="${RUN_DIR}/OVMF_VARS.fd"
 
@@ -43,12 +45,12 @@ Kullanim:
   scripts/qemu-boot-iso.sh [secenekler]
 
 Amac:
-  iso-realese altinda uretilen Ro-ASD ISO'yu UEFI/OVMF ile QEMU'da baslatir.
+  iso-release altinda uretilen Ro-ASD ISO'yu UEFI/OVMF ile QEMU'da baslatir.
   Installer'i otomatik calistirmaz; once ISO boot ve live masaustu kontrolu icindir.
 
 Secenekler:
   --iso PATH        Test edilecek ISO. Varsayilan: RO_ASD_TEST_ISO, latest-iso-path.txt,
-                    sonra iso-realese/Ro-ASD-beta*.iso icindeki en yeni dosya.
+                    sonra iso-release/Ro-ASD-beta*.iso icindeki en yeni dosya.
   --gui            QEMU penceresi ac. Varsayilan mod.
   --headless       Grafik pencere acmadan baslat. Erken crash kontrolu icin kullanisli.
   --timeout SEC    Bu sure dolunca QEMU hala calisiyorsa testi basarili sayip kapatir.
@@ -69,7 +71,7 @@ Secenekler:
 
 Ornekler:
   scripts/qemu-boot-iso.sh
-  scripts/qemu-boot-iso.sh --iso iso-realese/Ro-ASD-beta1.iso --memory 8192
+  scripts/qemu-boot-iso.sh --iso iso-release/Ro-ASD-beta1.iso --memory 8192
   scripts/qemu-boot-iso.sh --boot-entry debug --video virtio
   scripts/qemu-boot-iso.sh --headless --timeout 180 --boot-entry text
   scripts/qemu-boot-iso.sh --boot-entry text --ssh-port 2222
@@ -220,28 +222,35 @@ resolve_iso() {
     return 0
   fi
 
-  local latest_file="${REPO_ROOT}/iso-realese/latest-iso-path.txt"
-  if [[ -f "${latest_file}" ]]; then
-    candidate="$(<"${latest_file}")"
-    if [[ -f "${candidate}" ]]; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
+  local latest_file latest_dir
+  for latest_file in \
+    "${REPO_ROOT}/iso-release/latest-iso-path.txt" \
+    "${REPO_ROOT}/iso-realese/latest-iso-path.txt"; do
+    if [[ -f "${latest_file}" ]]; then
+      candidate="$(<"${latest_file}")"
+      if [[ -f "${candidate}" ]]; then
+        printf '%s\n' "${candidate}"
+        return 0
+      fi
 
-    local rebased="${REPO_ROOT}/iso-realese/$(basename "${candidate}")"
-    if [[ -f "${rebased}" ]]; then
-      warn "latest-iso-path.txt eski makine yolunu gosteriyor; mevcut repo icindeki dosya kullaniliyor: ${rebased}"
-      printf '%s\n' "${rebased}"
-      return 0
+      latest_dir="$(dirname "${latest_file}")"
+      local rebased="${latest_dir}/$(basename "${candidate}")"
+      if [[ -f "${rebased}" ]]; then
+        warn "latest-iso-path.txt eski makine yolunu gosteriyor; mevcut repo icindeki dosya kullaniliyor: ${rebased}"
+        printf '%s\n' "${rebased}"
+        return 0
+      fi
     fi
-  fi
+  done
 
   local newest=""
-  while IFS= read -r -d '' candidate; do
-    if [[ -z "${newest}" || "${candidate}" -nt "${newest}" ]]; then
-      newest="${candidate}"
-    fi
-  done < <(find "${REPO_ROOT}/iso-realese" -maxdepth 1 -type f -name 'Ro-ASD-beta*.iso' -print0 2>/dev/null)
+  for latest_dir in "${REPO_ROOT}/iso-release" "${REPO_ROOT}/iso-realese"; do
+    while IFS= read -r -d '' candidate; do
+      if [[ -z "${newest}" || "${candidate}" -nt "${newest}" ]]; then
+        newest="${candidate}"
+      fi
+    done < <(find "${latest_dir}" -maxdepth 1 -type f -name 'Ro-ASD-beta*.iso' -print0 2>/dev/null)
+  done
 
   [[ -n "${newest}" ]] || fail "Uretilmis Ro-ASD ISO bulunamadi. Once scripts/02-build-iso.sh ile ISO uretin veya --iso PATH verin."
   printf '%s\n' "${newest}"
@@ -376,8 +385,47 @@ QEMU_CMD=(
   "${QEMU_DISPLAY_ARGS[@]}"
 )
 
+write_run_manifest() {
+  local iso_sha256="unavailable"
+  local qemu_command=""
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    iso_sha256="$(sha256sum "${ISO_FILE}" | awk '{print $1}')"
+  fi
+  printf -v qemu_command '%q ' "${QEMU_CMD[@]}"
+
+  cat > "${RUN_MANIFEST}" <<EOF
+schema_version=1
+artifact_kind=ro-asd-qemu-iso-boot
+created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+repo_root=${REPO_ROOT}
+iso_file=${ISO_FILE}
+iso_sha256=${iso_sha256}
+run_dir=${RUN_DIR}
+disk_image=${DISK_IMAGE}
+serial_log=${SERIAL_LOG}
+qemu_log=${QEMU_LOG}
+qmp_socket=${QMP_SOCKET}
+ovmf_code=${OVMF_CODE}
+ovmf_vars_template=${OVMF_VARS_TEMPLATE}
+ovmf_vars_copy=${OVMF_VARS_COPY}
+mode=${MODE}
+memory_mb=${MEMORY_MB}
+cpu_count=${CPU_COUNT}
+disk_size=${DISK_SIZE}
+video_backend=${VIDEO_BACKEND}
+boot_entry=${BOOT_ENTRY}
+ssh_port=${SSH_PORT}
+no_kvm=${NO_KVM}
+timeout_seconds=${TIMEOUT_SECONDS}
+qemu_command=${qemu_command}
+EOF
+}
+
 info "Calisma dizini: ${RUN_DIR}"
 info "Serial log: ${SERIAL_LOG}"
+info "QEMU log: ${QEMU_LOG}"
+info "Run manifest: ${RUN_MANIFEST}"
 info "QMP socket: ${QMP_SOCKET}"
 if (( SSH_PORT > 0 )); then
   info "Guest icinde sshd acildiktan sonra hosttan baglan: ssh -p ${SSH_PORT} liveuser@127.0.0.1"
@@ -393,7 +441,8 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-"${QEMU_CMD[@]}" &
+write_run_manifest
+"${QEMU_CMD[@]}" >"${QEMU_LOG}" 2>&1 &
 QEMU_PID="$!"
 
 wait_for_qmp_socket() {
@@ -509,6 +558,7 @@ if (( TIMEOUT_SECONDS > 0 )); then
   while kill -0 "${QEMU_PID}" 2>/dev/null; do
     if (( SECONDS >= deadline )); then
       info "Timeout doldu ve QEMU hala calisiyor; erken boot crash gorunmedi."
+      info "Artefaktlar: ${RUN_MANIFEST}"
       cleanup
       exit 0
     fi
@@ -517,7 +567,7 @@ if (( TIMEOUT_SECONDS > 0 )); then
 
   wait "${QEMU_PID}"
   rc=$?
-  fail "QEMU timeout dolmadan kapandi. Cikis kodu: ${rc}. Serial log: ${SERIAL_LOG}"
+  fail "QEMU timeout dolmadan kapandi. Cikis kodu: ${rc}. Manifest: ${RUN_MANIFEST}. Serial log: ${SERIAL_LOG}. QEMU log: ${QEMU_LOG}"
 fi
 
 wait "${QEMU_PID}"

@@ -61,11 +61,52 @@ refresh_latest_file() {
   info "${label}: ${artifact}"
 }
 
-refresh_latest_file \
-  "ISO" \
-  "${REPO_ROOT}/iso-realese/latest-iso-path.txt" \
-  "${REPO_ROOT}/iso-realese" \
-  "Ro-ASD-beta*.iso"
+refresh_iso_latest_file() {
+  local output_file="${REPO_ROOT}/iso-release/latest-iso-path.txt"
+  local legacy_output_file="${REPO_ROOT}/iso-realese/latest-iso-path.txt"
+  local current=""
+  local rebased=""
+  local artifact=""
+  local artifact_dir=""
+  local current_file=""
+
+  for current_file in "${output_file}" "${legacy_output_file}"; do
+    if [[ -f "${current_file}" ]]; then
+      current="$(<"${current_file}")"
+      if [[ -f "${current}" ]]; then
+        artifact="${current}"
+        break
+      fi
+      for artifact_dir in "${REPO_ROOT}/iso-release" "${REPO_ROOT}/iso-realese"; do
+        rebased="${artifact_dir}/$(basename "${current}")"
+        if [[ -f "${rebased}" ]]; then
+          artifact="${rebased}"
+          break 2
+        fi
+      done
+    fi
+  done
+
+  if [[ -z "${artifact}" ]]; then
+    for artifact_dir in "${REPO_ROOT}/iso-release" "${REPO_ROOT}/iso-realese"; do
+      current="$(newest_file "${artifact_dir}" "Ro-ASD-beta*.iso")"
+      if [[ -n "${current}" && ( -z "${artifact}" || "${current}" -nt "${artifact}" ) ]]; then
+        artifact="${current}"
+      fi
+    done
+  fi
+
+  if [[ -z "${artifact}" ]]; then
+    warn "ISO artifact bulunamadi: iso-release veya iso-realese altinda Ro-ASD-beta*.iso"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "${output_file}")"
+  printf '%s\n' "${artifact}" > "${output_file}"
+  info "ISO: ${artifact}"
+}
+
+refresh_iso_latest_file
 
 refresh_latest_file \
   "RPM" \

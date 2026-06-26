@@ -161,6 +161,11 @@ class BootloaderStage {
     }
     final cmdlineUuid = ctx.isMock ? '1234-abcd' : rootUuid;
     final rootFs = (ctx.state['fileSystem'] ?? 'btrfs').toString();
+    if (rootFs != 'btrfs') {
+      return StageResult.fail(
+        'Ro-ASD boot zinciri yalnızca Btrfs root ile desteklenir: $rootFs',
+      );
+    }
     final needsBtrfsRootflags = rootFs == 'btrfs';
     final rootFlags = needsBtrfsRootflags ? ' rootflags=subvol=@' : '';
     final swapDevice = _resolveSwapDevice(ctx.state);

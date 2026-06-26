@@ -28,6 +28,47 @@ die() {
   exit 1
 }
 
+sha256_file() {
+  sha256sum "$1" | awk '{print $1}'
+}
+
+file_size() {
+  stat -c '%s' "$1"
+}
+
+shell_join() {
+  local arg
+  local joined=""
+  for arg in "$@"; do
+    printf -v arg '%q' "${arg}"
+    joined+="${arg} "
+  done
+  printf '%s' "${joined% }"
+}
+
+git_value() {
+  local fallback="$1"
+  shift
+  if command -v git >/dev/null 2>&1 && git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "${REPO_ROOT}" "$@" 2>/dev/null || printf '%s\n' "${fallback}"
+  else
+    printf '%s\n' "${fallback}"
+  fi
+}
+
+git_dirty_state() {
+  if ! command -v git >/dev/null 2>&1 || ! git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf 'unknown\n'
+    return 0
+  fi
+  if git -C "${REPO_ROOT}" diff --quiet --ignore-submodules -- && \
+     git -C "${REPO_ROOT}" diff --cached --quiet --ignore-submodules --; then
+    printf 'clean\n'
+  else
+    printf 'dirty\n'
+  fi
+}
+
 cmd_exists() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -59,6 +100,9 @@ pkg_for_cmd() {
     grep) echo "grep" ;;
     awk) echo "gawk" ;;
     iconv) echo "glibc-common" ;;
+    sha256sum|stat|uname) echo "coreutils" ;;
+    rpm) echo "rpm" ;;
+    rsync) echo "rsync" ;;
     *) return 1 ;;
   esac
 }
@@ -76,6 +120,9 @@ ensure_host_tools() {
     log "[MISSING] '${cmd}' not found."
   done
 
+  if [[ "${HOST_AUTO_INSTALL:-1}" -ne 1 ]]; then
+    die "Missing host tools and host auto-install is disabled: ${missing_cmds[*]}"
+  fi
   if ! cmd_exists dnf; then
     die "Missing host tools and 'dnf' is unavailable for auto-install. Install: xorriso squashfs-tools erofs-utils mtools dracut util-linux sed grep gawk glibc-common policycoreutils"
   fi
@@ -117,9 +164,11 @@ Options:
   --ro-theme-rpm PATH  Deprecated; accepted for compatibility and ignored.
   --source-iso PATH    Source Fedora KDE live ISO path.
   --beta N|betaN       Output ISO beta number. Default: auto increment.
-  --output-dir PATH    Output directory (default: iso-realese).
+  --output-dir PATH    Output directory (default: iso-release).
   --work-root PATH     Temporary work root (default: outputs/iso-work).
   --keep-workdir       Keep temporary workdir even on success.
+  --no-host-auto-install
+                       Do not install missing host tools with dnf; fail instead.
   -h, --help           Show help.
 EOF
 }
@@ -128,9 +177,10 @@ RPM_PATH=""
 ENABLE_RO_THEME=1
 SOURCE_ISO=""
 BETA_INPUT="auto"
-OUTPUT_DIR="${REPO_ROOT}/iso-realese"
+OUTPUT_DIR="${REPO_ROOT}/iso-release"
 WORK_ROOT="${REPO_ROOT}/outputs/iso-work"
 KEEP_WORKDIR=0
+HOST_AUTO_INSTALL=1
 SHOW_HELP=0
 ORIGINAL_ARGS=("$@")
 
@@ -183,6 +233,10 @@ while [[ $# -gt 0 ]]; do
       KEEP_WORKDIR=1
       shift
       ;;
+    --no-host-auto-install)
+      HOST_AUTO_INSTALL=0
+      shift
+      ;;
     -h|--help)
       SHOW_HELP=1
       shift
@@ -205,7 +259,7 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
   die "This script needs root privileges. Run with sudo."
 fi
 
-ensure_host_tools xorriso unsquashfs mksquashfs fsck.erofs mkfs.erofs blkid chroot mount umount sed grep awk iconv setfiles dd mdir lsinitrd
+ensure_host_tools xorriso unsquashfs mksquashfs fsck.erofs mkfs.erofs blkid chroot mount umount sed grep awk iconv setfiles dd mdir lsinitrd sha256sum stat uname rpm
 
 if [[ -z "${RPM_PATH}" ]]; then
   if [[ -f "${REPO_ROOT}/rpm-outputs/latest-rpm-path.txt" ]]; then
@@ -250,6 +304,12 @@ fi
 BETA_TAG="beta${BETA_NUM}"
 OUTPUT_ISO="${OUTPUT_DIR}/Ro-ASD-${BETA_TAG}.iso"
 [[ ! -e "${OUTPUT_ISO}" ]] || die "Output ISO already exists: ${OUTPUT_ISO}"
+OUTPUT_SHA256_FILE="${OUTPUT_ISO}.sha256"
+BUILD_MANIFEST="${OUTPUT_DIR}/Ro-ASD-${BETA_TAG}.build-manifest.txt"
+[[ ! -e "${OUTPUT_SHA256_FILE}" ]] || die "Output SHA256 file already exists: ${OUTPUT_SHA256_FILE}"
+[[ ! -e "${BUILD_MANIFEST}" ]] || die "Build manifest already exists: ${BUILD_MANIFEST}"
+LATEST_MANIFEST_FILE="${OUTPUT_DIR}/latest-iso-manifest.txt"
+AUDIT_LOG_FILE="${LOG_DIR}/03-audit-iso-${BETA_TAG}-${TIMESTAMP}.log"
 
 VOLUME_ID="RO-ASD-BETA${BETA_NUM}"
 if (( ${#VOLUME_ID} > 32 )); then
@@ -269,6 +329,10 @@ UPPER_DIR="${WORK_BASE}/mnt/upper"
 OVERLAY_WORK_DIR="${WORK_BASE}/mnt/work"
 MERGED_DIR="${WORK_BASE}/mnt/merged"
 INNER_ROOTFS_DIR="${WORK_BASE}/mnt/inner-rootfs"
+ISO_EMBEDDED_MANIFEST="${WORK_BASE}/ro-build-manifest.txt"
+LIVE_RPM_MANIFEST_LOCAL="${WORK_BASE}/ro-live-rpm-manifest.txt"
+LIVE_REPOLIST_LOCAL="${WORK_BASE}/ro-live-repolist.txt"
+LIVE_RELEASE_POLICY_LOCAL="${WORK_BASE}/ro-release-policy.txt"
 mkdir -p "${WORK_BASE}" "${OUTPUT_DIR}"
 
 BASE_MOUNTS=()
@@ -277,6 +341,11 @@ SUCCESS=0
 IMAGE_MODE=""
 IMAGE_FSTYPE=""
 TARGET_ROOT_DIR=""
+SOURCE_CHECKSUM_STATUS="not_checked"
+SOURCE_CHECKSUM_FILE=""
+SOURCE_ISO_SHA256=""
+RPM_SHA256=""
+OUTPUT_ISO_SHA256=""
 
 mount_base_squash() {
   mkdir -p "${LOWER_DIR}"
@@ -465,12 +534,16 @@ verify_source_iso_checksum() {
 
   checksum_file="$(find "${source_dir}" -maxdepth 1 -type f -name '*CHECKSUM' -print | sort | head -n 1 || true)"
   if [[ -z "${checksum_file}" ]]; then
+    SOURCE_CHECKSUM_STATUS="missing"
+    SOURCE_CHECKSUM_FILE=""
     log "[WARN] No Fedora CHECKSUM file found next to source ISO; skipping source ISO checksum verification."
     log "[WARN] Place the official *CHECKSUM file beside ${source_name} to catch corrupt downloads before build."
     return 0
   fi
+  SOURCE_CHECKSUM_FILE="${checksum_file}"
 
   if ! grep -Fq "${source_name}" "${checksum_file}"; then
+    SOURCE_CHECKSUM_STATUS="not_listed"
     log "[WARN] CHECKSUM file does not mention ${source_name}: ${checksum_file}"
     return 0
   fi
@@ -480,10 +553,13 @@ verify_source_iso_checksum() {
     cd "${source_dir}"
     sha256sum -c "$(basename "${checksum_file}")" --ignore-missing
   ) || die "Source ISO checksum verification failed: ${SOURCE_ISO}"
+  SOURCE_CHECKSUM_STATUS="verified"
 }
 
 log "Extracting required files from source ISO..."
 verify_source_iso_checksum
+SOURCE_ISO_SHA256="$(sha256_file "${SOURCE_ISO}")"
+RPM_SHA256="$(sha256_file "${RPM_PATH}")"
 extract_iso_file "/LiveOS/squashfs.img" "${SQUASHFS_ORIG}"
 extract_iso_file "/boot/grub2/grub.cfg" "${GRUB_CFG_LOCAL}"
 extract_iso_file_optional "/EFI/fedora/BOOTX64.CSV" "${BOOTX64_CSV_LOCAL}"
@@ -609,6 +685,31 @@ repo_gpgcheck=0
 enabled=0
 enabled_metadata=1
 EOF
+}
+
+write_ro_release_policy() {
+  mkdir -p /etc/ro-asd
+  cat > /etc/ro-asd/release-policy.conf <<'EOF'
+policy_version=1
+system_role=live-iso
+kernel_policy=ro-kernel-only
+selected_kernel_channels=stable
+stable_kernel_required=1
+experimental_kernel_enabled=0
+stable_kernel_source=copr:hynkzz/ro-kernel-stable
+experimental_kernel_source=copr:hynkzz/ro-Kernel-Experimental
+fedora_stock_kernel_policy=removed-and-excluded
+ro_repo_package_gpgcheck=1
+ro_repo_metadata_gpgcheck=1
+ro_repo_gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd
+copr_kernel_package_gpgcheck=1
+copr_kernel_metadata_gpgcheck=0
+copr_kernel_metadata_reason=copr_metadata_signatures_not_available
+safe_graphics_policy=live-grub-diagnostic-entries
+target_cmdline_policy=no-live-or-debug-gpu-args
+boot_fallback_policy=live-grub-diagnostic-entries-target-clean-cmdline
+EOF
+  chmod 0644 /etc/ro-asd/release-policy.conf
 }
 
 write_ro_kernel_protection() {
@@ -1105,10 +1206,12 @@ EOF
 }
 
 write_ro_repos
+write_ro_release_policy
 test -f /etc/yum.repos.d/ro-repo.repo
 test -f /etc/yum.repos.d/ro-repo-noarch.repo
 test -f /etc/yum.repos.d/ro-kernel-stable-copr.repo
 test -f /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+test -f /etc/ro-asd/release-policy.conf
 grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
 grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
 grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo.repo
@@ -1116,9 +1219,21 @@ grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
+grep -q '^repo_gpgcheck=0$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
 grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-kernel-stable/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
 grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+grep -q '^repo_gpgcheck=0$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
 grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-Kernel-Experimental/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
+grep -q '^policy_version=1$' /etc/ro-asd/release-policy.conf
+grep -q '^system_role=live-iso$' /etc/ro-asd/release-policy.conf
+grep -q '^kernel_policy=ro-kernel-only$' /etc/ro-asd/release-policy.conf
+grep -q '^selected_kernel_channels=stable$' /etc/ro-asd/release-policy.conf
+grep -q '^fedora_stock_kernel_policy=removed-and-excluded$' /etc/ro-asd/release-policy.conf
+grep -q '^ro_repo_package_gpgcheck=1$' /etc/ro-asd/release-policy.conf
+grep -q '^ro_repo_metadata_gpgcheck=1$' /etc/ro-asd/release-policy.conf
+grep -q '^copr_kernel_package_gpgcheck=1$' /etc/ro-asd/release-policy.conf
+grep -q '^copr_kernel_metadata_gpgcheck=0$' /etc/ro-asd/release-policy.conf
+grep -q '^copr_kernel_metadata_reason=copr_metadata_signatures_not_available$' /etc/ro-asd/release-policy.conf
 install_pkgs=(
   "${installer_rpm}"
   gdisk
@@ -1145,8 +1260,11 @@ fi
 
 echo "[INFO] Installing ro-kernel-stable and removing Fedora stock live kernel/modules."
 write_ro_kernel_protection
+test -f /etc/dnf/protected.d/ro-kernel.conf
+grep -q '^ro-kernel-stable$' /etc/dnf/protected.d/ro-kernel.conf
 install_ro_stable_kernel
 write_stock_kernel_excludes
+grep -q '^excludepkgs=kernel kernel-core kernel-modules kernel-modules-core kernel-modules-extra kernel-devel kernel-devel-matched kernel-debug kernel-debug-core kernel-debug-modules kernel-debug-modules-core kernel-debug-modules-extra kernel-debug-devel kernel-uki kernel-uki-core kernel-uki-modules kernel-uki-modules-core kernel-uki-modules-extra$' /etc/dnf/dnf.conf
 prepare_live_ro_kernel_artifacts
 write_live_kernel_config_manifest
 write_live_firmware_manifest
@@ -1164,6 +1282,9 @@ else
 fi
 write_live_graphics_compat
 write_live_cursor_compat
+
+rpm -qa | sort > /var/tmp/ro-live-rpm-manifest.txt
+dnf repolist --enabled > /var/tmp/ro-live-repolist.txt
 
 dnf clean all
 cleanup_rpms=("${installer_rpm}")
@@ -1186,6 +1307,9 @@ install -Dm644 "${TARGET_ROOT_DIR}${RO_LIVE_KERNEL_IMAGE_REL}" "${LIVE_KERNEL_LO
 install -Dm644 "${TARGET_ROOT_DIR}/var/tmp/ro-live-initrd.img" "${LIVE_INITRD_LOCAL}"
 install -Dm644 "${TARGET_ROOT_DIR}/var/tmp/ro-live-kernel-config-check.txt" "${WORK_BASE}/ro-live-kernel-config-check.txt"
 install -Dm644 "${TARGET_ROOT_DIR}/var/tmp/ro-live-firmware-check.txt" "${WORK_BASE}/ro-live-firmware-check.txt"
+install -Dm644 "${TARGET_ROOT_DIR}/var/tmp/ro-live-rpm-manifest.txt" "${LIVE_RPM_MANIFEST_LOCAL}"
+install -Dm644 "${TARGET_ROOT_DIR}/var/tmp/ro-live-repolist.txt" "${LIVE_REPOLIST_LOCAL}"
+install -Dm644 "${TARGET_ROOT_DIR}/etc/ro-asd/release-policy.conf" "${LIVE_RELEASE_POLICY_LOCAL}"
 log "Prepared live boot kernel from ro-kernel-stable: ${RO_LIVE_KERNEL_VERSION}"
 rm -f "${WORK_BASE}/ro-optional-apps-missing.txt"
 
@@ -1197,6 +1321,8 @@ rm -f \
   "${TARGET_ROOT_DIR}/var/tmp/ro-live-kernel-image" \
   "${TARGET_ROOT_DIR}/var/tmp/ro-live-kernel-config-check.txt" \
   "${TARGET_ROOT_DIR}/var/tmp/ro-live-firmware-check.txt" \
+  "${TARGET_ROOT_DIR}/var/tmp/ro-live-rpm-manifest.txt" \
+  "${TARGET_ROOT_DIR}/var/tmp/ro-live-repolist.txt" \
   "${TARGET_ROOT_DIR}/var/tmp/ro-live-customize.sh"
 
 log "Live ISO boot kernel/initrd replaced with ro-kernel-stable artifacts."
@@ -1442,6 +1568,65 @@ else
   die "Internal error: unknown image mode '${IMAGE_MODE}'."
 fi
 
+write_iso_embedded_manifest() {
+  local manifest_path="$1"
+  local host_pretty="unknown"
+  local pubspec_version="unknown"
+  local git_commit="unknown"
+  local git_branch="unknown"
+  local git_dirty="unknown"
+  local rpm_nevra="unknown"
+
+  if [[ -r /etc/os-release ]]; then
+    host_pretty="$(awk -F= '$1 == "PRETTY_NAME" {gsub(/^"|"$/, "", $2); print $2; exit}' /etc/os-release)"
+  fi
+  pubspec_version="$(awk '/^version:/ {print $2; exit}' "${REPO_ROOT}/pubspec.yaml" 2>/dev/null || true)"
+  [[ -n "${pubspec_version}" ]] || pubspec_version="unknown"
+  git_commit="$(git_value unknown rev-parse --verify HEAD)"
+  git_branch="$(git_value unknown branch --show-current)"
+  [[ -n "${git_branch}" ]] || git_branch="detached"
+  git_dirty="$(git_dirty_state)"
+  rpm_nevra="$(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' "${RPM_PATH}" 2>/dev/null || true)"
+  [[ -n "${rpm_nevra}" ]] || rpm_nevra="unknown"
+
+  {
+    printf 'manifest_version=1\n'
+    printf 'build_timestamp_utc=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'build_command=%s\n' "$(shell_join "$0" "${ORIGINAL_ARGS[@]}")"
+    printf 'host_os=%s\n' "${host_pretty}"
+    printf 'host_kernel=%s\n' "$(uname -srmo)"
+    printf 'repo_root=%s\n' "${REPO_ROOT}"
+    printf 'git_commit=%s\n' "${git_commit}"
+    printf 'git_branch=%s\n' "${git_branch}"
+    printf 'git_dirty=%s\n' "${git_dirty}"
+    printf 'pubspec_version=%s\n' "${pubspec_version}"
+    printf 'source_iso_path=%s\n' "${SOURCE_ISO}"
+    printf 'source_iso_size=%s\n' "$(file_size "${SOURCE_ISO}")"
+    printf 'source_iso_sha256=%s\n' "${SOURCE_ISO_SHA256}"
+    printf 'source_checksum_status=%s\n' "${SOURCE_CHECKSUM_STATUS}"
+    printf 'source_checksum_file=%s\n' "${SOURCE_CHECKSUM_FILE}"
+    printf 'rpm_path=%s\n' "${RPM_PATH}"
+    printf 'rpm_nevra=%s\n' "${rpm_nevra}"
+    printf 'rpm_size=%s\n' "$(file_size "${RPM_PATH}")"
+    printf 'rpm_sha256=%s\n' "${RPM_SHA256}"
+    printf 'beta_tag=%s\n' "${BETA_TAG}"
+    printf 'volume_id=%s\n' "${VOLUME_ID}"
+    printf 'enable_ro_theme=%s\n' "${ENABLE_RO_THEME}"
+    printf 'host_auto_install=%s\n' "${HOST_AUTO_INSTALL}"
+    printf 'image_mode=%s\n' "${IMAGE_MODE}"
+    printf 'image_fstype=%s\n' "${IMAGE_FSTYPE:-unknown}"
+    printf 'ro_live_kernel_version=%s\n' "${RO_LIVE_KERNEL_VERSION}"
+    printf 'ro_live_kernel_image=%s\n' "${RO_LIVE_KERNEL_IMAGE_REL}"
+    printf 'release_policy_file=%s\n' "/ro-release-policy.txt"
+    printf 'release_policy_sha256=%s\n' "$(sha256_file "${LIVE_RELEASE_POLICY_LOCAL}")"
+    printf 'work_root=%s\n' "${WORK_ROOT}"
+    printf 'work_base=%s\n' "${WORK_BASE}"
+    printf 'log_file=%s\n' "${LOG_FILE}"
+  } > "${manifest_path}"
+}
+
+write_iso_embedded_manifest "${ISO_EMBEDDED_MANIFEST}"
+
 log "Repacking ISO with original boot layout replay..."
 XORRISO_CMD=(
   -indev "${SOURCE_ISO}"
@@ -1453,8 +1638,12 @@ XORRISO_CMD=(
   -map "${GRUB_CFG_LOCAL}" /boot/grub2/grub.cfg
   -map "${LIVE_KERNEL_LOCAL}" /boot/x86_64/loader/linux
   -map "${LIVE_INITRD_LOCAL}" /boot/x86_64/loader/initrd
+  -map "${ISO_EMBEDDED_MANIFEST}" /ro-build-manifest.txt
+  -map "${LIVE_RELEASE_POLICY_LOCAL}" /ro-release-policy.txt
   -map "${WORK_BASE}/ro-live-kernel-config-check.txt" /ro-live-kernel-config-check.txt
   -map "${WORK_BASE}/ro-live-firmware-check.txt" /ro-live-firmware-check.txt
+  -map "${LIVE_RPM_MANIFEST_LOCAL}" /ro-live-rpm-manifest.txt
+  -map "${LIVE_REPOLIST_LOCAL}" /ro-live-repolist.txt
 )
 
 if [[ -f "${BOOTX64_CSV_LOCAL}" ]]; then
@@ -1473,12 +1662,34 @@ if command -v implantisomd5 >/dev/null 2>&1; then
 fi
 
 log "Auditing ISO boot readiness..."
-"${REPO_ROOT}/scripts/03-audit-iso.sh" "${OUTPUT_ISO}"
+if "${REPO_ROOT}/scripts/03-audit-iso.sh" "${OUTPUT_ISO}" | tee -a "${AUDIT_LOG_FILE}"; then
+  AUDIT_EXIT_CODE=0
+else
+  AUDIT_EXIT_CODE=$?
+fi
+[[ ${AUDIT_EXIT_CODE} -eq 0 ]] || die "ISO audit failed. Audit log: ${AUDIT_LOG_FILE}"
+
+OUTPUT_ISO_SHA256="$(sha256_file "${OUTPUT_ISO}")"
+printf '%s  %s\n' "${OUTPUT_ISO_SHA256}" "$(basename "${OUTPUT_ISO}")" > "${OUTPUT_SHA256_FILE}"
+{
+  cat "${ISO_EMBEDDED_MANIFEST}"
+  printf 'output_iso_path=%s\n' "${OUTPUT_ISO}"
+  printf 'output_iso_size=%s\n' "$(file_size "${OUTPUT_ISO}")"
+  printf 'output_iso_sha256=%s\n' "${OUTPUT_ISO_SHA256}"
+  printf 'output_sha256_file=%s\n' "${OUTPUT_SHA256_FILE}"
+  printf 'audit_log_file=%s\n' "${AUDIT_LOG_FILE}"
+  printf 'audit_exit_code=%s\n' "${AUDIT_EXIT_CODE}"
+} > "${BUILD_MANIFEST}"
 
 printf '%s\n' "${OUTPUT_ISO}" > "${OUTPUT_DIR}/latest-iso-path.txt"
+printf '%s\n' "${BUILD_MANIFEST}" > "${LATEST_MANIFEST_FILE}"
 NEW_LABEL="$(blkid -o value -s LABEL "${OUTPUT_ISO}" || true)"
 log "ISO created: ${OUTPUT_ISO}"
 log "ISO label: ${NEW_LABEL:-unknown}"
+log "ISO sha256: ${OUTPUT_ISO_SHA256}"
+log "SHA256 file: ${OUTPUT_SHA256_FILE}"
+log "Build manifest: ${BUILD_MANIFEST}"
+log "Audit log: ${AUDIT_LOG_FILE}"
 log "Detailed log: ${LOG_FILE}"
 
 SUCCESS=1
