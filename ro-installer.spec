@@ -7,7 +7,8 @@ URL:            https://github.com/Project-Ro-ASD/ro-Installer
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      x86_64
 
-BuildRequires:  flutter
+# Flutter SDK is provided by the build wrapper or CI because Fedora 43 does not
+# ship a supported flutter RPM in the base repositories.
 BuildRequires:  clang
 BuildRequires:  cmake
 BuildRequires:  ninja-build

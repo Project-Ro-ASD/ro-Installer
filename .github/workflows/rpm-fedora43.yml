@@ -40,7 +40,11 @@ jobs:
             gawk \
             sed \
             grep \
-            flutter \
+            xz \
+            unzip \
+            which \
+            curl \
+            ca-certificates \
             clang \
             cmake \
             ninja-build \
@@ -48,6 +52,13 @@ jobs:
             pkgconf-pkg-config \
             python3 \
             ripgrep
+
+      - name: Install Flutter SDK
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git /opt/flutter
+          echo "/opt/flutter/bin" >> "$GITHUB_PATH"
+          /opt/flutter/bin/flutter --version
+          /opt/flutter/bin/flutter config --enable-linux-desktop
 
       - name: Check out repository
         uses: actions/checkout@v4

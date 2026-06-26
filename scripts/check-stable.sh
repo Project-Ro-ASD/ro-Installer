@@ -191,6 +191,8 @@ require_github_rpm_ci_policy() {
   local workflow=".github/workflows/rpm-fedora43.yml"
   [[ -f "${workflow}" ]]
   rg -q 'fedora:43' "${workflow}"
+  rg -q '/opt/flutter/bin' "${workflow}"
+  ! rg -q '^[[:space:]]+flutter[[:space:]]*\\$' "${workflow}"
   rg -q 'scripts/01-build-rpm.sh --no-chain --source-mode git --require-clean-git' "${workflow}"
   rg -q 'actions/upload-artifact@v4' "${workflow}"
   rg -q 'softprops/action-gh-release@v2' "${workflow}"
