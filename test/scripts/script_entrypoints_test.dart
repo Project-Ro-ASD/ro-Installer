@@ -5,11 +5,15 @@ import 'package:test/test.dart';
 void main() {
   group('script entrypoints', () {
     const scripts = [
+      'scripts/build-iso.sh',
+      'scripts/test-qemu.sh',
       'scripts/01-build-rpm.sh',
       'scripts/02-build-iso.sh',
       'scripts/03-audit-iso.sh',
       'scripts/04-benchmark-copy-paths.sh',
       'scripts/qemu-boot-iso.sh',
+      'test_qemu_vm.sh',
+      'test_qemu_guest_runner.sh',
     ];
 
     test('shell scripts are syntax-valid', () async {
@@ -25,6 +29,8 @@ void main() {
 
     test('main scripts expose help without starting heavy work', () async {
       const helpScripts = [
+        'scripts/build-iso.sh',
+        'scripts/test-qemu.sh',
         'scripts/01-build-rpm.sh',
         'scripts/02-build-iso.sh',
         'scripts/03-audit-iso.sh',

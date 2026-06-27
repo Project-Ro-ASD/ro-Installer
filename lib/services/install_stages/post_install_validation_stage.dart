@@ -71,13 +71,55 @@ grep -q '^excludepkgs=kernel kernel-core kernel-modules kernel-modules-core kern
 
 const postInstallRoDesktopAppsValidationScript = r'''
 set -e
+validate_executable_runtime() {
+  binary="$1"
+  file_info=""
+  ldd_output=""
+
+  test -x "$binary"
+
+  if command -v file >/dev/null 2>&1; then
+    file_info="$(file -L "$binary")"
+    echo "[INFO] $file_info"
+    case "$file_info" in
+      *"ELF "*"dynamically linked"*)
+        ldd -r "$binary"
+        ;;
+      *"ELF "*"statically linked"*|*"script"*|*"text executable"*)
+        echo "[INFO] $binary is not a dynamic ELF executable; ldd -r is not applicable."
+        ;;
+      *)
+        echo "[ERROR] Unsupported executable type for $binary: $file_info" >&2
+        return 1
+        ;;
+    esac
+    return 0
+  fi
+
+  if ldd_output="$(ldd -r "$binary" 2>&1)"; then
+    printf '%s\n' "$ldd_output"
+    return 0
+  fi
+
+  printf '%s\n' "$ldd_output" >&2
+  case "$ldd_output" in
+    *"not a dynamic executable"*)
+      echo "[INFO] $binary is not a dynamic ELF executable; ldd -r is not applicable."
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 rpm -q ro-assist ro-control
 ro_assist_bin="$(command -v ro-assist)"
 ro_control_bin="$(command -v ro-control)"
-test -x "$ro_assist_bin"
-test -x "$ro_control_bin"
-ldd -r "$ro_assist_bin"
-ldd -r "$ro_control_bin"
+validate_executable_runtime "$ro_assist_bin"
+if [ -x /usr/libexec/ro-assist/ro-assist ]; then
+  validate_executable_runtime /usr/libexec/ro-assist/ro-assist
+fi
+validate_executable_runtime "$ro_control_bin"
 ''';
 
 const postInstallKernelImageValidationScript = r'''

@@ -15,27 +15,33 @@ set -euo pipefail
 MODE="${1:-auto}"
 PROFILE_RELATIVE_PATH="${2:-test/fixtures/profile_full_btrfs.json}"
 
-PROJECT_DIR="$(pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_ROOT="$PROJECT_DIR/outputs/vm"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 RUN_DIR="$RUN_ROOT/$STAMP"
 
-DISK_SIZE="${DISK_SIZE:-20G}"
+DISK_SIZE="${DISK_SIZE:-64G}"
 MEMORY_MB="${MEMORY_MB:-4096}"
 CPU_COUNT="${CPU_COUNT:-4}"
 LIVE_BOOT_WAIT_SECONDS="${LIVE_BOOT_WAIT_SECONDS:-120}"
 AUTO_TEST_TIMEOUT_SECONDS="${AUTO_TEST_TIMEOUT_SECONDS:-1800}"
+GUEST_RUNNER_START_TIMEOUT_SECONDS="${GUEST_RUNNER_START_TIMEOUT_SECONDS:-300}"
+QMP_KEY_DELAY_MS="${QMP_KEY_DELAY_MS:-90}"
 BOOT_MENU_WAIT_SECONDS="${BOOT_MENU_WAIT_SECONDS:-20}"
 VM_GUEST_DISK="${VM_GUEST_DISK:-/dev/vda}"
+QEMU_DISPLAY_MODE="${QEMU_DISPLAY_MODE:-headless}"
+HOST_MOUNT_IN_GUEST="${HOST_MOUNT_IN_GUEST:-/run/ro-host}"
 
 DISK_IMAGE="$RUN_DIR/test_disk.qcow2"
 SERIAL_LOG="$RUN_DIR/serial.log"
 QMP_SOCKET="$RUN_DIR/qmp.sock"
 OVMF_VARS_COPY="$RUN_DIR/OVMF_VARS.fd"
+HOST_VM_LOG_DIR="$RUN_DIR/guest-logs"
 GENERATED_PROFILE_RELATIVE_PATH="outputs/vm/$STAMP/auto_profile.json"
 GENERATED_PROFILE_PATH="$PROJECT_DIR/$GENERATED_PROFILE_RELATIVE_PATH"
 
 mkdir -p "$RUN_DIR"
+mkdir -p "$HOST_VM_LOG_DIR"
 
 info() {
   printf '[BILGI] %s\n' "$*"
@@ -124,10 +130,37 @@ resolve_iso() {
     return 0
   fi
 
-  local found
-  found="$(find "$PROJECT_DIR" -maxdepth 1 -type f -name '*.iso' | sort | head -n 1)"
-  [ -n "$found" ] || fail "Proje dizininde Fedora Live ISO bulunamadi. RO_INSTALLER_TEST_ISO ile yol verebilirsiniz."
-  printf '%s\n' "$found"
+  local latest_file latest_dir candidate found newest search_dir
+  for latest_file in \
+    "$PROJECT_DIR/iso-release/latest-iso-path.txt" \
+    "$PROJECT_DIR/iso-realese/latest-iso-path.txt"; do
+    if [ -f "$latest_file" ]; then
+      candidate="$(cat "$latest_file")"
+      if [ -f "$candidate" ]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+
+      latest_dir="$(dirname "$latest_file")"
+      candidate="$latest_dir/$(basename "$candidate")"
+      if [ -f "$candidate" ]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+    fi
+  done
+
+  newest=""
+  for search_dir in "$PROJECT_DIR/iso-release" "$PROJECT_DIR/iso-realese" "$PROJECT_DIR"; do
+    [ -d "$search_dir" ] || continue
+    found="$(find "$search_dir" -maxdepth 1 -type f \( -name 'Ro-ASD-beta*.iso' -o -name '*.iso' \) | sort | tail -n 1)"
+    if [ -n "$found" ] && { [ -z "$newest" ] || [ "$found" -nt "$newest" ]; }; then
+      newest="$found"
+    fi
+  done
+
+  [ -n "$newest" ] || fail "Ro-ASD/Fedora Live ISO bulunamadi. RO_INSTALLER_TEST_ISO ile yol verebilirsiniz."
+  printf '%s\n' "$newest"
 }
 
 resolve_profile_source() {
@@ -170,23 +203,40 @@ build_installer() {
   local flutter_bin
   local host_cc
   local host_cxx
+  local flutter_build_dir
   local cmake_release_dir
+  local lock_sha_before
+  local lock_sha_after
   flutter_bin="$(resolve_flutter)"
   mapfile -t _compilers < <(resolve_host_compilers)
   host_cc="${_compilers[0]}"
   host_cxx="${_compilers[1]}"
+  flutter_build_dir="$PROJECT_DIR/.dart_tool/flutter_build"
   cmake_release_dir="$PROJECT_DIR/build/linux/x64/release"
 
   info "Linux release binary derleniyor..."
   info "C derleyicisi: $host_cc"
   info "C++ derleyicisi: $host_cxx"
 
-  if [ -f "$cmake_release_dir/CMakeCache.txt" ]; then
-    info "Eski CMake cache temizleniyor: $cmake_release_dir"
+  [ -f "$PROJECT_DIR/pubspec.lock" ] || fail "pubspec.lock bulunamadi; deterministik VM testi icin lockfile zorunlu."
+  lock_sha_before="$(sha256sum "$PROJECT_DIR/pubspec.lock" | awk '{print $1}')"
+  "$flutter_bin" pub get --enforce-lockfile
+  lock_sha_after="$(sha256sum "$PROJECT_DIR/pubspec.lock" | awk '{print $1}')"
+  if [ "$lock_sha_before" != "$lock_sha_after" ]; then
+    fail "flutter pub get pubspec.lock dosyasini degistirdi. VM testi lockfile'i sessizce guncellemez."
+  fi
+
+  if [ -d "$flutter_build_dir" ]; then
+    info "Flutter build cache temizleniyor: $flutter_build_dir"
+    rm -rf "$flutter_build_dir"
+  fi
+
+  if [ -d "$cmake_release_dir" ]; then
+    info "Linux release build dizini temizleniyor: $cmake_release_dir"
     rm -rf "$cmake_release_dir"
   fi
 
-  CC="$host_cc" CXX="$host_cxx" "$flutter_bin" build linux --release
+  CC="$host_cc" CXX="$host_cxx" "$flutter_bin" build linux --release --no-pub
 }
 
 prepare_vm_profile() {
@@ -244,7 +294,7 @@ wait_for_serial_pattern() {
   local waited=0
 
   while [ "$waited" -lt "$timeout" ]; do
-    if [ -f "$SERIAL_LOG" ] && grep -q "$pattern" "$SERIAL_LOG"; then
+    if [ -f "$SERIAL_LOG" ] && grep -qE "$pattern" "$SERIAL_LOG"; then
       return 0
     fi
 
@@ -260,14 +310,14 @@ wait_for_serial_pattern() {
 }
 
 select_live_boot_entry() {
-  info "Fedora boot menusu bekleniyor..."
+  info "Live ISO boot menusu bekleniyor..."
 
-  if ! wait_for_serial_pattern 'Start Fedora' "$BOOT_MENU_WAIT_SECONDS"; then
+  if ! wait_for_serial_pattern 'Start (Ro-ASD|Fedora).*Live|Start Fedora' "$BOOT_MENU_WAIT_SECONDS"; then
     warn "Boot menusu $BOOT_MENU_WAIT_SECONDS saniyede algilanamadi. Varsayilan ISO girdisi ile devam edilecek."
     return 0
   fi
 
-  info "Ilk boot girdisi seciliyor: Start Fedora..."
+  info "Ilk live boot girdisi seciliyor..."
   python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
     --socket "$QMP_SOCKET" \
     --combo home
@@ -303,7 +353,21 @@ run_manual_mode() {
 }
 
 launch_auto_vm() {
-  info "QEMU headless otomatik test ortami baslatiliyor..."
+  local display_args=()
+
+  case "$QEMU_DISPLAY_MODE" in
+    headless)
+      display_args=(-display none)
+      ;;
+    gui)
+      display_args=()
+      ;;
+    *)
+      fail "Gecersiz QEMU_DISPLAY_MODE: $QEMU_DISPLAY_MODE (headless|gui)"
+      ;;
+  esac
+
+  info "QEMU otomatik test ortami baslatiliyor (display: $QEMU_DISPLAY_MODE)..."
 
   run_host qemu-system-x86_64 \
     -name "ro-installer-auto" \
@@ -319,7 +383,7 @@ launch_auto_vm() {
     -device virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=hostshare \
     -net nic,model=virtio -net user \
     -vga virtio \
-    -display none \
+    "${display_args[@]}" \
     -serial file:"$SERIAL_LOG" \
     -qmp unix:"$QMP_SOCKET",server=on,wait=off \
     -boot order=c,once=d,menu=off &
@@ -338,6 +402,7 @@ send_guest_command() {
   info "Konsole aciliyor (Ctrl+Alt+T)..."
   python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
     --socket "$QMP_SOCKET" \
+    --delay-ms "$QMP_KEY_DELAY_MS" \
     --combo ctrl-alt-t
 
   sleep 3
@@ -346,6 +411,7 @@ send_guest_command() {
   python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
     --socket "$QMP_SOCKET" \
     --text "$command_text" \
+    --delay-ms "$QMP_KEY_DELAY_MS" \
     --enter
 
   info "Komut gonderildi. Kurulum, reboot ve smoke test bekleniyor."
@@ -355,6 +421,9 @@ send_guest_command() {
 monitor_auto_test() {
   local deadline=$((SECONDS + AUTO_TEST_TIMEOUT_SECONDS))
   local next_progress=60
+  local failed_summary
+  local elapsed
+  local runner_state_file="${HOST_VM_LOG_DIR}/runner-state.txt"
 
   while [ "$SECONDS" -lt "$deadline" ]; do
     if [ -f "$SERIAL_LOG" ] && grep -q 'RO_INSTALLER_VM_BOOT_OK' "$SERIAL_LOG"; then
@@ -362,12 +431,26 @@ monitor_auto_test() {
       return 0
     fi
 
+    failed_summary="$(find "$HOST_VM_LOG_DIR" -maxdepth 1 -type f -name '*.summary.json' -print 2>/dev/null | sort | tail -n 1)"
+    if [ -n "$failed_summary" ] && grep -q '"success"[[:space:]]*:[[:space:]]*false' "$failed_summary"; then
+      warn "Installer failure summary bulundu: $failed_summary"
+      return 1
+    fi
+
+    elapsed=$((AUTO_TEST_TIMEOUT_SECONDS - (deadline - SECONDS)))
+    if [ "$elapsed" -ge "$GUEST_RUNNER_START_TIMEOUT_SECONDS" ]; then
+      if [[ ! -s "$runner_state_file" ]] && ! grep -q 'RO_INSTALLER_GUEST_RUNNER_START' "$SERIAL_LOG" 2>/dev/null; then
+        warn "Guest runner baslangic marker'i ${GUEST_RUNNER_START_TIMEOUT_SECONDS}s icinde gorulmedi; komut enjeksiyonu baslamamis olabilir."
+        return 1
+      fi
+    fi
+
     if ! kill -0 "$QEMU_PID" 2>/dev/null; then
       break
     fi
 
     local remaining=$((deadline - SECONDS))
-    local elapsed=$((AUTO_TEST_TIMEOUT_SECONDS - remaining))
+    elapsed=$((AUTO_TEST_TIMEOUT_SECONDS - remaining))
     if [ "$elapsed" -ge "$next_progress" ]; then
       info "Otomatik test suruyor... gecen: ${elapsed}s, kalan en fazla: ${remaining}s"
       next_progress=$((next_progress + 60))
@@ -380,9 +463,32 @@ monitor_auto_test() {
 }
 
 print_failure_context() {
+  local latest_summary=""
+  local latest_install_log=""
+  local runner_state_file="${HOST_VM_LOG_DIR}/runner-state.txt"
+
   warn "Otomatik VM testi basarisiz oldu."
   warn "Calisma dizini: $RUN_DIR"
   warn "Seri log: $SERIAL_LOG"
+  if [ -s "$runner_state_file" ]; then
+    warn "Guest runner state: $runner_state_file"
+    cat "$runner_state_file" >&2 || true
+  elif ! grep -q 'RO_INSTALLER_GUEST_RUNNER_START' "$SERIAL_LOG" 2>/dev/null; then
+    warn "Guest runner baslangic marker'i seri logda yok; QMP klavye enjeksiyonu live oturumda komutu baslatamamis olabilir."
+  fi
+  latest_summary="$(find "$HOST_VM_LOG_DIR" -maxdepth 1 -type f -name '*.summary.json' -print 2>/dev/null | sort | tail -n 1)"
+  latest_install_log="$(find "$HOST_VM_LOG_DIR" -maxdepth 1 -type f -name '*.log' -print 2>/dev/null | sort | tail -n 1)"
+  if [ -z "$latest_summary" ] && [ -z "$latest_install_log" ]; then
+    warn "Guest log dizininde installer artefakti yok: $HOST_VM_LOG_DIR"
+  fi
+  if [ -n "$latest_summary" ]; then
+    warn "Installer summary: $latest_summary"
+    cat "$latest_summary" >&2 || true
+  fi
+  if [ -n "$latest_install_log" ]; then
+    warn "Installer log son satirlari: $latest_install_log"
+    tail -n 80 "$latest_install_log" >&2 || true
+  fi
   if [ -f "$SERIAL_LOG" ]; then
     warn "Seri log son satirlari:"
     tail -n 40 "$SERIAL_LOG" >&2 || true
@@ -416,6 +522,10 @@ info "Profil: $PROFILE_SOURCE_PATH"
 info "OVMF CODE: $OVMF_CODE"
 info "OVMF VARS: $OVMF_VARS_TEMPLATE"
 info "Calisma dizini: $RUN_DIR"
+info "Guest log dizini: $HOST_VM_LOG_DIR"
+info "QEMU display modu: $QEMU_DISPLAY_MODE"
+info "QMP tus gecikmesi: ${QMP_KEY_DELAY_MS}ms"
+info "Guest host paylasim mount noktasi: $HOST_MOUNT_IN_GUEST"
 
 build_installer
 prepare_vm_profile
@@ -431,7 +541,7 @@ if [ "$MODE" != "auto" ]; then
   fail "Gecersiz mod: $MODE (kullanim: ./test_qemu_vm.sh [auto|manual] [profil])"
 fi
 
-RUN_DIALOG_COMMAND="sudo mkdir -p /mnt/host; sudo mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/host; sh /mnt/host/test_qemu_guest_runner.sh /mnt/host/$GENERATED_PROFILE_RELATIVE_PATH"
+RUN_DIALOG_COMMAND="sudo mkdir -p $HOST_MOUNT_IN_GUEST; sudo mount -t 9p -o trans=virtio hostshare $HOST_MOUNT_IN_GUEST; sh $HOST_MOUNT_IN_GUEST/test_qemu_guest_runner.sh $HOST_MOUNT_IN_GUEST/$GENERATED_PROFILE_RELATIVE_PATH"
 
 launch_auto_vm
 select_live_boot_entry

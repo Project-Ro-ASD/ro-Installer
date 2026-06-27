@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ISO_PATH="${RO_ASD_TEST_ISO:-}"
+ALLOW_UNSIGNED_RO_REPO=0
 
 failures=0
 warnings=0
@@ -32,7 +33,7 @@ need_cmd() {
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/03-audit-iso.sh [ISO_PATH]
+  scripts/03-audit-iso.sh [ISO_PATH] [--allow-unsigned-ro-repo]
 
 Checks the Ro-ASD live ISO for the boot regressions that are easy to miss:
 - El Torito UEFI image and hidden ESP contents
@@ -40,17 +41,34 @@ Checks the Ro-ASD live ISO for the boot regressions that are easy to miss:
 - initrd dracut live modules
 - Ro live kernel config and Intel/NVIDIA firmware manifests
 - build, enabled repo, and installed package manifests
+
+Options:
+  --allow-unsigned-ro-repo
+      Accept an ISO whose release policy explicitly records unsigned Ro-Repo
+      package/metadata checks. This is only for local test ISOs, not release.
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
-
-if [[ $# -gt 0 ]]; then
-  ISO_PATH="$1"
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --allow-unsigned-ro-repo)
+      ALLOW_UNSIGNED_RO_REPO=1
+      shift
+      ;;
+    *)
+      if [[ -n "${ISO_PATH}" ]]; then
+        fail "Unexpected extra argument: $1"
+      else
+        ISO_PATH="$1"
+      fi
+      shift
+      ;;
+  esac
+done
 
 if [[ -z "${ISO_PATH}" ]]; then
   for latest_file in \
@@ -315,8 +333,19 @@ if [[ -s "${release_policy}" ]]; then
   [[ "$(read_manifest_value "${release_policy}" system_role)" == "live-iso" ]] || fail "Release policy has unexpected system_role."
   [[ "$(read_manifest_value "${release_policy}" kernel_policy)" == "ro-kernel-only" ]] || fail "Release policy must require ro-kernel-only."
   [[ "$(read_manifest_value "${release_policy}" selected_kernel_channels)" == "stable" ]] || fail "Live ISO release policy must use stable kernel channel."
-  [[ "$(read_manifest_value "${release_policy}" ro_repo_package_gpgcheck)" == "1" ]] || fail "Release policy must require Ro repo package GPG."
-  [[ "$(read_manifest_value "${release_policy}" ro_repo_metadata_gpgcheck)" == "1" ]] || fail "Release policy must require Ro repo metadata GPG."
+  ro_repo_package_gpgcheck="$(read_manifest_value "${release_policy}" ro_repo_package_gpgcheck)"
+  ro_repo_metadata_gpgcheck="$(read_manifest_value "${release_policy}" ro_repo_metadata_gpgcheck)"
+  ro_repo_unsigned_reason="$(read_manifest_value "${release_policy}" ro_repo_unsigned_reason)"
+  if [[ "${ro_repo_package_gpgcheck}" == "1" && "${ro_repo_metadata_gpgcheck}" == "1" ]]; then
+    :
+  elif [[ ${ALLOW_UNSIGNED_RO_REPO} -eq 1 &&
+          "${ro_repo_package_gpgcheck}" == "0" &&
+          "${ro_repo_metadata_gpgcheck}" == "0" &&
+          "${ro_repo_unsigned_reason}" == "ro_repo_signatures_not_published" ]]; then
+    warn "Ro repo package/metadata GPG checks are disabled by explicit test-only policy."
+  else
+    fail "Release policy must require Ro repo package and metadata GPG."
+  fi
   [[ "$(read_manifest_value "${release_policy}" copr_kernel_package_gpgcheck)" == "1" ]] || fail "Release policy must require COPR package GPG."
   [[ "$(read_manifest_value "${release_policy}" copr_kernel_metadata_gpgcheck)" == "0" ]] || fail "Release policy must record COPR metadata GPG as disabled."
   [[ "$(read_manifest_value "${release_policy}" copr_kernel_metadata_reason)" == "copr_metadata_signatures_not_available" ]] || fail "Release policy must explain COPR metadata GPG exception."

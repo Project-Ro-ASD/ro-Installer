@@ -153,6 +153,31 @@ ensure_host_tools() {
   fi
 }
 
+require_signed_ro_repo_or_explicit_test_mode() {
+  [[ ${ALLOW_UNSIGNED_RO_REPO} -eq 0 ]] || return 0
+
+  if ! cmd_exists curl; then
+    log "[WARN] curl not found; Ro repo signature preflight skipped. DNF will enforce GPG policy later."
+    return 0
+  fi
+
+  local missing=0
+  local url
+  for url in \
+    "https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd" \
+    "https://project-ro-asd.github.io/Ro-Repo/x86_64/repodata/repomd.xml.asc" \
+    "https://project-ro-asd.github.io/Ro-Repo/noarch/repodata/repomd.xml.asc"; do
+    if ! curl -fsIL --max-time 20 "${url}" >/dev/null; then
+      log "[MISSING] Ro repo release signature artifact unavailable: ${url}"
+      missing=1
+    fi
+  done
+
+  if [[ ${missing} -ne 0 ]]; then
+    die "Ro-Repo is not release-signed. Publish signed RPMs, RPM-GPG-KEY-ro-asd, and repomd.xml.asc; or build a non-release test ISO with --allow-unsigned-ro-repo."
+  fi
+}
+
 show_help() {
   cat <<'EOF'
 Usage:
@@ -169,6 +194,9 @@ Options:
   --keep-workdir       Keep temporary workdir even on success.
   --no-host-auto-install
                        Do not install missing host tools with dnf; fail instead.
+  --allow-unsigned-ro-repo
+                       Test-only escape hatch: allow current Ro repo packages
+                       without package or metadata GPG signatures. Not release evidence.
   -h, --help           Show help.
 EOF
 }
@@ -181,6 +209,7 @@ OUTPUT_DIR="${REPO_ROOT}/iso-release"
 WORK_ROOT="${REPO_ROOT}/outputs/iso-work"
 KEEP_WORKDIR=0
 HOST_AUTO_INSTALL=1
+ALLOW_UNSIGNED_RO_REPO=0
 SHOW_HELP=0
 ORIGINAL_ARGS=("$@")
 
@@ -237,6 +266,10 @@ while [[ $# -gt 0 ]]; do
       HOST_AUTO_INSTALL=0
       shift
       ;;
+    --allow-unsigned-ro-repo)
+      ALLOW_UNSIGNED_RO_REPO=1
+      shift
+      ;;
     -h|--help)
       SHOW_HELP=1
       shift
@@ -260,6 +293,7 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
 fi
 
 ensure_host_tools xorriso unsquashfs mksquashfs fsck.erofs mkfs.erofs blkid chroot mount umount sed grep awk iconv setfiles dd mdir lsinitrd sha256sum stat uname rpm
+require_signed_ro_repo_or_explicit_test_mode
 
 if [[ -z "${RPM_PATH}" ]]; then
   if [[ -f "${REPO_ROOT}/rpm-outputs/latest-rpm-path.txt" ]]; then
@@ -474,6 +508,10 @@ log "Source ISO: ${SOURCE_ISO}"
 log "RPM: ${RPM_PATH}"
 log "Live boot kernel: ro-kernel-stable from COPR"
 log "Ro repositories: ro-repo + ro-repo-noarch + Ro kernel COPR"
+if [[ ${ALLOW_UNSIGNED_RO_REPO} -eq 1 ]]; then
+  log "[WARN] Ro repo package/metadata GPG checks are disabled for this test ISO."
+  log "[WARN] This ISO is not release evidence until Ro-Repo publishes signed packages, RPM-GPG-KEY-ro-asd, and repomd.xml.asc."
+fi
 log "Ro desktop apps: ro-assist + ro-control from Ro repo"
 if [[ ${ENABLE_RO_THEME} -eq 1 ]]; then
   log "Ro theme: ro-theme from Ro repo"
@@ -636,28 +674,55 @@ set -euxo pipefail
 installer_rpm="$1"
 enable_ro_theme="$2"
 theme_source="$3"
-shift 3
+allow_unsigned_ro_repo="$4"
+shift 4
+
+ro_repo_gpgcheck=1
+ro_repo_metadata_gpgcheck=1
+ro_repo_unsigned_reason=none
+if [[ "${allow_unsigned_ro_repo}" == "1" ]]; then
+  ro_repo_gpgcheck=0
+  ro_repo_metadata_gpgcheck=0
+  ro_repo_unsigned_reason=ro_repo_signatures_not_published
+fi
+
+dnf_retry() {
+  local attempt=1
+  local max_attempts=3
+  local rc=0
+
+  until dnf "$@"; do
+    rc=$?
+    if (( attempt >= max_attempts )); then
+      return "${rc}"
+    fi
+    echo "[WARN] dnf command failed with ${rc}; retrying (${attempt}/${max_attempts})..." >&2
+    dnf clean expire-cache >/dev/null 2>&1 || true
+    sleep $((attempt * 10))
+    attempt=$((attempt + 1))
+  done
+}
 
 write_ro_repos() {
   mkdir -p /etc/yum.repos.d
-  cat > /etc/yum.repos.d/ro-repo.repo <<'EOF'
+  cat > /etc/yum.repos.d/ro-repo.repo <<EOF
 [ro-repo]
 name=Acik Kaynak Gelistirme Toplulugu Repo
-baseurl=https://project-ro-asd.github.io/Ro-Repo/$basearch/
+baseurl=https://project-ro-asd.github.io/Ro-Repo/\$basearch/
 enabled=1
-gpgcheck=1
+gpgcheck=${ro_repo_gpgcheck}
 gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd
-repo_gpgcheck=1
+repo_gpgcheck=${ro_repo_metadata_gpgcheck}
 EOF
 
-  cat > /etc/yum.repos.d/ro-repo-noarch.repo <<'EOF'
+  cat > /etc/yum.repos.d/ro-repo-noarch.repo <<EOF
 [ro-repo-noarch]
 name=Acik Kaynak Gelistirme Toplulugu Repo - Noarch
 baseurl=https://project-ro-asd.github.io/Ro-Repo/noarch/
 enabled=1
-gpgcheck=1
+gpgcheck=${ro_repo_gpgcheck}
 gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd
-repo_gpgcheck=1
+repo_gpgcheck=${ro_repo_metadata_gpgcheck}
 EOF
 
   cat > /etc/yum.repos.d/ro-kernel-stable-copr.repo <<'EOF'
@@ -671,6 +736,9 @@ gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-kernel-stabl
 repo_gpgcheck=0
 enabled=1
 enabled_metadata=1
+timeout=180
+minrate=1
+retries=10
 EOF
 
   cat > /etc/yum.repos.d/ro-kernel-experimental-copr.repo <<'EOF'
@@ -684,12 +752,15 @@ gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-Kernel-Exper
 repo_gpgcheck=0
 enabled=0
 enabled_metadata=1
+timeout=180
+minrate=1
+retries=10
 EOF
 }
 
 write_ro_release_policy() {
   mkdir -p /etc/ro-asd
-  cat > /etc/ro-asd/release-policy.conf <<'EOF'
+  cat > /etc/ro-asd/release-policy.conf <<EOF
 policy_version=1
 system_role=live-iso
 kernel_policy=ro-kernel-only
@@ -699,9 +770,10 @@ experimental_kernel_enabled=0
 stable_kernel_source=copr:hynkzz/ro-kernel-stable
 experimental_kernel_source=copr:hynkzz/ro-Kernel-Experimental
 fedora_stock_kernel_policy=removed-and-excluded
-ro_repo_package_gpgcheck=1
-ro_repo_metadata_gpgcheck=1
+ro_repo_package_gpgcheck=${ro_repo_gpgcheck}
+ro_repo_metadata_gpgcheck=${ro_repo_metadata_gpgcheck}
 ro_repo_gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd
+ro_repo_unsigned_reason=${ro_repo_unsigned_reason}
 copr_kernel_package_gpgcheck=1
 copr_kernel_metadata_gpgcheck=0
 copr_kernel_metadata_reason=copr_metadata_signatures_not_available
@@ -778,7 +850,7 @@ install_ro_stable_kernel() {
     ro-kernel-stable-devel
   )
 
-  dnf -y --refresh --setopt=install_weak_deps=False install "${stable_packages[@]}"
+  dnf_retry -y --refresh --setopt=install_weak_deps=False install "${stable_packages[@]}"
   rpm -q "${stable_packages[@]}"
   remove_fedora_stock_kernels
 }
@@ -895,9 +967,9 @@ write_live_firmware_manifest() {
   }
 
   {
-    printf 'FIRMWARE_I915=%s\n' "$(count_firmware '*/i915/*.bin')"
-    printf 'FIRMWARE_XE=%s\n' "$(count_firmware '*/xe/*.bin')"
-    printf 'FIRMWARE_NVIDIA_GSP=%s\n' "$(count_firmware '*/nvidia/*/gsp*.bin')"
+    printf 'FIRMWARE_I915=%s\n' "$(count_firmware '*/i915/*.bin*')"
+    printf 'FIRMWARE_XE=%s\n' "$(count_firmware '*/xe/*.bin*')"
+    printf 'FIRMWARE_NVIDIA_GSP=%s\n' "$(count_firmware '*/nvidia/*/gsp*.bin*')"
   } > /var/tmp/ro-live-firmware-check.txt
 }
 
@@ -1170,13 +1242,41 @@ validate_kde_wayland_runtime() {
 validate_ro_desktop_apps() {
   local ro_assist_bin
   local ro_control_bin
+
+  validate_executable_runtime() {
+    local binary="$1"
+    local file_info=""
+
+    test -x "${binary}"
+    if ! command -v file >/dev/null 2>&1; then
+      echo "[WARN] file command not available; skipping dynamic linker check for ${binary}." >&2
+      return 0
+    fi
+
+    file_info="$(file -L "${binary}")"
+    echo "[INFO] ${file_info}"
+    case "${file_info}" in
+      *"ELF "*"dynamically linked"*)
+        ldd -r "${binary}"
+        ;;
+      *"ELF "*"statically linked"*|*"script"*|*"text executable"*)
+        echo "[INFO] ${binary} is not a dynamic ELF executable; ldd -r is not applicable."
+        ;;
+      *)
+        echo "[ERROR] Unsupported executable type for ${binary}: ${file_info}" >&2
+        return 1
+        ;;
+    esac
+  }
+
   rpm -q ro-assist ro-control
   ro_assist_bin="$(command -v ro-assist)"
   ro_control_bin="$(command -v ro-control)"
-  test -x "${ro_assist_bin}"
-  test -x "${ro_control_bin}"
-  ldd -r "${ro_assist_bin}"
-  ldd -r "${ro_control_bin}"
+  validate_executable_runtime "${ro_assist_bin}"
+  if [[ -x /usr/libexec/ro-assist/ro-assist ]]; then
+    validate_executable_runtime /usr/libexec/ro-assist/ro-assist
+  fi
+  validate_executable_runtime "${ro_control_bin}"
 }
 
 upgrade_kde_wayland_runtime() {
@@ -1188,8 +1288,14 @@ upgrade_kde_wayland_runtime() {
   )
 
   # DNF install does not necessarily upgrade already-installed packages. Keep
-  # KWin and KDecoration on the same Plasma ABI before running ldd -r.
-  dnf -y --refresh --best upgrade "${kde_runtime_pkgs[@]}"
+  # KWin and KDecoration on the same Plasma ABI before running ldd -r. COPR is
+  # disabled here because this KDE-only operation must not fail on kernel repo
+  # metadata refresh timeouts.
+  dnf_retry -y \
+    --best \
+    --disablerepo='copr:copr.fedorainfracloud.org:hynkzz:ro-kernel-stable' \
+    --disablerepo='copr:copr.fedorainfracloud.org:hynkzz:ro-Kernel-Experimental' \
+    upgrade "${kde_runtime_pkgs[@]}"
   rpm -q "${kde_runtime_pkgs[@]}"
 }
 
@@ -1212,11 +1318,11 @@ test -f /etc/yum.repos.d/ro-repo-noarch.repo
 test -f /etc/yum.repos.d/ro-kernel-stable-copr.repo
 test -f /etc/yum.repos.d/ro-kernel-experimental-copr.repo
 test -f /etc/ro-asd/release-policy.conf
-grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
-grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
+grep -q "^gpgcheck=${ro_repo_gpgcheck}$" /etc/yum.repos.d/ro-repo.repo
+grep -q "^repo_gpgcheck=${ro_repo_metadata_gpgcheck}$" /etc/yum.repos.d/ro-repo.repo
 grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo.repo
-grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
-grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
+grep -q "^gpgcheck=${ro_repo_gpgcheck}$" /etc/yum.repos.d/ro-repo-noarch.repo
+grep -q "^repo_gpgcheck=${ro_repo_metadata_gpgcheck}$" /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
 grep -q '^repo_gpgcheck=0$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
@@ -1229,8 +1335,9 @@ grep -q '^system_role=live-iso$' /etc/ro-asd/release-policy.conf
 grep -q '^kernel_policy=ro-kernel-only$' /etc/ro-asd/release-policy.conf
 grep -q '^selected_kernel_channels=stable$' /etc/ro-asd/release-policy.conf
 grep -q '^fedora_stock_kernel_policy=removed-and-excluded$' /etc/ro-asd/release-policy.conf
-grep -q '^ro_repo_package_gpgcheck=1$' /etc/ro-asd/release-policy.conf
-grep -q '^ro_repo_metadata_gpgcheck=1$' /etc/ro-asd/release-policy.conf
+grep -q "^ro_repo_package_gpgcheck=${ro_repo_gpgcheck}$" /etc/ro-asd/release-policy.conf
+grep -q "^ro_repo_metadata_gpgcheck=${ro_repo_metadata_gpgcheck}$" /etc/ro-asd/release-policy.conf
+grep -q "^ro_repo_unsigned_reason=${ro_repo_unsigned_reason}$" /etc/ro-asd/release-policy.conf
 grep -q '^copr_kernel_package_gpgcheck=1$' /etc/ro-asd/release-policy.conf
 grep -q '^copr_kernel_metadata_gpgcheck=0$' /etc/ro-asd/release-policy.conf
 grep -q '^copr_kernel_metadata_reason=copr_metadata_signatures_not_available$' /etc/ro-asd/release-policy.conf
@@ -1244,7 +1351,7 @@ install_pkgs=(
 if [[ "${enable_ro_theme}" == "1" ]]; then
   install_pkgs+=(ro-theme)
 fi
-dnf -y --refresh --setopt=install_weak_deps=False install "${install_pkgs[@]}"
+dnf_retry -y --refresh --setopt=install_weak_deps=False install "${install_pkgs[@]}"
 upgrade_kde_wayland_runtime
 command -v sgdisk
 command -v ro-installer
@@ -1297,7 +1404,7 @@ if [[ ${ENABLE_RO_THEME} -eq 1 ]]; then
 else
   log "Installing installer, Ro desktop apps and Ro kernel policy inside live rootfs (Ro theme disabled)..."
 fi
-chroot "${TARGET_ROOT_DIR}" /usr/bin/env bash -euxo pipefail /var/tmp/ro-live-customize.sh "/var/tmp/${RPM_BASENAME}" "${ENABLE_RO_THEME}" "${RO_THEME_RPM_ARG}"
+chroot "${TARGET_ROOT_DIR}" /usr/bin/env bash -euxo pipefail /var/tmp/ro-live-customize.sh "/var/tmp/${RPM_BASENAME}" "${ENABLE_RO_THEME}" "${RO_THEME_RPM_ARG}" "${ALLOW_UNSIGNED_RO_REPO}"
 
 RO_LIVE_KERNEL_IMAGE_REL="$(<"${TARGET_ROOT_DIR}/var/tmp/ro-live-kernel-image")"
 RO_LIVE_KERNEL_VERSION="$(<"${TARGET_ROOT_DIR}/var/tmp/ro-live-kernel-version")"
@@ -1615,6 +1722,7 @@ write_iso_embedded_manifest() {
     printf 'host_auto_install=%s\n' "${HOST_AUTO_INSTALL}"
     printf 'image_mode=%s\n' "${IMAGE_MODE}"
     printf 'image_fstype=%s\n' "${IMAGE_FSTYPE:-unknown}"
+    printf 'allow_unsigned_ro_repo=%s\n' "${ALLOW_UNSIGNED_RO_REPO}"
     printf 'ro_live_kernel_version=%s\n' "${RO_LIVE_KERNEL_VERSION}"
     printf 'ro_live_kernel_image=%s\n' "${RO_LIVE_KERNEL_IMAGE_REL}"
     printf 'release_policy_file=%s\n' "/ro-release-policy.txt"
@@ -1662,7 +1770,11 @@ if command -v implantisomd5 >/dev/null 2>&1; then
 fi
 
 log "Auditing ISO boot readiness..."
-if "${REPO_ROOT}/scripts/03-audit-iso.sh" "${OUTPUT_ISO}" | tee -a "${AUDIT_LOG_FILE}"; then
+AUDIT_CMD=("${REPO_ROOT}/scripts/03-audit-iso.sh" "${OUTPUT_ISO}")
+if [[ ${ALLOW_UNSIGNED_RO_REPO} -eq 1 ]]; then
+  AUDIT_CMD+=("--allow-unsigned-ro-repo")
+fi
+if "${AUDIT_CMD[@]}" | tee -a "${AUDIT_LOG_FILE}"; then
   AUDIT_EXIT_CODE=0
 else
   AUDIT_EXIT_CODE=$?
@@ -1678,6 +1790,7 @@ printf '%s  %s\n' "${OUTPUT_ISO_SHA256}" "$(basename "${OUTPUT_ISO}")" > "${OUTP
   printf 'output_iso_sha256=%s\n' "${OUTPUT_ISO_SHA256}"
   printf 'output_sha256_file=%s\n' "${OUTPUT_SHA256_FILE}"
   printf 'audit_log_file=%s\n' "${AUDIT_LOG_FILE}"
+  printf 'allow_unsigned_ro_repo=%s\n' "${ALLOW_UNSIGNED_RO_REPO}"
   printf 'audit_exit_code=%s\n' "${AUDIT_EXIT_CODE}"
 } > "${BUILD_MANIFEST}"
 

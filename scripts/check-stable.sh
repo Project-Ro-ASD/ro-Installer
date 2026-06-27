@@ -59,6 +59,8 @@ run_check "shell script syntax" \
   bash -n \
   test_qemu_vm.sh \
   test_qemu_guest_runner.sh \
+  scripts/build-iso.sh \
+  scripts/test-qemu.sh \
   scripts/01-build-rpm.sh \
   scripts/02-build-iso.sh \
   scripts/03-audit-iso.sh \
@@ -100,13 +102,17 @@ require_ro_repo_metadata_gpg() {
   local file
   local key_count
   local metadata_count
-  for file in lib/services/install_stages/chroot_config_stage.dart scripts/02-build-iso.sh; do
+  for file in lib/services/install_stages/chroot_config_stage.dart; do
     rg -n 'project-ro-asd.github.io/Ro-Repo' "${file}" >/dev/null
     metadata_count="$(rg -c '^repo_gpgcheck=1$' "${file}" || true)"
     key_count="$(rg -c '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' "${file}" || true)"
     [[ "${metadata_count}" -ge 2 ]]
     [[ "${key_count}" -ge 2 ]]
   done
+  rg -q 'ro_repo_gpgcheck=1' scripts/02-build-iso.sh
+  rg -q 'ro_repo_metadata_gpgcheck=1' scripts/02-build-iso.sh
+  rg -q 'ro_repo_signatures_not_published' scripts/02-build-iso.sh
+  rg -q -- '--allow-unsigned-ro-repo' scripts/02-build-iso.sh
 }
 
 run_check "Ro repo metadata GPG zorunlu" require_ro_repo_metadata_gpg
@@ -122,6 +128,19 @@ require_ro_release_policy_contract() {
   rg -q '/ro-release-policy.txt' scripts/02-build-iso.sh
   rg -q 'release_policy_sha256' scripts/02-build-iso.sh
   rg -q 'release_policy_sha256' scripts/03-audit-iso.sh
+  rg -q 'Ro-Repo is not release-signed' scripts/02-build-iso.sh
+  rg -q 'Release policy must require Ro repo package and metadata GPG' scripts/03-audit-iso.sh
+  rg -q 'dnf_retry' scripts/02-build-iso.sh
+  rg -q -- "--disablerepo='copr:copr.fedorainfracloud.org:hynkzz:ro-kernel-stable'" scripts/02-build-iso.sh
+  rg -q 'timeout=180' scripts/02-build-iso.sh
+  rg -q 'validate_executable_runtime' scripts/02-build-iso.sh
+  rg -q 'validate_executable_runtime' lib/services/install_stages/post_install_validation_stage.dart
+  rg -q '/usr/libexec/ro-assist/ro-assist' scripts/02-build-iso.sh
+  rg -q '/usr/libexec/ro-assist/ro-assist' lib/services/install_stages/post_install_validation_stage.dart
+  rg -q 'is not a dynamic ELF executable' lib/services/install_stages/post_install_validation_stage.dart
+  rg -q "count_firmware '\\*/i915/\\*.bin\\*'" scripts/02-build-iso.sh
+  rg -q "count_firmware '\\*/xe/\\*.bin\\*'" scripts/02-build-iso.sh
+  rg -q "count_firmware '\\*/nvidia/\\*/gsp\\*.bin\\*'" scripts/02-build-iso.sh
 }
 
 run_check "Ro release policy kaniti zorunlu" require_ro_release_policy_contract
@@ -201,6 +220,52 @@ require_github_rpm_ci_policy() {
 }
 
 run_check "GitHub Fedora 43 RPM CI sozlesmesi" require_github_rpm_ci_policy
+
+require_release_entrypoint_policy() {
+  rg -q 'scripts/01-build-rpm.sh' scripts/build-iso.sh
+  rg -q 'scripts/02-build-iso.sh' scripts/build-iso.sh
+  rg -q 'gh release download' scripts/build-iso.sh
+  rg -q 'RPM_SOURCE=".*github' scripts/build-iso.sh
+  rg -q -- '--rpm-source' scripts/build-iso.sh
+  rg -q -- '--github-tag' scripts/build-iso.sh
+  rg -q -- '--allow-unsigned-ro-repo' scripts/build-iso.sh
+  rg -q 'rpm-outputs/latest-rpm-path.txt' scripts/build-iso.sh
+  rg -q 'iso-release/latest-iso-path.txt' scripts/build-iso.sh
+  rg -q '03-audit-iso.sh' scripts/test-qemu.sh
+  rg -q 'detect_audit_policy_from_manifest' scripts/test-qemu.sh
+  rg -q 'allow_unsigned_ro_repo=1' scripts/test-qemu.sh
+  rg -q -- '--allow-unsigned-ro-repo' scripts/test-qemu.sh
+  rg -q 'qemu-boot-iso.sh' scripts/test-qemu.sh
+  rg -q 'test_qemu_vm.sh' scripts/test-qemu.sh
+  rg -q 'suite.*smoke' scripts/test-qemu.sh
+  rg -q 'RO_INSTALLER_TEST_ISO' test_qemu_vm.sh
+  rg -q 'iso-release/latest-iso-path.txt' test_qemu_vm.sh
+  rg -q -- '--enforce-lockfile' test_qemu_vm.sh
+  rg -q -- 'build linux --release --no-pub' test_qemu_vm.sh
+  rg -q '.dart_tool/flutter_build' test_qemu_vm.sh
+  rg -q 'pubspec.lock dosyasini degistirdi' test_qemu_vm.sh
+  rg -Fq 'DISK_SIZE="${DISK_SIZE:-64G}"' test_qemu_vm.sh
+  rg -q 'DISK_SIZE="64G"' scripts/test-qemu.sh
+  rg -q 'HOST_VM_LOG_DIR="\$RUN_DIR/guest-logs"' test_qemu_vm.sh
+  rg -q 'Installer failure summary bulundu' test_qemu_vm.sh
+  rg -q 'RO_INSTALLER_GUEST_RUNNER_INSTALL_EXIT' test_qemu_guest_runner.sh
+  rg -q 'GUEST_RUNNER_START_TIMEOUT_SECONDS' test_qemu_vm.sh
+  rg -Fq 'QEMU_DISPLAY_MODE="${QEMU_DISPLAY_MODE:-headless}"' test_qemu_vm.sh
+  rg -Fq 'QEMU_DISPLAY_MODE="${QEMU_MODE}"' scripts/test-qemu.sh
+  rg -q 'Guest runner baslangic marker' test_qemu_vm.sh
+  rg -Fq 'QMP_KEY_DELAY_MS="${QMP_KEY_DELAY_MS:-90}"' test_qemu_vm.sh
+  ! rg -q 'version=9p2000' test_qemu_vm.sh
+  ! rg -q 'RO_INSTALLER_VM_LOG_DIR=\$GUEST_VM_LOG_DIR' test_qemu_vm.sh
+  rg -Fq 'HOST_MOUNT_IN_GUEST="${HOST_MOUNT_IN_GUEST:-/run/ro-host}"' test_qemu_vm.sh
+  rg -Fq 'HOST_MOUNT="${HOST_MOUNT:-/run/ro-host}"' test_qemu_guest_runner.sh
+  ! rg -q '/mnt/host' test_qemu_vm.sh test_qemu_guest_runner.sh
+  rg -q 'HOST_LOG_DIR="\$PROFILE_DIR/guest-logs"' test_qemu_guest_runner.sh
+  rg -q 'write_runner_state "started"' test_qemu_guest_runner.sh
+  rg -q 'runner-state.txt' test_qemu_vm.sh
+  rg -q 'sudo -n tee /dev/ttyS0' test_qemu_guest_runner.sh
+}
+
+run_check "tek komut ISO/QEMU entrypoint sozlesmesi" require_release_entrypoint_policy
 
 forbid_pattern \
   "live sudo politikasi NOPASSWD ALL degil" \

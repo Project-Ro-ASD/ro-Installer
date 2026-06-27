@@ -221,6 +221,28 @@ void main() {
       ], exitCode: exitCode);
     }
 
+    test(
+      'Ro desktop uygulama doğrulaması non-dynamic executable dosyalarda ldd zorlamaz',
+      () {
+        expect(
+          postInstallRoDesktopAppsValidationScript,
+          contains(r'validate_executable_runtime "$ro_assist_bin"'),
+        );
+        expect(
+          postInstallRoDesktopAppsValidationScript,
+          contains('/usr/libexec/ro-assist/ro-assist'),
+        );
+        expect(
+          postInstallRoDesktopAppsValidationScript,
+          contains('is not a dynamic ELF executable'),
+        );
+        expect(
+          postInstallRoDesktopAppsValidationScript,
+          isNot(contains(r'ldd -r "$ro_assist_bin"\nldd -r "$ro_control_bin"')),
+        );
+      },
+    );
+
     void addInstallerRemovalResponses(FakeCommandRunner fake) {
       fake.addResponse('test', ['!', '-e', '/mnt/usr/bin/ro-installer']);
       fake.addResponse('test', ['!', '-e', '/mnt/usr/bin/ro_installer']);
