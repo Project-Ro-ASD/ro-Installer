@@ -1,18 +1,14 @@
 import 'package:flutter/material.dart';
-import '../data/keyboard_presets.dart';
-import '../data/location_presets.dart';
 import '../services/disk_service.dart';
 import '../l10n/installer_translation_catalog.dart';
-import '../utils/account_validation.dart';
 
 class InstallerState extends ChangeNotifier {
   int _currentStep = 0;
   int get currentStep => _currentStep;
 
-  InstallerState({required this.translations, this.platformLocaleName = ''});
+  InstallerState({required this.translations});
 
   final InstallerTranslationCatalog translations;
-  final String platformLocaleName;
 
   // Disk discovery may still complete after the state has been disposed.
   bool _isDisposed = false;
@@ -31,14 +27,8 @@ class InstallerState extends ChangeNotifier {
     super.notifyListeners();
   }
 
-  // Interactive wizard; legacy state remains available to the install backend.
-  List<String> get steps => const [
-    "Welcome",
-    "Location",
-    "Account",
-    "Disk",
-    "Install",
-  ];
+  // Initial Setup owns first-user configuration.
+  List<String> get steps => const ["Welcome", "Disk", "Install"];
 
   // ---- Geliştirici & Test Modu ----
   bool isDeveloperMode =
@@ -48,17 +38,6 @@ class InstallerState extends ChangeNotifier {
 
   // ---- 1. Welcome ----
   String selectedLanguage = 'tr'; // Varsayılan Türkçe
-
-  // ---- 3. Location ----
-  String selectedRegion = 'Türkiye';
-  String selectedTimezone = 'Europe/Istanbul';
-  String selectedKeyboard = 'trq';
-
-  // ---- 5. Account ----
-  String fullName = '';
-  String username = '';
-  String password = '';
-  bool isAdministrator = true;
 
   // ---- 7. Disk ----
   String selectedDisk = '';
@@ -90,10 +69,6 @@ class InstallerState extends ChangeNotifier {
   List<String> unsupportedStorageDetails = [];
   bool isDetectingOS = false; // UI'da loading göstermek için
 
-  // Temporary compatibility bridge for the legacy install stages. Remove this
-  // when kernel policy is removed from the backend; the GUI cannot select it.
-  List<String> get selectedKernelChannelsList => const ['stable'];
-
   // Navigasyon metodları
   void nextStep() {
     if (_currentStep < steps.length - 1) {
@@ -120,19 +95,9 @@ class InstallerState extends ChangeNotifier {
   }
 
   // State Güncelleme metodları
-  void updateLanguage(String languageCode, {bool syncLocationPreset = true}) {
-    if (translations.localeFor(languageCode) == null) {
-      return;
-    }
+  void updateLanguage(String languageCode) {
+    if (translations.localeFor(languageCode) == null) return;
     selectedLanguage = languageCode;
-    if (syncLocationPreset) {
-      final preset = preferredLocationPresetForLanguage(languageCode);
-      if (preset != null) {
-        selectedRegion = preset.region;
-        selectedTimezone = preset.timezone;
-        selectedKeyboard = preset.keyboard;
-      }
-    }
     notifyListeners();
   }
 
@@ -144,87 +109,6 @@ class InstallerState extends ChangeNotifier {
     return translations.localeFor(selectedLanguage) ??
         translations.localeFor(translations.fallbackLocale) ??
         translations.selectableLocales.first;
-  }
-
-  List<LocationPreset> get locationPresets =>
-      List<LocationPreset>.unmodifiable(kLocationPresets);
-
-  List<String> get availableRegions =>
-      locationPresets.map((preset) => preset.region).toList(growable: false);
-
-  List<String> get availableTimezones =>
-      locationPresets.map((preset) => preset.timezone).toSet().toList()..sort();
-
-  List<String> get availableKeyboards =>
-      locationPresets.map((preset) => preset.keyboard).toSet().toList()
-        ..sort((left, right) {
-          return keyboardLabelFor(left).compareTo(keyboardLabelFor(right));
-        });
-
-  LocationPreset? get selectedRegionPreset {
-    for (final preset in locationPresets) {
-      if (preset.region == selectedRegion) {
-        return preset;
-      }
-    }
-    return null;
-  }
-
-  LocationPreset? preferredLocationPresetForLanguage(String languageCode) {
-    return defaultLocationPresetForLanguage(
-      languageCode,
-      localeName: platformLocaleName,
-    );
-  }
-
-  KeyboardPreset? keyboardPresetFor(String code) {
-    for (final preset in kKeyboardPresets) {
-      if (preset.code == code) {
-        return preset;
-      }
-    }
-    return null;
-  }
-
-  String keyboardLabelFor(String code) {
-    return keyboardPresetFor(code)?.label ?? code.toUpperCase();
-  }
-
-  String get selectedKeyboardLabel {
-    return keyboardLabelFor(selectedKeyboard);
-  }
-
-  void updateLocation({String? region, String? timezone, String? keyboard}) {
-    if (region != null) selectedRegion = region;
-    if (timezone != null) selectedTimezone = timezone;
-    if (keyboard != null) selectedKeyboard = keyboard;
-    notifyListeners();
-  }
-
-  void applyLocationPreset(String region) {
-    LocationPreset? preset;
-    for (final candidate in locationPresets) {
-      if (candidate.region == region) {
-        preset = candidate;
-        break;
-      }
-    }
-    if (preset == null) {
-      return;
-    }
-
-    selectedRegion = preset.region;
-    selectedTimezone = preset.timezone;
-    selectedKeyboard = preset.keyboard;
-    notifyListeners();
-  }
-
-  void updateAccount(String fName, String uName, String pass, bool isAdmin) {
-    fullName = fName.trim();
-    username = normalizeLinuxUsername(uName);
-    password = pass.trim();
-    isAdministrator = isAdmin;
-    notifyListeners();
   }
 
   void updateDiskParams(String disk, String fs, String partition) {

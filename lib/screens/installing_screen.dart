@@ -241,14 +241,7 @@ class _InstallingScreenState extends State<InstallingScreen>
       'fileSystem': state.fileSystem,
       'manualPartitions': state.manualPartitions,
       'selectedFreeSpace': state.selectedFreeSpace,
-      'username': state.username,
-      'password': state.password,
-      'selectedRegion': state.selectedRegion,
-      'selectedTimezone': state.selectedTimezone,
-      'selectedKeyboard': state.selectedKeyboard,
       'selectedLanguage': state.selectedLanguage,
-      'selectedLocale': state.selectedLocale.locale,
-      'isAdministrator': state.isAdministrator,
       'linuxDiskSizeGB': state.linuxDiskSizeGB,
       'hasExistingEfi': state.hasExistingEfi,
       'existingEfiPartition': state.existingEfiPartition,
@@ -260,7 +253,6 @@ class _InstallingScreenState extends State<InstallingScreen>
       'largestFreeContiguousBytes': state.largestFreeContiguousBytes,
       'unsupportedStorageBlockers': state.unsupportedStorageBlockers,
       'unsupportedStorageDetails': state.unsupportedStorageDetails,
-      'selectedKernelChannels': state.selectedKernelChannelsList,
     };
 
     _pushStatus(_statusText);
@@ -300,19 +292,13 @@ class _InstallingScreenState extends State<InstallingScreen>
         'partitionMethod': state.partitionMethod,
         'fileSystem': state.fileSystem,
         'selectedFreeSpace': state.selectedFreeSpace,
-        'selectedRegion': state.selectedRegion,
-        'selectedTimezone': state.selectedTimezone,
-        'selectedKeyboard': state.selectedKeyboard,
         'selectedLanguage': state.selectedLanguage,
-        'selectedLocale': state.selectedLocale.locale,
-        'isAdministrator': state.isAdministrator,
         'linuxDiskSizeGB': state.linuxDiskSizeGB,
         'hasExistingEfi': state.hasExistingEfi,
         'shrinkCandidatePartition': state.shrinkCandidatePartition,
         'shrinkCandidateFs': state.shrinkCandidateFs,
         'unsupportedStorageBlockers': state.unsupportedStorageBlockers,
         'unsupportedStorageDetails': state.unsupportedStorageDetails,
-        'selectedKernelChannels': state.selectedKernelChannelsList,
       },
     );
 

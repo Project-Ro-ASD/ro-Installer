@@ -54,6 +54,9 @@ void main() {
       expect(rsyncCall.args, contains('--info=progress2,stats2'));
       expect(rsyncCall.args, contains('--human-readable'));
       expect(rsyncCall.args, contains('--exclude=/etc/kernel/cmdline'));
+      expect(rsyncCall.args, contains('--exclude=/etc/machine-id'));
+      expect(rsyncCall.args, contains('--exclude=/var/lib/dbus/machine-id'));
+      expect(rsyncCall.args, contains('--exclude=/etc/hostname'));
       expect(rsyncCall.args, contains('--exclude=/var/cache/dnf/*'));
       expect(rsyncCall.args, contains('--exclude=/var/tmp/*'));
       expect(rsyncCall.args, contains('--exclude=/home/*/.cache/*'));

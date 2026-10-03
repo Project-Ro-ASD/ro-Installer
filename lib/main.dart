@@ -11,8 +11,6 @@ import 'theme/app_theme.dart';
 import 'state/installer_state.dart';
 import 'widgets/installer_layout.dart';
 import 'screens/welcome_screen.dart';
-import 'screens/location_screen.dart';
-import 'screens/account_screen.dart';
 import 'screens/disk_selection_screen.dart';
 import 'screens/installing_screen.dart';
 
@@ -83,7 +81,7 @@ void main() async {
   }
 
   if (isAutoInstallMode) {
-    final exitCode = await _runAutoInstall(
+    final exitCode = await runAutoInstall(
       autoProfilePath,
       commandRunner,
       translationCatalog,
@@ -93,10 +91,7 @@ void main() async {
 
   runApp(
     ChangeNotifierProvider(
-      create: (_) => InstallerState(
-        translations: translationCatalog,
-        platformLocaleName: Platform.localeName,
-      ),
+      create: (_) => InstallerState(translations: translationCatalog),
       child: const RoInstallerApp(),
     ),
   );
@@ -159,12 +154,6 @@ class MainScreenWrapper extends StatelessWidget {
       case "Welcome":
         currentScreen = const WelcomeScreen();
         break;
-      case "Location":
-        currentScreen = const LocationScreen();
-        break;
-      case "Account":
-        currentScreen = const AccountScreen();
-        break;
       case "Disk":
         currentScreen = const DiskSelectionScreen();
         break;
@@ -179,11 +168,12 @@ class MainScreenWrapper extends StatelessWidget {
   }
 }
 
-Future<int> _runAutoInstall(
+Future<int> runAutoInstall(
   String profilePath,
   CommandRunner commandRunner,
-  InstallerTranslationCatalog translationCatalog,
-) async {
+  InstallerTranslationCatalog translationCatalog, {
+  InstallService? installService,
+}) async {
   final startedAt = DateTime.now();
   final statusHistory = <String>[];
   final technicalLogs = <String>[];
@@ -225,9 +215,6 @@ Future<int> _runAutoInstall(
 
     final stateMap = profile.toStateMap();
     stateMap['selectedLanguage'] = selectedLanguage;
-    stateMap['selectedLocale'] = profile.selectedLocale.isNotEmpty
-        ? profile.selectedLocale
-        : (translationCatalog.localeFor(selectedLanguage)?.locale ?? '');
     stateMap['vmTestMode'] = _envFlag('RO_INSTALLER_VM_TEST_MODE');
 
     final extraKernelArgs =
@@ -245,17 +232,24 @@ Future<int> _runAutoInstall(
       }),
     );
 
-    final success = await InstallService.instance.runInstall(
-      stateMap,
-      (progress, status) {
-        final percent = progress < 0 ? '--' : '${(progress * 100).round()}%';
-        pushStatus(
-          t('auto_progress_line', {'percent': percent, 'status': status}),
-        );
-      },
-      pushLog,
-      translate: t,
-    );
+    final success =
+        await (installService ?? InstallService(commandRunner: commandRunner))
+            .runInstall(
+              stateMap,
+              (progress, status) {
+                final percent = progress < 0
+                    ? '--'
+                    : '${(progress * 100).round()}%';
+                pushStatus(
+                  t('auto_progress_line', {
+                    'percent': percent,
+                    'status': status,
+                  }),
+                );
+              },
+              pushLog,
+              translate: t,
+            );
 
     final finishedAt = DateTime.now();
     final exportResult = await InstallLogExportService.instance.exportSession(
@@ -300,7 +294,7 @@ Future<int> _runAutoInstall(
 
     return 0;
   } catch (e, stack) {
-    pushLog('FATAL AUTO INSTALL: $e');
+    pushLog('FATAL AUTO INSTALL: ${e.runtimeType}');
     pushLog(stack.toString());
     return 2;
   }

@@ -20,7 +20,7 @@ class StageContext {
     this.isMock = false,
   });
 
-  /// Kurulum yapılandırma verisi (disk, kullanıcı, timezone vb.)
+  /// Kurulum yapılandırma verisi (disk, storage layout, Installer UI language hint)
   final Map<String, dynamic> state;
 
   /// Teknik log yazma fonksiyonu

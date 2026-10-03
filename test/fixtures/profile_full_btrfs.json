@@ -1,10 +1,9 @@
 {
+  "schemaVersion": 1,
   "selectedDisk": "/dev/sda",
   "partitionMethod": "full",
   "fileSystem": "btrfs",
-  "username": "testuser",
-  "password": "test1234",
-  "timezone": "Europe/Istanbul",
-  "keyboard": "trq",
-  "isAdministrator": true
+  "selectedLanguage": "tr",
+  "confirmDestructive": true,
+  "encryptionEnabled": false
 }

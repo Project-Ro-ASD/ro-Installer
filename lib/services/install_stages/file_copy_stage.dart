@@ -100,6 +100,8 @@ class FileCopyStage {
       '--exclude=/lost+found',
       '--exclude=/.cache/*',
       '--exclude=/etc/machine-id',
+      '--exclude=/var/lib/dbus/machine-id',
+      '--exclude=/etc/hostname',
       '--exclude=/etc/kernel/cmdline',
       '--exclude=/home/*/.cache/*',
       '--exclude=/root/.cache/*',

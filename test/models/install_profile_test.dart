@@ -1,144 +1,161 @@
+import 'dart:convert';
 import 'package:test/test.dart';
 import 'package:ro_installer/models/install_profile.dart';
 
 void main() {
-  group('InstallProfile', () {
-    for (final mode in ['alongside', 'free_space', 'manual', 'unknown']) {
-      test(
-        '$mode profile fails closed without changing its requested mode',
-        () {
-          final profile = InstallProfile.fromJson({
-            'selectedDisk': '/dev/vda',
-            'partitionMethod': mode,
-            'username': 'tester',
-            'password': 'secure123',
-          });
-          expect(
-            profile.validate(),
-            contains('Storage MVP yalnızca full-disk erase destekler: $mode'),
-          );
-          expect(profile.toStateMap()['partitionMethod'], mode);
-        },
-      );
-    }
+  Map<String, dynamic> valid() => {
+    'schemaVersion': 1,
+    'selectedDisk': '/dev/vda',
+    'partitionMethod': 'full',
+    'fileSystem': 'btrfs',
+    'selectedLanguage': 'tr',
+    'confirmDestructive': true,
+  };
 
-    test('schemaVersion ve encryption alanlarını state map içine taşır', () {
+  test('full/Btrfs requires no account or location and round-trips safely', () {
+    final profile = InstallProfile.fromJson(valid());
+    expect(profile.validate(), isEmpty);
+    expect(
+      InstallProfile.fromJsonString(jsonEncode(profile.toJson())).toJson(),
+      profile.toJson(),
+    );
+    expect(
+      InstallProfile.fromJsonFile(
+        'test/fixtures/profile_full_btrfs.json',
+      ).validate(),
+      isEmpty,
+    );
+  });
+
+  test(
+    'legacy identity, location, kernel and storage inputs are discarded',
+    () {
       final profile = InstallProfile.fromJson({
-        'schemaVersion': 1,
-        'selectedDisk': '/dev/vda',
-        'partitionMethod': 'full',
-        'username': 'tester',
-        'password': 'secure123',
-        'storage': {
-          'encryption': {'enabled': false, 'type': 'none'},
-        },
+        ...valid(),
+        'username': 'old-user',
+        'password': 'private-password',
+        'passwordHash': 'hash',
+        'fullName': 'Old Name',
+        'timezone': 'Asia/Tokyo',
+        'keyboard': 'jp106',
+        'isAdministrator': true,
+        'selectedRegion': 'Japan',
+        'selectedLocale': 'ja_JP.UTF-8',
+        'selectedKernelChannels': ['experimental'],
+        'manualPartitions': [],
+        'existingEfiPartition': '/dev/vda3',
+        'linuxDiskSizeGB': 64,
+        'selectedFreeSpace': {'startSector': 1},
       });
 
       expect(profile.validate(), isEmpty);
-      expect(profile.schemaVersion, 1);
-      expect(profile.encryption.enabled, false);
-      expect(profile.toStateMap()['encryptionEnabled'], false);
-      expect(profile.toStateMap()['encryptionType'], 'none');
-    });
-
-    test(
-      'Btrfs disi fileSystem profilde sessizce degistirilmez ve reddedilir',
-      () {
-        final profile = InstallProfile.fromJson({
-          'selectedDisk': '/dev/vda',
-          'partitionMethod': 'full',
-          'fileSystem': 'ext4',
-          'username': 'tester',
-          'password': 'secure123',
-        });
-
-        final errors = profile.validate();
-
-        expect(profile.fileSystem, 'ext4');
-        expect(profile.toStateMap()['fileSystem'], 'ext4');
-        expect(
-          errors,
-          contains('Geçersiz dosya sistemi: yalnizca btrfs desteklenir.'),
-        );
-      },
-    );
-
-    test('manuel profilde mount edilen Btrfs disi bolum reddedilir', () {
-      final profile = InstallProfile.fromJson({
-        'selectedDisk': '/dev/vda',
-        'partitionMethod': 'manual',
-        'username': 'tester',
-        'password': 'secure123',
-        'manualPartitions': [
-          {
-            'name': '/dev/vda1',
-            'type': 'fat32',
-            'mount': '/boot/efi',
-            'isPlanned': true,
-            'isFreeSpace': false,
-          },
-          {
-            'name': '/dev/vda2',
-            'type': 'ext4',
-            'mount': '/',
-            'isPlanned': true,
-            'isFreeSpace': false,
-          },
-        ],
+      expect(profile.toJson().keys.toSet(), {
+        'schemaVersion',
+        'selectedDisk',
+        'partitionMethod',
+        'fileSystem',
+        'selectedLanguage',
+        'confirmDestructive',
+        'encryptionEnabled',
       });
+      expect(profile.toStateMap(), profile.toJson());
+      expect(profile.toString(), isNot(contains('private-password')));
+      expect(profile.toString(), isNot(contains('old-user')));
+    },
+  );
 
+  for (final consent in [null, false, 'true', 1]) {
+    test('confirmation $consent is not explicit boolean consent', () {
+      final input = valid()..remove('confirmDestructive');
+      if (consent != null) input['confirmDestructive'] = consent;
+      expect(InstallProfile.fromJson(input).validate(), isNotEmpty);
+    });
+  }
+  test('canonical false cannot be overridden by an alias', () {
+    expect(
+      InstallProfile.fromJson({
+        ...valid(),
+        'confirmDestructive': false,
+        'confirm_destructive': true,
+      }).validate(),
+      isNotEmpty,
+    );
+  });
+
+  test('snake-case boolean consent is accepted', () {
+    final input = valid()..remove('confirmDestructive');
+    input['confirm_destructive'] = true;
+    expect(InstallProfile.fromJson(input).validate(), isEmpty);
+  });
+
+  for (final mode in ['manual', 'alongside', 'free_space', 'unknown']) {
+    test('$mode still fails closed', () {
+      final profile = InstallProfile.fromJson({
+        ...valid(),
+        'partitionMethod': mode,
+      });
+      expect(profile.partitionMethod, mode);
       expect(
         profile.validate(),
-        contains(
-          'Manuel profilde mount edilen bölümler Btrfs olmalıdır: /dev/vda2 (ext4)',
-        ),
+        contains('Storage MVP yalnızca full-disk erase destekler: $mode'),
       );
     });
-
-    test('LUKS etkin profil stage desteği tamamlanana kadar reddedilir', () {
-      final profile = InstallProfile.fromJson({
-        'selectedDisk': '/dev/vda',
-        'partitionMethod': 'full',
-        'username': 'tester',
-        'password': 'secure123',
-        'storage': {
-          'encryption': {
-            'enabled': true,
-            'type': 'luks2',
-            'passphrase': 'luks-passphrase',
-          },
-        },
-      });
-
-      final errors = profile.validate();
-
-      expect(profile.encryption.enabled, true);
-      expect(profile.encryption.type, 'luks2');
-      expect(profile.toStateMap()['encryptionPassphrase'], 'luks-passphrase');
+  }
+  for (final invalid in [
+    {'fileSystem': 'ext4'},
+    {'fileSystem': 'xfs'},
+    {'selectedDisk': ''},
+    {'selectedDisk': '/dev/sda;echo unsafe'},
+    {'schemaVersion': 2},
+  ]) {
+    test('$invalid fails validation', () {
       expect(
-        errors,
-        contains(
-          'LUKS stage desteği henüz tamamlanmadı; şifreli profil güvenli şekilde durduruldu.',
-        ),
+        InstallProfile.fromJson({...valid(), ...invalid}).validate(),
+        isNotEmpty,
       );
     });
-
-    test('LUKS passphrase JSON export içine yazılmaz', () {
-      final profile = InstallProfile.fromJson({
-        'selectedDisk': '/dev/vda',
-        'partitionMethod': 'full',
-        'username': 'tester',
-        'password': 'secure123',
-        'storage': {
-          'encryption': {
-            'enabled': true,
-            'type': 'luks2',
-            'passphrase': 'very-secret-passphrase',
-          },
-        },
-      });
-
-      expect(profile.toJson().toString(), isNot(contains('very-secret')));
-    });
-  });
+  }
+  for (final request in [
+    {'encryptionEnabled': true, 'encryptionPassphrase': 'secret'},
+    {
+      'storage': {
+        'encryption': {'enabled': true, 'passphrase': 'secret'},
+      },
+    },
+    {
+      'storage': {
+        'encryption': {'enabled': false},
+      },
+      'encryptionEnabled': true,
+    },
+    {
+      'storage': {
+        'encryption': {'enabled': true},
+      },
+      'encryptionEnabled': false,
+    },
+    {
+      'encryption': {'enabled': true, 'passphrase': 'secret'},
+    },
+    {'encryption': true},
+    {
+      'storage': {'encryption': true},
+    },
+    {'encryptionType': 'luks2'},
+    {'encryptionEnabled': 'true'},
+  ]) {
+    test(
+      'encryption request $request fails closed without retaining secrets',
+      () {
+        final profile = InstallProfile.fromJson({...valid(), ...request});
+        expect(profile.encryptionEnabled, isTrue);
+        expect(
+          profile.validate(),
+          contains('LUKS kurulumu henüz desteklenmiyor.'),
+        );
+        expect(jsonEncode(profile.toStateMap()), isNot(contains('secret')));
+        expect(profile.toString(), isNot(contains('passphrase')));
+      },
+    );
+  }
 }

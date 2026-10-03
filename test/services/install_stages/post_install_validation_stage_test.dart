@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:ro_installer/models/installer_handoff.dart';
 import 'package:test/test.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
 import 'package:ro_installer/services/install_stages/post_install_validation_stage.dart';
@@ -30,37 +32,13 @@ StageContext makeContext(
 
 void main() {
   group('PostInstallValidationStage', () {
-    void addLocalizationResponses(
-      FakeCommandRunner fake, {
-      String locale = 'en_US.UTF-8',
-      String keymap = 'trq',
-      String x11Layout = 'tr',
-      String timezone = 'Europe/Istanbul',
-      List<String> packages = const ['glibc-langpack-en', 'langpacks-en'],
-    }) {
-      fake.addResponse('test', ['-f', '/mnt/etc/locale.conf']);
-      fake.addResponse('sh', [
-        '-c',
-        'grep -q "^LANG=$locale\$" /mnt/etc/locale.conf',
-      ]);
-      fake.addResponse('test', ['-f', '/mnt/etc/vconsole.conf']);
-      fake.addResponse('sh', [
-        '-c',
-        'grep -q "^KEYMAP=$keymap\$" /mnt/etc/vconsole.conf',
-      ]);
-      fake.addResponse('test', [
-        '-f',
-        '/mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
-      ]);
-      fake.addResponse('sh', [
-        '-c',
-        'grep -q \'Option "XkbLayout" "$x11Layout"\' /mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
-      ]);
-      fake.addResponse('sh', [
-        '-c',
-        '[ "\$(readlink /mnt/etc/localtime)" = "/usr/share/zoneinfo/$timezone" ]',
-      ]);
-      fake.addResponse('chroot', ['/mnt', 'rpm', '-q', ...packages]);
+    void addHandoffResponses(FakeCommandRunner fake) {
+      fake.addResponse('cat', [
+        '/mnt$installerSeedPath',
+      ], stdout: jsonEncode(installerSeed('tr')));
+      fake.addResponse('cat', [
+        '/mnt$installMetadataPath',
+      ], stdout: jsonEncode(installMetadata()));
     }
 
     void addNoFedoraKernelResponse(FakeCommandRunner fake, {int exitCode = 0}) {
@@ -328,7 +306,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      addLocalizationResponses(fake);
+      addHandoffResponses(fake);
       addBrandingResponse(fake);
       fake.addResponse('sh', [
         '-c',
@@ -382,6 +360,16 @@ void main() {
 
       expect(result.success, true);
       expect(
+        fake.commandLog.any(
+          (c) =>
+              c.args.join(' ').contains('/etc/locale.conf') ||
+              c.args.join(' ').contains('/etc/localtime') ||
+              c.args.join(' ').contains('langpacks-') ||
+              c.args.join(' ').contains('/etc/vconsole.conf'),
+        ),
+        isFalse,
+      );
+      expect(
         fake.wasCalledWith('sh', ['-c', postInstallSwapResumeValidationScript]),
         isFalse,
       );
@@ -391,6 +379,7 @@ void main() {
       'standard storage mismatch fails validation without requiring swap',
       () async {
         final fake = FakeCommandRunner();
+        addHandoffResponses(fake);
         addBootReferenceResponses(fake);
         fake.addResponse('sh', [
           '-c',
@@ -415,7 +404,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      addLocalizationResponses(fake);
+      addHandoffResponses(fake);
       addBrandingResponse(fake);
       fake.addResponse('sh', [
         '-c',
@@ -469,7 +458,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      addLocalizationResponses(fake);
+      addHandoffResponses(fake);
       addBrandingResponse(fake);
       fake.addResponse('sh', [
         '-c',
@@ -523,7 +512,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      addLocalizationResponses(fake);
+      addHandoffResponses(fake);
       addBrandingResponse(fake);
       fake.addResponse('sh', [
         '-c',
@@ -556,7 +545,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      addLocalizationResponses(fake);
+      addHandoffResponses(fake);
       addBrandingResponse(fake);
       fake.addResponse('sh', [
         '-c',
@@ -600,7 +589,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      addLocalizationResponses(fake);
+      addHandoffResponses(fake);
       addBrandingResponse(fake);
       fake.addResponse('sh', [
         '-c',
@@ -629,7 +618,7 @@ void main() {
         final fake = FakeCommandRunner(defaultSuccess: false);
         fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
         fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-        addLocalizationResponses(fake);
+        addHandoffResponses(fake);
         addBrandingResponse(fake);
         fake.addResponse('sh', [
           '-c',
@@ -703,7 +692,7 @@ void main() {
         final fake = FakeCommandRunner(defaultSuccess: false);
         fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
         fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-        addLocalizationResponses(fake);
+        addHandoffResponses(fake);
         addBrandingResponse(fake);
         fake.addResponse('sh', [
           '-c',
@@ -734,7 +723,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      addLocalizationResponses(fake);
+      addHandoffResponses(fake);
       addBrandingResponse(fake);
       fake.addResponse('sh', [
         '-c',
@@ -769,7 +758,7 @@ void main() {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
       fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      addLocalizationResponses(fake);
+      addHandoffResponses(fake);
       addBrandingResponse(fake);
       fake.addResponse('sh', [
         '-c',
@@ -795,22 +784,45 @@ void main() {
       );
     });
 
-    test('locale ayari eksikse stage düşer', () async {
-      final fake = FakeCommandRunner(defaultSuccess: false);
-      fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
-      fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      fake.addResponse('test', ['-f', '/mnt/etc/locale.conf'], exitCode: 1);
+    for (final path in [installerSeedPath, installMetadataPath]) {
+      test('$path must exist', () async {
+        final fake = FakeCommandRunner();
+        if (path == installMetadataPath) {
+          fake.addResponse('cat', [
+            '/mnt$installerSeedPath',
+          ], stdout: jsonEncode(installerSeed('tr')));
+        }
+        fake.addResponse('cat', ['/mnt$path'], exitCode: 1);
+        final result = await const PostInstallValidationStage().execute(
+          makeContext({'fileSystem': 'btrfs', 'partitionMethod': 'full'}, fake),
+        );
+        expect(result.success, isFalse);
+        expect(result.message, contains('metadata okunamadı'));
+      });
+    }
 
-      final ctx = makeContext(const {
-        'fileSystem': 'btrfs',
-        'partitionMethod': 'full',
-      }, fake);
-
-      final stage = const PostInstallValidationStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, false);
-      expect(result.message, '/mnt/etc/locale.conf bulunamadı.');
-    });
+    test(
+      'secret-bearing or malformed handoff fails without source disclosure',
+      () async {
+        for (final seed in [
+          '{bad-json',
+          jsonEncode({...installerSeed('tr'), 'password': 'secret'}),
+        ]) {
+          final fake = FakeCommandRunner();
+          fake.addResponse('cat', ['/mnt$installerSeedPath'], stdout: seed);
+          fake.addResponse('cat', [
+            '/mnt$installMetadataPath',
+          ], stdout: jsonEncode(installMetadata()));
+          final result = await const PostInstallValidationStage().execute(
+            makeContext({
+              'fileSystem': 'btrfs',
+              'partitionMethod': 'full',
+            }, fake),
+          );
+          expect(result.success, isFalse);
+          expect(result.message, isNot(contains('secret')));
+        }
+      },
+    );
   });
 }
