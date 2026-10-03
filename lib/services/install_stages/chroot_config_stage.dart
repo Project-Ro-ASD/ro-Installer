@@ -1,3 +1,4 @@
+import '../../models/standard_storage_layout.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
 import '../../utils/account_validation.dart';
@@ -1015,44 +1016,29 @@ chmod 0644 /etc/ro-asd/release-policy.conf
       case 'full':
         final selectedDisk = (ctx.state['selectedDisk'] ?? '/dev/sda')
             .toString();
-        final efiPart = _partitionPath(selectedDisk, 1);
-        final swapPart = _partitionPath(selectedDisk, 2);
-        final rootPart = _partitionPath(selectedDisk, 3);
-
-        final rootEntry = await _makeFsEntry(
-          ctx,
-          device: rootPart,
-          mountPoint: '/',
-          fsType: rootFs,
-          options: _rootMountOptions(rootFs),
-        );
-        if (rootEntry == null) return const [];
-        entries.add(rootEntry);
-
-        if (rootFs == 'btrfs') {
-          final homeEntry = await _makeFsEntry(
+        final rootPart = _partitionPath(selectedDisk, 2);
+        for (final entry in StandardStorageLayout.subvolumes.entries) {
+          final fsEntry = await _makeFsEntry(
             ctx,
             device: rootPart,
-            mountPoint: '/home',
+            mountPoint: entry.value,
             fsType: 'btrfs',
-            options: 'defaults,compress=zstd:1,subvol=@home',
+            options:
+                'defaults,${StandardStorageLayout.mountOptions(entry.key)}',
           );
-          if (homeEntry == null) return const [];
-          entries.add(homeEntry);
+          if (fsEntry == null) return const [];
+          entries.add(fsEntry);
         }
 
         final efiEntry = await _makeFsEntry(
           ctx,
-          device: efiPart,
+          device: _partitionPath(selectedDisk, 1),
           mountPoint: '/boot/efi',
           fsType: 'vfat',
           options: _defaultMountOptions('vfat'),
         );
         if (efiEntry == null) return const [];
         entries.add(efiEntry);
-        final swapEntry = await _makeSwapEntry(ctx, swapPart);
-        if (swapEntry == null) return const [];
-        entries.add(swapEntry);
         return entries;
 
       case 'alongside':

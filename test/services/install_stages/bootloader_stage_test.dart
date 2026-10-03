@@ -160,12 +160,13 @@ void main() {
           '/dev/sda2',
         ], stdout: 'swap-uuid-9999');
 
-        final state = <String, dynamic>{
-          'selectedDisk': '/dev/sda',
-          'fileSystem': 'btrfs',
-          'partitionMethod': 'full',
-        };
-        final ctx = makeContext(state, fake);
+      final state = <String, dynamic>{
+        'selectedDisk': '/dev/sda',
+        'fileSystem': 'btrfs',
+        'partitionMethod': 'manual',
+        '_resolvedSwapPart': '/dev/sda2',
+      };
+      final ctx = makeContext(state, fake);
 
         final stage = const BootloaderStage();
         final result = await stage.execute(ctx);
@@ -202,6 +203,7 @@ void main() {
         final state = <String, dynamic>{
           'fileSystem': 'btrfs',
           'partitionMethod': 'full',
+          '_resolvedSwapPart': '/dev/stale-swap',
         };
         final ctx = makeContext(state, fake);
 
@@ -209,10 +211,17 @@ void main() {
         final result = await stage.execute(ctx);
 
         expect(result.success, true);
+        expect(fake.wasCommandCalled('blkid'), isFalse);
+        expect(
+          fake.commandLog.any(
+            (cmd) => cmd.args.join(' ').contains('resume=UUID='),
+          ),
+          isFalse,
+        );
         expect(
           fake.wasCalledWith('sh', [
             '-c',
-            'echo "root=UUID=root-uuid-1234 ro rootflags=subvol=@ rhgb quiet" > /mnt/etc/kernel/cmdline',
+            'echo "root=UUID=root-uuid-1234 ro rootflags=subvol=root rhgb quiet" > /mnt/etc/kernel/cmdline',
           ]),
           true,
         );

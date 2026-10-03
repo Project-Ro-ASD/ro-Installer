@@ -87,7 +87,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('disk_full'), findsOneWidget);
-      expect(find.text('disk_alongside'), findsOneWidget);
+      expect(find.text('disk_alongside'), findsNothing);
       expect(find.text('install_type_standard'), findsOneWidget);
       expect(find.text('install_type_advanced'), findsNothing);
       expect(find.text('type_adv_desc'), findsNothing);
@@ -227,7 +227,7 @@ void main() {
       expect(state.partitionMethod, 'full');
 
       state.updatePartitionMethod('alongside');
-      expect(state.partitionMethod, 'alongside');
+      expect(state.partitionMethod, 'full');
     });
   });
 }

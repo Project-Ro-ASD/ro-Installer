@@ -167,7 +167,12 @@ class BootloaderStage {
       );
     }
     final needsBtrfsRootflags = rootFs == 'btrfs';
-    final rootFlags = needsBtrfsRootflags ? ' rootflags=subvol=@' : '';
+    final rootSubvolume = (ctx.state['partitionMethod'] ?? 'full') == 'full'
+        ? 'root'
+        : '@';
+    final rootFlags = needsBtrfsRootflags
+        ? ' rootflags=subvol=$rootSubvolume'
+        : '';
     final swapDevice = _resolveSwapDevice(ctx.state);
     final resumeUuid = swapDevice == null
         ? null
@@ -415,18 +420,10 @@ EOF
   }
 
   String? _resolveSwapDevice(Map<String, dynamic> state) {
-    final resolved = (state['_resolvedSwapPart'] ?? '').toString();
-    if (resolved.isNotEmpty) {
-      return resolved;
-    }
-
     final partitionMethod = (state['partitionMethod'] ?? 'full').toString();
-    if (partitionMethod == 'full') {
-      final selectedDisk = (state['selectedDisk'] ?? '').toString();
-      if (selectedDisk.isNotEmpty) {
-        return _partitionPath(selectedDisk, 2);
-      }
-    }
+    if (partitionMethod == 'full') return null;
+    final resolved = (state['_resolvedSwapPart'] ?? '').toString();
+    if (resolved.isNotEmpty) return resolved;
 
     if (partitionMethod == 'manual') {
       final manualPartitions =
@@ -467,14 +464,6 @@ EOF
       return uuid;
     }
     return null;
-  }
-
-  String _partitionPath(String disk, int partitionNumber) {
-    final needsP =
-        disk.contains('nvme') ||
-        disk.contains('loop') ||
-        disk.contains('mmcblk');
-    return needsP ? '${disk}p$partitionNumber' : '$disk$partitionNumber';
   }
 }
 

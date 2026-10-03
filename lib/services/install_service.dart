@@ -129,6 +129,29 @@ class InstallService {
       onTechnicalLog(msg);
     }
 
+    // Fail closed before disk preparation; never reinterpret another mode as full.
+    if ((state['partitionMethod'] ?? 'full') != 'full') {
+      log(
+        'Storage MVP yalnızca full-disk erase destekler; disk işlemleri başlatılmadı.',
+      );
+      return false;
+    }
+    if (!isMock) {
+      final arch = await _commandRunner.run('uname', ['-m']);
+      final uefi = await _commandRunner.run('test', [
+        '-d',
+        '/sys/firmware/efi',
+      ]);
+      if (!arch.started ||
+          arch.exitCode != 0 ||
+          arch.stdout.trim() != 'x86_64' ||
+          !uefi.started ||
+          uefi.exitCode != 0) {
+        log('Storage MVP x86_64 UEFI gerektirir; disk işlemleri başlatılmadı.');
+        return false;
+      }
+    }
+
     final localizer = InstallLocalizer(translate: translate);
 
     String t(

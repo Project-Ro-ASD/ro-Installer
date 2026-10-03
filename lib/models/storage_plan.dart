@@ -128,11 +128,6 @@ class StoragePlanBuilder {
       destructive: true,
     ),
     StoragePlanOperation(
-      type: 'create_swap',
-      target: targetDisk,
-      destructive: true,
-    ),
-    StoragePlanOperation(
       type: 'create_btrfs_root',
       target: targetDisk,
       destructive: true,
@@ -143,13 +138,8 @@ class StoragePlanBuilder {
       destructive: true,
     ),
     StoragePlanOperation(
-      type: 'format_swap',
-      target: _partitionPath(targetDisk, 2),
-      destructive: true,
-    ),
-    StoragePlanOperation(
       type: 'format_btrfs_root',
-      target: _partitionPath(targetDisk, 3),
+      target: _partitionPath(targetDisk, 2),
       destructive: true,
     ),
   ];

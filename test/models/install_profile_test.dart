@@ -3,6 +3,25 @@ import 'package:ro_installer/models/install_profile.dart';
 
 void main() {
   group('InstallProfile', () {
+    for (final mode in ['alongside', 'free_space', 'manual', 'unknown']) {
+      test(
+        '$mode profile fails closed without changing its requested mode',
+        () {
+          final profile = InstallProfile.fromJson({
+            'selectedDisk': '/dev/vda',
+            'partitionMethod': mode,
+            'username': 'tester',
+            'password': 'secure123',
+          });
+          expect(
+            profile.validate(),
+            contains('Storage MVP yalnızca full-disk erase destekler: $mode'),
+          );
+          expect(profile.toStateMap()['partitionMethod'], mode);
+        },
+      );
+    }
+
     test('schemaVersion ve encryption alanlarını state map içine taşır', () {
       final profile = InstallProfile.fromJson({
         'schemaVersion': 1,
