@@ -1,6 +1,8 @@
+import 'dart:convert';
+
+import '../../models/installer_handoff.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
-import '../target_system_settings.dart';
 
 const postInstallNoFedoraKernelValidationScript = r'''
 if rpm -qa | grep -Eq '^(kernel|kernel-core|kernel-modules|kernel-modules-core|kernel-modules-extra|kernel-devel|kernel-devel-matched|kernel-debug|kernel-debug-core|kernel-debug-modules|kernel-debug-modules-core|kernel-debug-modules-extra|kernel-debug-devel|kernel-uki|kernel-uki-core|kernel-uki-modules|kernel-uki-modules-core|kernel-uki-modules-extra)-[0-9]'; then
@@ -35,8 +37,6 @@ test -f /etc/yum.repos.d/ro-repo.repo
 test -f /etc/yum.repos.d/ro-repo-noarch.repo
 test -f /etc/yum.repos.d/ro-kernel-stable-copr.repo
 test -f /etc/yum.repos.d/ro-kernel-experimental-copr.repo
-test -f /etc/ro-asd/release-policy.conf
-test -f /etc/dnf/protected.d/ro-kernel.conf
 grep -q 'https://project-ro-asd.github.io/Ro-Repo/$basearch/' /etc/yum.repos.d/ro-repo.repo
 grep -q 'https://project-ro-asd.github.io/Ro-Repo/noarch/' /etc/yum.repos.d/ro-repo-noarch.repo
 grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
@@ -53,20 +53,6 @@ grep -q 'hynkzz/ro-Kernel-Experimental' /etc/yum.repos.d/ro-kernel-experimental-
 grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
 grep -q '^repo_gpgcheck=0$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
 grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-Kernel-Experimental/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
-grep -q '^policy_version=1$' /etc/ro-asd/release-policy.conf
-grep -q '^system_role=installed-target$' /etc/ro-asd/release-policy.conf
-grep -q '^kernel_policy=ro-kernel-only$' /etc/ro-asd/release-policy.conf
-grep -Eq '^selected_kernel_channels=(stable|experimental|experimental,stable|stable,experimental)$' /etc/ro-asd/release-policy.conf
-grep -q '^fedora_stock_kernel_policy=removed-and-excluded$' /etc/ro-asd/release-policy.conf
-grep -q '^ro_repo_package_gpgcheck=1$' /etc/ro-asd/release-policy.conf
-grep -q '^ro_repo_metadata_gpgcheck=1$' /etc/ro-asd/release-policy.conf
-grep -q '^copr_kernel_package_gpgcheck=1$' /etc/ro-asd/release-policy.conf
-grep -q '^copr_kernel_metadata_gpgcheck=0$' /etc/ro-asd/release-policy.conf
-grep -q '^copr_kernel_metadata_reason=copr_metadata_signatures_not_available$' /etc/ro-asd/release-policy.conf
-grep -q '^safe_graphics_policy=live-only$' /etc/ro-asd/release-policy.conf
-grep -q '^target_cmdline_policy=no-live-or-debug-gpu-args$' /etc/ro-asd/release-policy.conf
-grep -Eq '^ro-kernel-(stable|experimental)' /etc/dnf/protected.d/ro-kernel.conf
-grep -q '^excludepkgs=kernel kernel-core kernel-modules kernel-modules-core kernel-modules-extra kernel-devel kernel-devel-matched kernel-debug kernel-debug-core kernel-debug-modules kernel-debug-modules-core kernel-debug-modules-extra kernel-debug-devel kernel-uki kernel-uki-core kernel-uki-modules kernel-uki-modules-core kernel-uki-modules-extra$' /etc/dnf/dnf.conf
 ''';
 
 const postInstallRoDesktopAppsValidationScript = r'''
@@ -264,16 +250,6 @@ class PostInstallValidationStage {
       'Kurulu sistemin boot doğrulaması yapılıyor...',
     );
 
-    final localeSettings = resolveTargetLocaleSettings(
-      selectedLanguage: (ctx.state['selectedLanguage'] ?? 'en').toString(),
-      selectedLocale: (ctx.state['selectedLocale'] ?? '').toString(),
-    );
-    final keyboardSettings = resolveTargetKeyboardSettings(
-      (ctx.state['selectedKeyboard'] ?? 'trq').toString(),
-    );
-    final timezone = (ctx.state['selectedTimezone'] ?? 'Europe/Istanbul')
-        .toString();
-
     StageResult? failure = await _requireCommand(ctx, 'test', [
       '-f',
       '/mnt/etc/fstab',
@@ -286,54 +262,7 @@ class PostInstallValidationStage {
     ], '/mnt/etc/kernel/cmdline bulunamadı.');
     if (failure != null) return failure;
 
-    failure = await _requireCommand(ctx, 'test', [
-      '-f',
-      '/mnt/etc/locale.conf',
-    ], '/mnt/etc/locale.conf bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -q "^LANG=${localeSettings.locale}\$" /mnt/etc/locale.conf',
-    ], '/etc/locale.conf beklenen locale değerini içermiyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '-f',
-      '/mnt/etc/vconsole.conf',
-    ], '/mnt/etc/vconsole.conf bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -q "^KEYMAP=${keyboardSettings.consoleKeymap}\$" /mnt/etc/vconsole.conf',
-    ], '/etc/vconsole.conf beklenen klavye düzenini içermiyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '-f',
-      '/mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
-    ], '/mnt/etc/X11/xorg.conf.d/00-keyboard.conf bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -q \'Option "XkbLayout" "${keyboardSettings.x11Layout}"\' /mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
-    ], 'Grafik oturum klavye yerleşimi beklenen değeri içermiyor.');
-    if (failure != null) return failure;
-
-    if (keyboardSettings.hasVariant) {
-      failure = await _requireCommand(ctx, 'sh', [
-        '-c',
-        'grep -q \'Option "XkbVariant" "${keyboardSettings.x11Variant}"\' /mnt/etc/X11/xorg.conf.d/00-keyboard.conf',
-      ], 'Grafik oturum klavye varyantı beklenen değeri içermiyor.');
-      if (failure != null) return failure;
-    }
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      '[ "\$(readlink /mnt/etc/localtime)" = "/usr/share/zoneinfo/$timezone" ]',
-    ], '/etc/localtime beklenen saat dilimine işaret etmiyor.');
+    failure = await _validateHandoff(ctx);
     if (failure != null) return failure;
 
     failure = await _requireCommand(ctx, 'chroot', [
@@ -509,20 +438,14 @@ class PostInstallValidationStage {
     );
     if (failure != null) return failure;
 
-    failure = await _requireCommand(
-      ctx,
-      'chroot',
-      ['/mnt', 'rpm', '-q', 'dracut', 'grub2-efi-x64', 'shim-x64'],
-      'Bootloader için gerekli paketler hedef sistemde doğrulanamadı.',
-    );
-    if (failure != null) return failure;
-
     failure = await _requireCommand(ctx, 'chroot', [
       '/mnt',
       'rpm',
       '-q',
-      ...localeSettings.requiredPackages,
-    ], 'Secilen dil destek paketleri hedef sistemde doğrulanamadı.');
+      'dracut',
+      'grub2-efi-x64',
+      'shim-x64',
+    ], 'Bootloader için gerekli paketler hedef sistemde doğrulanamadı.');
     if (failure != null) return failure;
 
     failure = await _requireCommand(ctx, 'chroot', [
@@ -759,6 +682,28 @@ class PostInstallValidationStage {
     if (failure != null) return failure;
 
     return null;
+  }
+
+  Future<StageResult?> _validateHandoff(StageContext ctx) async {
+    if (ctx.isMock) return null;
+    try {
+      final values = <Object?>[];
+      for (final path in [installerSeedPath, installMetadataPath]) {
+        final result = await ctx.commandRunner.run('cat', ['/mnt$path']);
+        if (!result.started || result.exitCode != 0) {
+          return StageResult.fail(
+            'Firstboot seed veya install metadata okunamadı.',
+          );
+        }
+        values.add(jsonDecode(result.stdout));
+      }
+      if (isValidInstallerHandoff(values[0], values[1])) return null;
+    } catch (_) {
+      // JSON parse errors can include source excerpts; never log them.
+    }
+    return StageResult.fail(
+      'Firstboot seed veya install metadata v1 sözleşmesi geçersiz.',
+    );
   }
 
   Future<String?> _readFindmntValue(

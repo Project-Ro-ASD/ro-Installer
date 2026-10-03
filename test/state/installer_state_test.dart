@@ -10,7 +10,7 @@ import 'package:ro_installer/theme/app_theme.dart';
 
 void main() {
   group('InstallerState interactive wizard', () {
-    const expectedSteps = ['Welcome', 'Location', 'Account', 'Disk', 'Install'];
+    const expectedSteps = ['Welcome', 'Disk', 'Install'];
     late InstallerState state;
     late FakeCommandRunner runner;
 
@@ -29,9 +29,6 @@ void main() {
       expect(state.steps, expectedSteps);
       expect(state.currentStep, 0);
       expect(state.partitionMethod, 'full');
-      expect(state.selectedKernelChannelsList, ['stable']);
-      expect(state.username, isEmpty);
-      expect(state.password, isEmpty);
     });
 
     test('legacy storage data does not expose removed pages', () {
@@ -49,15 +46,6 @@ void main() {
       expect(runner.commandLog, isEmpty);
       await tester.pump(const Duration(seconds: 11));
       expect(runner.commandLog, isEmpty);
-    });
-
-    test('kernel compatibility is fixed and cannot be mutated', () {
-      final channels = state.selectedKernelChannelsList;
-
-      expect(channels, ['stable']);
-      expect(() => channels.add('experimental'), throwsUnsupportedError);
-      expect(() => channels[0] = 'experimental', throwsUnsupportedError);
-      expect(state.selectedKernelChannelsList, ['stable']);
     });
 
     testWidgets('disk UI exposes only the existing standard-path controls', (
@@ -106,16 +94,13 @@ void main() {
       state.previousStep();
       expect(state.steps[state.currentStep], 'Disk');
       state.previousStep();
-      expect(state.steps[state.currentStep], 'Account');
-      state.previousStep();
-      expect(state.steps[state.currentStep], 'Location');
-      state.previousStep();
+      expect(state.steps[state.currentStep], 'Welcome');
       state.previousStep();
       expect(state.currentStep, 0);
     });
   });
 
-  group('InstallerState location presets', () {
+  group('InstallerState UI language', () {
     late InstallerState state;
 
     setUp(() {
@@ -126,91 +111,20 @@ void main() {
       state.dispose();
     });
 
-    test('ulke preset secimi timezone ve klavye degerlerini gunceller', () {
-      state.applyLocationPreset('日本');
-
-      expect(state.selectedRegion, '日本');
-      expect(state.selectedTimezone, 'Asia/Tokyo');
-      expect(state.selectedKeyboard, 'jp106');
-      expect(state.selectedRegionPreset?.languageCode, 'ja');
-      expect(state.selectedKeyboardLabel, 'Japanese (106/109)');
-    });
-
-    test('ulke preset secimi kullanicinin dil secimini ezmez', () {
-      state.updateLanguage('en');
-
-      state.applyLocationPreset('Brasil');
-
-      expect(state.selectedLanguage, 'en');
-      expect(state.selectedTimezone, 'America/Sao_Paulo');
-      expect(state.selectedKeyboard, 'br-abnt2');
-      expect(state.selectedKeyboardLabel, 'Brazilian Portuguese (ABNT2)');
-    });
-
-    test('preset listesi yirmi bes ulkenin uzerine cikarildi', () {
-      expect(state.locationPresets.length, greaterThanOrEqualTo(25));
-      expect(state.availableRegions, contains('México'));
-      expect(state.availableRegions, contains('United Kingdom'));
-      expect(state.availableRegions, contains('مصر'));
-    });
-
-    test('latin amerika klavyesi icin insan okunur etiket dondurur', () {
-      state.applyLocationPreset('Argentina');
-
-      expect(state.selectedKeyboard, 'la-latin1');
-      expect(state.selectedKeyboardLabel, 'Latin American Spanish');
-    });
-
-    test('welcome dil secimi varsayilan konum presetini otomatik esler', () {
-      state.updateLanguage('ja');
-
-      expect(state.selectedRegion, '日本');
-      expect(state.selectedTimezone, 'Asia/Tokyo');
-      expect(state.selectedKeyboard, 'jp106');
-
-      state.updateLanguage('en');
-
-      expect(state.selectedRegion, 'United States');
-      expect(state.selectedTimezone, 'America/New_York');
-      expect(state.selectedKeyboard, 'us');
-    });
-
-    test('dil guncellemesi sync kapaliyken mevcut konumu korur', () {
-      state.applyLocationPreset('México');
-
-      state.updateLanguage('es', syncLocationPreset: false);
-
-      expect(state.selectedLanguage, 'es');
-      expect(state.selectedRegion, 'México');
-      expect(state.selectedTimezone, 'America/Mexico_City');
-      expect(state.selectedKeyboard, 'la-latin1');
-    });
-
-    test('sistem locale bolgesi varsa ayni dil icin uygun preset secilir', () {
-      final britishState = InstallerState(
-        translations: _catalog(),
-        platformLocaleName: 'en_GB.UTF-8',
-      );
-      addTearDown(britishState.dispose);
-
-      britishState.updateLanguage('en');
-
-      expect(britishState.selectedRegion, 'United Kingdom');
-      expect(britishState.selectedTimezone, 'Europe/London');
-      expect(britishState.selectedKeyboard, 'uk');
-
-      final mexicoState = InstallerState(
-        translations: _catalog(),
-        platformLocaleName: 'es_MX.UTF-8',
-      );
-      addTearDown(mexicoState.dispose);
-
-      mexicoState.updateLanguage('es');
-
-      expect(mexicoState.selectedRegion, 'México');
-      expect(mexicoState.selectedTimezone, 'America/Mexico_City');
-      expect(mexicoState.selectedKeyboard, 'la-latin1');
-    });
+    test(
+      'language only updates the UI and preserves disk/storage selection',
+      () {
+        state.selectedDisk = '/dev/vda';
+        state.updateLanguage('ja');
+        expect(state.selectedLanguage, 'ja');
+        expect(state.selectedLocale.locale, 'ja_JP.UTF-8');
+        expect(state.selectedDisk, '/dev/vda');
+        expect(state.partitionMethod, 'full');
+        expect(state.steps, ['Welcome', 'Disk', 'Install']);
+        state.updateLanguage('unsupported');
+        expect(state.selectedLanguage, 'ja');
+      },
+    );
 
     test('interactive partition updates retain standard-path restrictions', () {
       state.updateFreeSpaceSelection({

@@ -16,7 +16,7 @@ import 'install_localizer.dart';
 ///   3. Biçimlendirme         [FormattingStage]
 ///   4. Bağlama               [MountingStage]
 ///   5. Dosya Kopyalama       [FileCopyStage]
-///   6. Chroot Yapılandırma   [ChrootConfigStage]
+///   6. Hedef Sonlandırma   [TargetFinalizationStage]
 ///   7. Bootloader Kurulumu   [BootloaderStage]
 ///   8. Kurulum Sonrası Doğrulama [PostInstallValidationStage]
 ///   9. Temizlik              [CleanupStage]
@@ -40,7 +40,7 @@ class InstallService {
   final _formatting = const FormattingStage();
   final _mounting = const MountingStage();
   final _fileCopy = const FileCopyStage();
-  final _chrootConfig = const ChrootConfigStage();
+  final _targetFinalization = const TargetFinalizationStage();
   final _bootloader = const BootloaderStage();
   final _postInstallValidation = const PostInstallValidationStage();
   final _cleanup = const CleanupStage();
@@ -127,6 +127,21 @@ class InstallService {
   }) async {
     void log(String msg) {
       onTechnicalLog(msg);
+    }
+
+    // Discard obsolete identity/secret input before it can enter stage logs.
+    for (final key in [
+      'username',
+      'fullName',
+      'password',
+      'passwordHash',
+      'isAdministrator',
+      'selectedRegion',
+      'selectedTimezone',
+      'selectedKeyboard',
+      'selectedLocale',
+    ]) {
+      state.remove(key);
     }
 
     // Fail closed before disk preparation; never reinterpret another mode as full.
@@ -294,10 +309,10 @@ class InstallService {
       stageDone(5, stage5);
 
       // ══════════════════════════════════════════════
-      //  AŞAMA 6: Chroot Yapılandırma
+      //  AŞAMA 6: Hedef Sonlandırma
       // ══════════════════════════════════════════════
-      stageBanner(6, 'install_stage_chroot_config', 'Chroot Yapılandırma');
-      final stage6 = await _chrootConfig.execute(ctx);
+      stageBanner(6, 'install_stage_target_finalization', 'Hedef Sonlandırma');
+      final stage6 = await _targetFinalization.execute(ctx);
       if (!stage6.success) {
         stageFailed(6, stage6);
         await _artifactCollector.collectDiagnostics(

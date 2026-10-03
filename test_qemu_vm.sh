@@ -259,9 +259,37 @@ target = os.environ['VM_PROFILE_TARGET']
 guest_disk = os.environ['VM_GUEST_DISK']
 
 with open(source, 'r', encoding='utf-8') as handle:
-    profile = json.load(handle)
+    source_profile = json.load(handle)
 
-profile['selectedDisk'] = guest_disk
+# Emit only the safe automated MVP schema, never legacy identity/secret input.
+def encryption_requested(value):
+    if isinstance(value, dict):
+        enabled = value.get('enabled')
+        kind = value.get('type')
+        return ((enabled is not None and enabled is not False) or
+                (kind is not None and str(kind).lower() != 'none'))
+    return value is not None and value is not False
+
+storage = source_profile.get('storage')
+nested = storage.get('encryption') if isinstance(storage, dict) else None
+legacy_type = source_profile.get('encryptionType')
+confirmation = (source_profile.get('confirmDestructive')
+                if 'confirmDestructive' in source_profile
+                else source_profile.get('confirm_destructive'))
+profile = {
+    'schemaVersion': source_profile.get('schemaVersion', 1),
+    'selectedDisk': guest_disk,
+    'partitionMethod': source_profile.get('partitionMethod', 'full'),
+    'fileSystem': source_profile.get('fileSystem', 'btrfs'),
+    'selectedLanguage': source_profile.get('selectedLanguage',
+                                         source_profile.get('language', 'tr')),
+    'confirmDestructive': confirmation is True,
+    'encryptionEnabled': (
+        encryption_requested(source_profile.get('encryptionEnabled')) or
+        (legacy_type is not None and str(legacy_type).lower() != 'none') or
+        encryption_requested(nested) or
+        encryption_requested(source_profile.get('encryption'))),
+}
 
 os.makedirs(os.path.dirname(target), exist_ok=True)
 with open(target, 'w', encoding='utf-8') as handle:

@@ -10,7 +10,7 @@ export 'partitioning_stage.dart';
 export 'formatting_stage.dart';
 export 'mounting_stage.dart';
 export 'file_copy_stage.dart';
-export 'chroot_config_stage.dart';
+export 'target_finalization_stage.dart';
 export 'bootloader_stage.dart';
 export 'post_install_validation_stage.dart';
 export 'cleanup_stage.dart';
