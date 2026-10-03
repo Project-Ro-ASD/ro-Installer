@@ -164,7 +164,7 @@ class NetworkService {
 
       final shouldUseEnterprise = enterprise || _isEnterpriseSecurity(security);
       if (shouldUseEnterprise) {
-        return _connectEnterpriseWifi(
+        return await _connectEnterpriseWifi(
           ssid: ssid,
           password: password,
           identity: identity,
@@ -174,7 +174,7 @@ class NetworkService {
         );
       }
 
-      return _connectPersonalWifi(ssid: ssid, password: password);
+      return await _connectPersonalWifi(ssid: ssid, password: password);
     } catch (e) {
       return WifiConnectionResult(success: false, message: e.toString());
     }
