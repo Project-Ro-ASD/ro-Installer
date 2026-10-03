@@ -1,8 +1,6 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import '../data/keyboard_presets.dart';
 import '../data/location_presets.dart';
-import '../services/network_service.dart';
 import '../services/disk_service.dart';
 import '../l10n/installer_translation_catalog.dart';
 import '../utils/account_validation.dart';
@@ -11,30 +9,17 @@ class InstallerState extends ChangeNotifier {
   int _currentStep = 0;
   int get currentStep => _currentStep;
 
-  InstallerState({required this.translations, this.platformLocaleName = ''}) {
-    _initNetworkChecker();
-  }
+  InstallerState({required this.translations, this.platformLocaleName = ''});
 
   final InstallerTranslationCatalog translations;
   final String platformLocaleName;
 
-  Timer? _networkTimer;
-  bool _isNetworkCheckRunning = false;
+  // Disk discovery may still complete after the state has been disposed.
   bool _isDisposed = false;
-
-  void _initNetworkChecker() {
-    // İlk çalıştırma
-    _checkNetworkPeriodically();
-    // Ardından her 5 saniyede bir kontrol et
-    _networkTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      _checkNetworkPeriodically();
-    });
-  }
 
   @override
   void dispose() {
     _isDisposed = true;
-    _networkTimer?.cancel();
     super.dispose();
   }
 
@@ -44,73 +29,6 @@ class InstallerState extends ChangeNotifier {
       return;
     }
     super.notifyListeners();
-  }
-
-  Future<void> _checkNetworkPeriodically() async {
-    if (_isDisposed) {
-      return;
-    }
-    if (_isNetworkCheckRunning) {
-      return;
-    }
-    _isNetworkCheckRunning = true;
-
-    final wasEthernetConnected = isEthernetConnected;
-    final wasStatus = networkStatus;
-    try {
-      isEthernetConnected = await NetworkService.instance.checkEthernet();
-      _syncNetworkStatus();
-      if (wasEthernetConnected != isEthernetConnected ||
-          wasStatus != networkStatus) {
-        notifyListeners();
-      }
-    } finally {
-      _isNetworkCheckRunning = false;
-    }
-  }
-
-  Future<void> scanWifiNetworks() async {
-    isScanningWifi = true;
-    notifyListeners();
-
-    wifiNetworks = await NetworkService.instance.scanWifi();
-    _syncNetworkStatus();
-
-    isScanningWifi = false;
-    notifyListeners();
-  }
-
-  Future<bool> connectToWifi(
-    String ssid,
-    String password, {
-    String security = '',
-    String identity = '',
-    String anonymousIdentity = '',
-    bool enterprise = false,
-    String eapMethod = 'peap',
-    String phase2Auth = 'mschapv2',
-  }) async {
-    lastWifiConnectionError = '';
-    final result = await NetworkService.instance.connectWifiDetailed(
-      ssid,
-      password,
-      isMock: isMockEnabled,
-      security: security,
-      identity: identity,
-      anonymousIdentity: anonymousIdentity,
-      enterprise: enterprise,
-      eapMethod: eapMethod,
-      phase2Auth: phase2Auth,
-    );
-    if (result.success) {
-      await scanWifiNetworks(); // Listeyi yenile
-      _syncNetworkStatus();
-      notifyListeners();
-    } else {
-      lastWifiConnectionError = result.message;
-      notifyListeners();
-    }
-    return result.success;
   }
 
   // Interactive wizard; legacy state remains available to the install backend.
@@ -131,31 +49,16 @@ class InstallerState extends ChangeNotifier {
   // ---- 1. Welcome ----
   String selectedLanguage = 'tr'; // Varsayılan Türkçe
 
-  // ---- 2. Theme ----
-  String themeMode = 'dark'; // 'light' veya 'dark'
-
   // ---- 3. Location ----
   String selectedRegion = 'Türkiye';
   String selectedTimezone = 'Europe/Istanbul';
   String selectedKeyboard = 'trq';
-
-  // ---- 4. Network ----
-  String networkStatus = 'offline'; // 'offline' or 'connected'
-  bool isEthernetConnected = false;
-  List<Map<String, dynamic>> wifiNetworks = [];
-  bool isScanningWifi = false;
-  String lastWifiConnectionError = '';
-  bool get hasActiveWifi => wifiNetworks.any((net) => net['inUse'] == true);
-  bool get hasActiveNetwork => isEthernetConnected || hasActiveWifi;
 
   // ---- 5. Account ----
   String fullName = '';
   String username = '';
   String password = '';
   bool isAdministrator = true;
-
-  // ---- 6. Type ----
-  String installType = 'standard';
 
   // ---- 7. Disk ----
   String selectedDisk = '';
@@ -187,26 +90,9 @@ class InstallerState extends ChangeNotifier {
   List<String> unsupportedStorageDetails = [];
   bool isDetectingOS = false; // UI'da loading göstermek için
 
-  // ---- 8. Kernel ----
-  Set<String> selectedKernelChannels = {'stable'};
-  bool isKernelSelected(String channel) =>
-      selectedKernelChannels.contains(channel);
-  bool get hasAnyKernelSelected => selectedKernelChannels.isNotEmpty;
-  List<String> get selectedKernelChannelsList {
-    final ordered = <String>[];
-    if (selectedKernelChannels.contains('stable')) {
-      ordered.add('stable');
-    }
-    if (selectedKernelChannels.contains('experimental')) {
-      ordered.add('experimental');
-    }
-    for (final channel in selectedKernelChannels) {
-      if (!ordered.contains(channel)) {
-        ordered.add(channel);
-      }
-    }
-    return ordered;
-  }
+  // Temporary compatibility bridge for the legacy install stages. Remove this
+  // when kernel policy is removed from the backend; the GUI cannot select it.
+  List<String> get selectedKernelChannelsList => const ['stable'];
 
   // Navigasyon metodları
   void nextStep() {
@@ -234,11 +120,6 @@ class InstallerState extends ChangeNotifier {
   }
 
   // State Güncelleme metodları
-  void updateTheme(String mode) {
-    themeMode = mode;
-    notifyListeners();
-  }
-
   void updateLanguage(String languageCode, {bool syncLocationPreset = true}) {
     if (translations.localeFor(languageCode) == null) {
       return;
@@ -338,54 +219,6 @@ class InstallerState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateInstallType(String type) {
-    installType = type;
-    // Standart akış yalnızca ro-kernel-stable politikasıyla devam eder.
-    if (type == 'standard') {
-      selectedKernelChannels = {'stable'};
-      if (partitionMethod == 'manual' || partitionMethod == 'free_space') {
-        partitionMethod = 'full';
-        selectedFreeSpace = {};
-      }
-    }
-    notifyListeners();
-  }
-
-  void updateKernel(String type) {
-    selectedKernelChannels = type == 'experimental'
-        ? {'stable', 'experimental'}
-        : {'stable'};
-    notifyListeners();
-  }
-
-  bool setKernelSelected(String channel, bool selected) {
-    final alreadySelected = selectedKernelChannels.contains(channel);
-    if (selected) {
-      if (alreadySelected) {
-        return true;
-      }
-      selectedKernelChannels.add(channel);
-      notifyListeners();
-      return true;
-    }
-
-    if (!alreadySelected) {
-      return true;
-    }
-
-    if (selectedKernelChannels.length == 1) {
-      return false;
-    }
-
-    selectedKernelChannels.remove(channel);
-    notifyListeners();
-    return true;
-  }
-
-  void _syncNetworkStatus() {
-    networkStatus = hasActiveNetwork ? 'connected' : 'offline';
-  }
-
   void updateAccount(String fName, String uName, String pass, bool isAdmin) {
     fullName = fName.trim();
     username = normalizeLinuxUsername(uName);
@@ -407,9 +240,7 @@ class InstallerState extends ChangeNotifier {
   }
 
   void updatePartitionMethod(String method) {
-    final nextMethod =
-        installType != 'advanced' &&
-            (method == 'manual' || method == 'free_space')
+    final nextMethod = method == 'manual' || method == 'free_space'
         ? 'full'
         : method;
     partitionMethod = nextMethod;
