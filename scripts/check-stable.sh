@@ -102,7 +102,7 @@ forbid_pattern \
 # Ro-Compose owns repository wiring, image composition, and baseline kernel
 # policy. Do not require the legacy Ro/COPR/ISO release-policy implementation.
 run_check "COPR source tarball hijyeni" \
-  sh -c 'rg -q "git archive" .copr/Makefile && rg -q "Source tarball contains forbidden files" .copr/Makefile && rg -q "sha256sum" .copr/Makefile && rg -q "/docs/old/ export-ignore" .gitattributes && rg -q "/docs/road.md export-ignore" .gitattributes && rg -q "/docs/road-plan.md export-ignore" .gitattributes && rg -q "/gerçeksistemdenloglar/ export-ignore" .gitattributes && rg -q "/iso-release/ export-ignore" .gitattributes && rg -q "iso-release" .copr/Makefile && ! rg -q "cp -a \\." .copr/Makefile'
+  sh -c 'rg -q "git archive" .copr/Makefile && rg -q "Source tarball contains forbidden files" .copr/Makefile && rg -q "sha256sum" .copr/Makefile && rg -q "/docs/old/ export-ignore" .gitattributes && rg -q "/docs/road.md export-ignore" .gitattributes && rg -q "/docs/road-plan.md export-ignore" .gitattributes && rg -q "/gerçeksistemdenloglar/ export-ignore" .gitattributes && ! rg -q "cp -a \\." .copr/Makefile'
 
 require_rpm_build_policy() {
   rg -q 'ALLOW_NODEPS=0' scripts/01-build-rpm.sh || return 1
