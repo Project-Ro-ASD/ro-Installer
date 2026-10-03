@@ -113,30 +113,14 @@ class InstallerState extends ChangeNotifier {
     return result.success;
   }
 
-  // Adımlar listesi (Dinamik - partitionMethod ve installType'a göre şekillenir)
-  List<String> get steps {
-    List<String> baseSteps = [
-      "Welcome",
-      "Theme",
-      "Location",
-      "Network",
-      "Account",
-      "Type",
-      "Disk",
-    ];
-
-    if (partitionMethod == 'manual') {
-      baseSteps.add("Partitions");
-    }
-
-    // Standart kurulumda Kernel adımı kullanıcıya gösterilmez (Atlanır)
-    if (installType == 'advanced') {
-      baseSteps.add("Kernel");
-    }
-
-    baseSteps.add("Install");
-    return baseSteps;
-  }
+  // Interactive wizard; legacy state remains available to the install backend.
+  List<String> get steps => const [
+    "Welcome",
+    "Location",
+    "Account",
+    "Disk",
+    "Install",
+  ];
 
   // ---- Geliştirici & Test Modu ----
   bool isDeveloperMode =

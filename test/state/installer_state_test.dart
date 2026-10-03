@@ -3,6 +3,58 @@ import 'package:ro_installer/l10n/installer_translation_catalog.dart';
 import 'package:ro_installer/state/installer_state.dart';
 
 void main() {
+  group('InstallerState interactive wizard', () {
+    const expectedSteps = ['Welcome', 'Location', 'Account', 'Disk', 'Install'];
+    late InstallerState state;
+
+    setUp(() {
+      state = InstallerState(translations: _catalog());
+    });
+
+    tearDown(() {
+      state.dispose();
+    });
+
+    test('fresh state exposes only the transitional wizard steps', () {
+      expect(state.steps, expectedSteps);
+      expect(state.currentStep, 0);
+      expect(state.installType, 'standard');
+      expect(state.partitionMethod, 'full');
+      expect(state.selectedKernelChannelsList, ['stable']);
+      expect(state.username, isEmpty);
+      expect(state.password, isEmpty);
+    });
+
+    test('legacy advanced and manual state does not expose removed pages', () {
+      state.updateInstallType('advanced');
+      state.updatePartitionMethod('manual');
+      state.updateKernel('experimental');
+
+      expect(state.installType, 'advanced');
+      expect(state.partitionMethod, 'manual');
+      expect(state.selectedKernelChannelsList, ['stable', 'experimental']);
+      expect(state.steps, expectedSteps);
+    });
+
+    test('navigation follows the shortened wizard and stops at Install', () {
+      for (final step in expectedSteps) {
+        expect(state.steps[state.currentStep], step);
+        state.nextStep();
+      }
+      expect(state.currentStep, expectedSteps.length - 1);
+
+      state.previousStep();
+      expect(state.steps[state.currentStep], 'Disk');
+      state.previousStep();
+      expect(state.steps[state.currentStep], 'Account');
+      state.previousStep();
+      expect(state.steps[state.currentStep], 'Location');
+      state.previousStep();
+      state.previousStep();
+      expect(state.currentStep, 0);
+    });
+  });
+
   group('InstallerState location presets', () {
     late InstallerState state;
 
