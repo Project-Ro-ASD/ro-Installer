@@ -12,14 +12,14 @@ void main() {
 
       expect(plan.mode, 'full');
       expect(plan.fileSystem, 'btrfs');
+      expect(plan.operations.last.target, '/dev/sda2');
+      expect(plan.operations.any((op) => op.type.contains('swap')), isFalse);
       expect(plan.operations.map((op) => op.type), contains('wipe_disk'));
       expect(plan.destructiveOperations.map((op) => op.type), [
         'wipe_disk',
         'create_efi',
-        'create_swap',
         'create_btrfs_root',
         'format_efi',
-        'format_swap',
         'format_btrfs_root',
       ]);
     });

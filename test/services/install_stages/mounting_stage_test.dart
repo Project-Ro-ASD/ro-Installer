@@ -29,6 +29,84 @@ StageContext makeContext(
 }
 
 void main() {
+  group('MountingStage - standard full disk', () {
+    for (final disk in ['/dev/sda', '/dev/nvme0n1']) {
+      test(
+        '$disk creates flat rollback-aware subvolumes without swap',
+        () async {
+          final fake = FakeCommandRunner();
+          final root = disk.contains('nvme') ? '${disk}p2' : '${disk}2';
+          final efi = disk.contains('nvme') ? '${disk}p1' : '${disk}1';
+          final result = await const MountingStage().execute(
+            makeContext({
+              'selectedDisk': disk,
+              'partitionMethod': 'full',
+              'fileSystem': 'btrfs',
+            }, fake),
+          );
+          expect(result.success, isTrue);
+          expect(
+            fake.wasCalledWith('mount', ['-o', 'subvolid=5', root, '/mnt']),
+            isTrue,
+          );
+          const layout = {
+            'root': '/',
+            'home': '/home',
+            'var_log': '/var/log',
+            'var_cache': '/var/cache',
+            'var_tmp': '/var/tmp',
+          };
+          final creates = fake.commandLog
+              .where((cmd) => cmd.command == 'btrfs')
+              .map((cmd) => cmd.args.last)
+              .toList();
+          expect(creates, layout.keys.map((name) => '/mnt/$name').toList());
+          for (final entry in layout.entries) {
+            final target = entry.value == '/' ? '/mnt' : '/mnt${entry.value}';
+            expect(
+              fake.wasCalledWith('mount', [
+                '-o',
+                'compress=zstd:1,subvol=${entry.key}',
+                root,
+                target,
+              ]),
+              isTrue,
+            );
+          }
+          expect(fake.wasCalledWith('mount', [efi, '/mnt/boot/efi']), isTrue);
+          expect(fake.wasCommandCalled('swapon'), isFalse);
+          expect(
+            fake.commandLog.any(
+              (cmd) => cmd.command == 'mount' && cmd.args.last == '/mnt/boot',
+            ),
+            isFalse,
+          );
+        },
+      );
+    }
+    test('top-level unmount failure stops root remount', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse('umount', ['/mnt'], exitCode: 1);
+      final result = await const MountingStage().execute(
+        makeContext({
+          'selectedDisk': '/dev/sda',
+          'partitionMethod': 'full',
+          'fileSystem': 'btrfs',
+        }, fake),
+      );
+      expect(result.success, isFalse);
+      expect(
+        fake.wasCalledWith('mount', [
+          '-o',
+          'compress=zstd:1,subvol=root',
+          '/dev/sda2',
+          '/mnt',
+        ]),
+        isFalse,
+      );
+    });
+  });
+
   group('MountingStage - Manual Mode', () {
     test('/boot, /boot/efi sirasiyla baglanir ve swap etkinlesir', () async {
       final fake = FakeCommandRunner();

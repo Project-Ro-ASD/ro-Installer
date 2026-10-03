@@ -251,13 +251,11 @@ class InstallProfile {
     if (schemaVersion < 1) {
       errors.add('Geçersiz profil şema sürümü: $schemaVersion');
     }
-    if (![
-      'full',
-      'alongside',
-      'free_space',
-      'manual',
-    ].contains(partitionMethod)) {
-      errors.add('Geçersiz bölümleme yöntemi: $partitionMethod');
+    // Temporary MVP restriction; preserve the profile schema for future modes.
+    if (partitionMethod != 'full') {
+      errors.add(
+        'Storage MVP yalnızca full-disk erase destekler: $partitionMethod',
+      );
     }
     if (fileSystem != 'btrfs') {
       errors.add('Geçersiz dosya sistemi: yalnizca btrfs desteklenir.');

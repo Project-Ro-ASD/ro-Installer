@@ -240,13 +240,12 @@ class InstallerState extends ChangeNotifier {
   }
 
   void updatePartitionMethod(String method) {
-    final nextMethod = method == 'manual' || method == 'free_space'
-        ? 'full'
-        : method;
-    partitionMethod = nextMethod;
-    if (nextMethod != 'free_space') {
-      selectedFreeSpace = {};
+    selectedFreeSpace = {};
+    if (method != 'full') {
+      notifyListeners();
+      return;
     }
+    partitionMethod = 'full';
     notifyListeners();
   }
 

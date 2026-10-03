@@ -204,6 +204,41 @@ if grep -R -E '(^|[[:space:]])(nomodeset|ro\.live\.software_render=1|ro\.live\.s
 fi
 ''';
 
+const postInstallStandardStorageValidationScript = r'''
+set -e
+root_uuid="$(findmnt -rn -o UUID --mountpoint /mnt)"
+test -n "$root_uuid"
+while read -r subvol mountpoint; do
+  target="/mnt$mountpoint"
+  [ "$mountpoint" != / ] || target=/mnt
+  actual="$(findmnt -rn -o FSTYPE,UUID,FSROOT --mountpoint "$target")"
+  [ "$actual" = "btrfs $root_uuid /$subvol" ]
+  awk -v uuid="UUID=$root_uuid" -v point="$mountpoint" -v subvol="$subvol" '
+    $1 == uuid && $2 == point && $3 == "btrfs" {
+      n=split($4, opts, ","); for (i=1; i<=n; i++) if (opts[i] == "subvol=" subvol) found++
+    }
+    END { exit found != 1 }
+  ' /mnt/etc/fstab
+done <<'LAYOUT'
+root /
+home /home
+var_log /var/log
+var_cache /var/cache
+var_tmp /var/tmp
+LAYOUT
+! awk '$3 == "swap" { found=1 } END { exit !found }' /mnt/etc/fstab || exit 1
+! findmnt -rn --mountpoint /mnt/boot >/dev/null || exit 1
+test -r /mnt/etc/kernel/cmdline
+grep -Eq '(^|[[:space:]])rootflags=subvol=root([[:space:]]|$)' /mnt/etc/kernel/cmdline
+! grep -E '(^|[[:space:]])resume=UUID=' /mnt/etc/kernel/cmdline || exit 1
+for entry in /mnt/boot/loader/entries/*.conf; do
+  test -r "$entry"
+  grep -Eq "^[[:space:]]*options[[:space:]].*root=UUID=${root_uuid}([[:space:]]|$)" "$entry"
+  grep -Eq '^[[:space:]]*options[[:space:]].*rootflags=subvol=root([[:space:]]|$)' "$entry"
+  ! grep -E '^[[:space:]]*options[[:space:]].*resume=UUID=' "$entry" || exit 1
+done
+''';
+
 /// AŞAMA 8: Kurulum Sonrası Doğrulama
 ///
 /// Kurulumun "tamamlandı" sayılabilmesi için hedef sistemde
@@ -214,7 +249,7 @@ fi
 /// - fstab sözdizimi doğrulanıyor mu
 /// - fstab, kernel cmdline ve BLS kök/EFI/resume UUID'leri tutarlı mı
 /// - Live ISO parametreleri hedef sisteme sızmış mı
-/// - BTRFS kurulumlarında rootflags=subvol=@ mevcut mu
+/// - Standard Btrfs root/home/var mount ve boot argümanları tutarlı mı
 class PostInstallValidationStage {
   const PostInstallValidationStage();
 
@@ -579,10 +614,21 @@ class PostInstallValidationStage {
     if (failure != null) return failure;
 
     if (rootFs == 'btrfs') {
+      final subvolume = (ctx.state['partitionMethod'] ?? 'full') == 'full'
+          ? 'root'
+          : '@';
       failure = await _requireCommand(ctx, 'sh', [
         '-c',
-        'grep -q "rootflags=subvol=@" /mnt/etc/kernel/cmdline',
-      ], 'BTRFS kurulumunda rootflags=subvol=@ eksik.');
+        'grep -q "rootflags=subvol=$subvolume" /mnt/etc/kernel/cmdline',
+      ], 'BTRFS kurulumunda beklenen root subvolume boot argümanı eksik.');
+      if (failure != null) return failure;
+    }
+
+    if ((ctx.state['partitionMethod'] ?? 'full') == 'full') {
+      failure = await _requireCommand(ctx, 'sh', [
+        '-c',
+        postInstallStandardStorageValidationScript,
+      ], 'Standard Btrfs mount/fstab veya swap/resume sözleşmesi tutarsız.');
       if (failure != null) return failure;
     }
 
@@ -686,10 +732,13 @@ class PostInstallValidationStage {
     if (failure != null) return failure;
 
     if (rootFs == 'btrfs') {
+      final subvolume = (ctx.state['partitionMethod'] ?? 'full') == 'full'
+          ? 'root'
+          : '@';
       failure = await _requireCommand(ctx, 'sh', [
         '-c',
-        'grep -R -E "^[[:space:]]*options[[:space:]].*rootflags=subvol=@" /mnt/boot/loader/entries/*.conf >/dev/null',
-      ], 'BTRFS kurulumunda BLS rootflags=subvol=@ girdisi eksik.');
+        'grep -R -E "^[[:space:]]*options[[:space:]].*rootflags=subvol=$subvolume" /mnt/boot/loader/entries/*.conf >/dev/null',
+      ], 'BTRFS kurulumunda BLS root subvolume argümanı eksik.');
       if (failure != null) return failure;
     }
 
@@ -740,9 +789,7 @@ class PostInstallValidationStage {
 
 bool _installationShouldHaveSwap(Map<String, dynamic> state) {
   final partitionMethod = (state['partitionMethod'] ?? 'full').toString();
-  if (partitionMethod == 'full' ||
-      partitionMethod == 'alongside' ||
-      partitionMethod == 'free_space') {
+  if (partitionMethod == 'alongside' || partitionMethod == 'free_space') {
     return true;
   }
 

@@ -402,30 +402,38 @@ void main() {
         );
         final fstabScript = fstabWrite.args.join(' ');
 
+      expect(
+        fstabScript,
+        contains(
+          'UUID=MOCK-VDA2 / btrfs defaults,compress=zstd:1,subvol=root 0 0',
+        ),
+      );
+      expect(
+        fstabScript,
+        contains(
+          'UUID=MOCK-VDA2 /home btrfs defaults,compress=zstd:1,subvol=home 0 0',
+        ),
+      );
+      expect(
+        fstabScript,
+        contains(
+          'UUID=MOCK-VDA1 /boot/efi vfat umask=0077,shortname=winnt 0 2',
+        ),
+      );
+      for (final name in ['log', 'cache', 'tmp']) {
         expect(
           fstabScript,
           contains(
-            'UUID=MOCK-VDA3 / btrfs defaults,compress=zstd:1,subvol=@ 0 0',
+            'UUID=MOCK-VDA2 /var/$name btrfs defaults,compress=zstd:1,subvol=var_$name 0 0',
           ),
         );
-        expect(
-          fstabScript,
-          contains(
-            'UUID=MOCK-VDA3 /home btrfs defaults,compress=zstd:1,subvol=@home 0 0',
-          ),
-        );
-        expect(
-          fstabScript,
-          contains(
-            'UUID=MOCK-VDA1 /boot/efi vfat umask=0077,shortname=winnt 0 2',
-          ),
-        );
-        expect(fstabScript, contains('UUID=MOCK-VDA2 none swap defaults 0 0'));
-        expect(fstabScript, isNot(contains('/run/initramfs/live')));
-        expect(fstabScript, isNot(contains('/dev/sr0')));
-        expect(fstabScript, isNot(contains('zram')));
-      },
-    );
+      }
+      expect(fstabScript, isNot(contains(' none swap ')));
+      expect(fstabScript, isNot(contains('subvol=@')));
+      expect(fstabScript, isNot(contains('/run/initramfs/live')));
+      expect(fstabScript, isNot(contains('/dev/sr0')));
+      expect(fstabScript, isNot(contains('zram')));
+    });
 
     test(
       'manuel btrfs root icin ayri /home yoksa @home fstab girdisi olusur',

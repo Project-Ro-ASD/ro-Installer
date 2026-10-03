@@ -33,7 +33,7 @@ StageContext makeContext(
 
 void main() {
   group('FormattingStage — full disk', () {
-    test('EFI, SWAP ve Root bölümleri biçimlendirilir', () async {
+    test('EFI ve Btrfs Root bölümleri biçimlendirilir', () async {
       final fake = FakeCommandRunner();
       final state = {
         'selectedDisk': '/dev/sda',
@@ -49,16 +49,21 @@ void main() {
 
       // mkfs.fat -F32 /dev/sda1
       expect(fake.wasCalledWith('mkfs.fat', ['-F32', '/dev/sda1']), true);
-      expect(fake.wasCalledWith('mkswap', ['/dev/sda2']), true);
-      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda3']), true);
-      final storagePlan =
-          jsonDecode(state['_formatStoragePlan'] as String)
-              as Map<String, dynamic>;
+      expect(fake.wasCommandCalled('mkswap'), false);
+      expect(state['_resolvedRootPart'], '/dev/sda2');
+      expect(state.containsKey('_resolvedSwapPart'), isFalse);
+      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda2']), true);
+      final storagePlan = jsonDecode(
+        state['_formatStoragePlan'] as String,
+      ) as Map<String, dynamic>;
       final destructiveTypes =
           (storagePlan['destructiveOperations'] as List<dynamic>)
               .map((entry) => (entry as Map<String, dynamic>)['type'])
               .toList();
-      expect(destructiveTypes, containsAll(['format_efi', 'format_swap']));
+      expect(
+        destructiveTypes,
+        containsAll(['format_efi', 'format_btrfs_root']),
+      );
     });
 
     test(
@@ -134,8 +139,8 @@ void main() {
 
       expect(result.success, true);
       expect(fake.wasCalledWith('mkfs.fat', ['-F32', '/dev/nvme0n1p1']), true);
-      expect(fake.wasCalledWith('mkswap', ['/dev/nvme0n1p2']), true);
-      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/nvme0n1p3']), true);
+      expect(fake.wasCommandCalled('mkswap'), false);
+      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/nvme0n1p2']), true);
     });
 
     test('mkfs.fat başarısız olursa stage durur', () async {

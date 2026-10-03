@@ -153,60 +153,7 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
       return;
     }
 
-    if (partitionMethod == 'manual') {
-      state.nextStep();
-      return;
-    }
-
-    if (partitionMethod == 'free_space') {
-      if (state.selectedFreeSpace.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(state.t('disk_free_space_missing')),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
-
-      final confirmed = await _showDecisionDialog(
-        accent: const Color(0xFF8CB6FF),
-        icon: Icons.space_dashboard_rounded,
-        title: state.t('disk_free_space_confirm_title'),
-        message: state.t('disk_free_space_confirm_body', {
-          'disk': state.selectedDisk,
-          'size': _diskSizeLabel(state.selectedFreeSpace['sizeBytes']),
-          'efi': state.existingEfiPartition,
-        }),
-        confirmLabel: state.t('disk_free_space_confirm_action'),
-        cancelLabel: state.t('cancel'),
-      );
-
-      if (confirmed == true && mounted) {
-        state.nextStep();
-      }
-      return;
-    }
-
-    if (partitionMethod == 'alongside') {
-      final confirmed = await _showDecisionDialog(
-        accent: const Color(0xFF6BE7B1),
-        icon: Icons.call_split_rounded,
-        title: state.t('disk_alongside_confirm_title'),
-        message: state.t('disk_alongside_confirm_body', {
-          'disk': state.selectedDisk,
-          'size': '${state.linuxDiskSizeGB.toStringAsFixed(1)} GB',
-          'source': state.shrinkCandidatePartition.isNotEmpty
-              ? state.shrinkCandidatePartition
-              : state.selectedDisk,
-        }),
-        confirmLabel: state.t('disk_alongside_confirm_action'),
-        cancelLabel: state.t('cancel'),
-      );
-
-      if (confirmed == true && mounted) {
-        state.nextStep();
-      }
+    if (partitionMethod != 'full') {
       return;
     }
 
@@ -354,7 +301,6 @@ class _InstallationPlanPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final alongsideAvailability = _methodAvailability(state, 'alongside');
 
     return NebulaPanel(
       padding: EdgeInsets.all(dense ? 22 : 28),
@@ -371,10 +317,7 @@ class _InstallationPlanPanel extends StatelessWidget {
             ),
           ),
           SizedBox(height: dense ? 14 : 18),
-          _CompactMethodGrid(
-            state: state,
-            alongsideAvailability: alongsideAvailability,
-          ),
+          _CompactMethodGrid(state: state),
         ],
       ),
     );
@@ -843,139 +786,20 @@ class _DeploymentPlanPanel extends StatelessWidget {
 }
 
 class _CompactMethodGrid extends StatelessWidget {
-  const _CompactMethodGrid({
-    required this.state,
-    required this.alongsideAvailability,
-  });
+  const _CompactMethodGrid({required this.state});
 
   final InstallerState state;
-  final _MethodAvailability alongsideAvailability;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    final options = <Widget>[
-      _CompactMethodOption(
-        label: state.t('disk_full'),
-        caption: state.t('disk_full_caption'),
-        icon: Icons.delete_sweep_rounded,
-        accent: const Color(0xFFFF8C7A),
-        selected: state.partitionMethod == 'full',
-        disabled: false,
-        onTap: () => state.updatePartitionMethod('full'),
-      ),
-      _CompactMethodOption(
-        label: state.t('disk_alongside'),
-        caption: _alongsideCaption(state),
-        icon: Icons.call_split_rounded,
-        accent: theme.colorScheme.tertiary,
-        selected: state.partitionMethod == 'alongside',
-        disabled: alongsideAvailability.disabled,
-        onTap: () => state.updatePartitionMethod('alongside'),
-      ),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-
-            return Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: options
-                  .map((option) => SizedBox(width: width, child: option))
-                  .toList(),
-            );
-          },
-        ),
-        if (alongsideAvailability.disabled &&
-            alongsideAvailability.reasons.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _MethodNotice(
-            title: state.t('disk_alongside_locked_title'),
-            messages: alongsideAvailability.reasons,
-            color: Colors.redAccent,
-          ),
-        ],
-        if (!alongsideAvailability.disabled &&
-            alongsideAvailability.warnings.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _MethodNotice(
-            title: 'NTFS',
-            messages: alongsideAvailability.warnings,
-            color: Colors.orangeAccent,
-          ),
-        ],
-        if (!alongsideAvailability.disabled &&
-            state.partitionMethod != 'alongside' &&
-            state.shrinkCandidatePartition.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(
-            _alongsideReadyHint(state),
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: context.installerVisuals.mutedForeground,
-              height: 1.35,
-            ),
-          ),
-        ],
-        if (state.partitionMethod == 'alongside' &&
-            !alongsideAvailability.disabled) ...[
-          const SizedBox(height: 12),
-          _AlongsideSizeAllocator(visible: true, state: state, dense: true),
-        ],
-      ],
-    );
-  }
-}
-
-class _MethodNotice extends StatelessWidget {
-  const _MethodNotice({
-    required this.title,
-    required this.messages,
-    required this.color,
-  });
-
-  final String title;
-  final List<String> messages;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: color.withValues(alpha: 0.08),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: theme.textTheme.labelLarge?.copyWith(color: color),
-          ),
-          const SizedBox(height: 8),
-          ...messages.map(
-            (message) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                '- $message',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: color,
-                  height: 1.35,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+    return _CompactMethodOption(
+      label: state.t('disk_full'),
+      caption: state.t('disk_full_caption'),
+      icon: Icons.delete_sweep_rounded,
+      accent: const Color(0xFFFF8C7A),
+      selected: state.partitionMethod == 'full',
+      disabled: false,
+      onTap: () => state.updatePartitionMethod('full'),
     );
   }
 }
@@ -1088,164 +912,6 @@ class _CompactMethodOption extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _AlongsideSizeAllocator extends StatelessWidget {
-  const _AlongsideSizeAllocator({
-    required this.visible,
-    required this.state,
-    this.dense = false,
-  });
-
-  final bool visible;
-  final InstallerState state;
-  final bool dense;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final maxSize = _alongsideSliderMax(state);
-    final sliderValue = state.linuxDiskSizeGB.clamp(40.0, maxSize).toDouble();
-    final maxFree = (state.alongsideMaxLinuxSizeBytes / (1024 * 1024 * 1024))
-        .clamp(0.0, maxSize)
-        .toDouble();
-
-    return AnimatedCrossFade(
-      duration: context.installerMotion.medium,
-      crossFadeState: visible
-          ? CrossFadeState.showSecond
-          : CrossFadeState.showFirst,
-      firstChild: const SizedBox(width: double.infinity, height: 0),
-      secondChild: Container(
-        width: double.infinity,
-        padding: EdgeInsets.all(dense ? 12 : 16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: theme.colorScheme.surface.withValues(
-            alpha: theme.brightness == Brightness.dark ? 0.22 : 0.6,
-          ),
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.38),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              state.t('disk_alongside_size_title'),
-              style: theme.textTheme.titleSmall,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              state.shrinkCandidatePartition.isNotEmpty
-                  ? state.t('disk_alongside_size_shrink_desc')
-                  : state.t('disk_alongside_size_free_desc'),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: context.installerVisuals.mutedForeground,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _AllocationStat(
-                    label: state.t('linux_size'),
-                    value: '${sliderValue.toInt()} GB',
-                    color: theme.colorScheme.primary,
-                    dense: dense,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _AllocationStat(
-                    label: state.t('disk_max_space'),
-                    value: '${maxFree.toInt()} GB',
-                    color: theme.colorScheme.outline,
-                    dense: dense,
-                  ),
-                ),
-              ],
-            ),
-            if (state.shrinkCandidatePartition.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text(
-                'Kaynak bolum: ${state.shrinkCandidatePartition} (${state.shrinkCandidateFs.toUpperCase()}). Bu bolumde en az 40 GB birakilacaktir.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: context.installerVisuals.mutedForeground,
-                  height: 1.35,
-                ),
-              ),
-            ],
-            const SizedBox(height: 14),
-            SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 12,
-                activeTrackColor: theme.colorScheme.primary,
-                inactiveTrackColor: theme.colorScheme.outlineVariant.withValues(
-                  alpha: 0.4,
-                ),
-                thumbColor: Colors.white,
-                overlayColor: theme.colorScheme.primary.withValues(alpha: 0.12),
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 10),
-              ),
-              child: Slider(
-                value: sliderValue,
-                min: 40.0,
-                max: maxSize,
-                onChanged: visible
-                    ? (value) => state.updateLinuxDiskSize(value)
-                    : null,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AllocationStat extends StatelessWidget {
-  const _AllocationStat({
-    required this.label,
-    required this.value,
-    required this.color,
-    this.dense = false,
-  });
-
-  final String label;
-  final String value;
-  final Color color;
-  final bool dense;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: EdgeInsets.all(dense ? 10 : 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: color.withValues(alpha: 0.08),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(color: color),
-          ),
-          SizedBox(height: dense ? 4 : 6),
-          Text(
-            value,
-            style: dense
-                ? theme.textTheme.titleSmall
-                : theme.textTheme.titleMedium,
-          ),
-        ],
       ),
     );
   }
@@ -1393,18 +1059,6 @@ class _DiskEmptyState extends StatelessWidget {
   }
 }
 
-class _MethodAvailability {
-  const _MethodAvailability({
-    required this.disabled,
-    this.reasons = const [],
-    this.warnings = const [],
-  });
-
-  final bool disabled;
-  final List<String> reasons;
-  final List<String> warnings;
-}
-
 class _DiskTone {
   const _DiskTone({
     required this.icon,
@@ -1417,81 +1071,6 @@ class _DiskTone {
   final Color color;
   final String label;
   final String subtitle;
-}
-
-_MethodAvailability _methodAvailability(InstallerState state, String code) {
-  if (code == 'free_space') {
-    if (state.isDetectingOS) {
-      return _MethodAvailability(
-        disabled: true,
-        reasons: [state.t('disk_analysis_in_progress')],
-      );
-    }
-
-    final reasons = <String>[];
-    if (state.diskBootMode != 'uefi') {
-      reasons.add(state.t('disk_blocker_boot_mode_not_uefi'));
-    }
-    if (state.diskPartitionTable != 'gpt') {
-      reasons.add(state.t('disk_blocker_partition_table_not_gpt'));
-    }
-    if (!state.hasExistingEfi) {
-      reasons.add(state.t('disk_blocker_missing_efi'));
-    }
-    if (state.unsupportedStorageBlockers.isNotEmpty) {
-      reasons.add(state.t('disk_blocker_unsupported_storage_topology'));
-    }
-    if (state.largestFreeContiguousBytes < 40 * 1024 * 1024 * 1024) {
-      reasons.add(state.t('disk_blocker_no_free_space'));
-    }
-    return _MethodAvailability(disabled: reasons.isNotEmpty, reasons: reasons);
-  }
-
-  if (code != 'alongside') {
-    return const _MethodAvailability(disabled: false);
-  }
-
-  if (state.isDetectingOS) {
-    return _MethodAvailability(
-      disabled: true,
-      reasons: [state.t('disk_analysis_in_progress')],
-    );
-  }
-
-  final reasons = _localizedAlongsideReasons(state);
-  final warnings = _localizedAlongsideWarnings(state);
-  if (reasons.isNotEmpty) {
-    return _MethodAvailability(
-      disabled: true,
-      reasons: reasons,
-      warnings: warnings,
-    );
-  }
-
-  return _MethodAvailability(disabled: false, warnings: warnings);
-}
-
-String _alongsideCaption(InstallerState state) {
-  if (state.shrinkCandidatePartition.isNotEmpty &&
-      state.shrinkCandidateFs.isNotEmpty) {
-    return '${state.shrinkCandidateFs.toUpperCase()} • ${state.shrinkCandidatePartition}';
-  }
-  if (state.hasExistingOS) {
-    return state.detectedOS;
-  }
-  return state.t('disk_dual_boot');
-}
-
-String _alongsideReadyHint(InstallerState state) {
-  final maxSize = _alongsideSliderMax(state).toStringAsFixed(0);
-  if (state.shrinkCandidatePartition.isNotEmpty) {
-    return state.t('disk_alongside_ready_with_source', {
-      'size': '$maxSize GB',
-      'partition': state.shrinkCandidatePartition,
-      'fs': state.shrinkCandidateFs.toUpperCase(),
-    });
-  }
-  return state.t('disk_alongside_ready_free', {'size': '$maxSize GB'});
 }
 
 String _bootModeChipLabel(InstallerState state) {
@@ -1516,68 +1095,6 @@ String _shrinkCandidateChipLabel(InstallerState state) {
     'fs': state.shrinkCandidateFs.toUpperCase(),
     'size': '${sizeGb.toStringAsFixed(0)} GB',
   });
-}
-
-List<String> _localizedAlongsideReasons(InstallerState state) {
-  return _localizedAlongsideCodes(
-    state,
-    state.alongsideBlockers.where(
-      (code) => !_repairableAlongsideBlockers.contains(code),
-    ),
-  );
-}
-
-List<String> _localizedAlongsideWarnings(InstallerState state) {
-  return _localizedAlongsideCodes(
-    state,
-    state.alongsideBlockers.where(_repairableAlongsideBlockers.contains),
-  );
-}
-
-const _repairableAlongsideBlockers = {'ntfs_dirty'};
-
-List<String> _localizedAlongsideCodes(
-  InstallerState state,
-  Iterable<String> codes,
-) {
-  final reasons = <String>[];
-  for (final code in codes) {
-    switch (code) {
-      case 'boot_mode_not_uefi':
-        reasons.add(state.t('disk_blocker_boot_mode_not_uefi'));
-      case 'partition_table_not_gpt':
-        reasons.add(state.t('disk_blocker_partition_table_not_gpt'));
-      case 'missing_efi':
-        reasons.add(state.t('disk_blocker_missing_efi'));
-      case 'no_existing_os':
-        reasons.add(state.t('disk_blocker_no_existing_os'));
-      case 'no_shrink_candidate':
-        reasons.add(state.t('disk_blocker_no_shrink_candidate'));
-      case 'bitlocker_enabled':
-        reasons.add(state.t('disk_blocker_bitlocker_enabled'));
-      case 'unsupported_storage_topology':
-        reasons.add(state.t('disk_blocker_unsupported_storage_topology'));
-      case 'ntfs_hibernated_or_fast_startup':
-        reasons.add(state.t('disk_blocker_ntfs_hibernated_or_fast_startup'));
-      case 'ntfs_dirty':
-        reasons.add(state.t('disk_blocker_ntfs_dirty'));
-      case 'ntfs_resize_tool_missing':
-        reasons.add(state.t('disk_blocker_ntfs_resize_tool_missing'));
-      case 'btrfs_resize_tool_missing':
-        reasons.add(state.t('disk_blocker_btrfs_resize_tool_missing'));
-      case 'ntfs_check_failed':
-        reasons.add(state.t('disk_blocker_ntfs_check_failed'));
-      case 'alongside_minimum_not_met':
-        reasons.add(state.t('disk_blocker_alongside_minimum_not_met'));
-      case 'alongside_engine_pending':
-        reasons.add(state.t('disk_blocker_alongside_engine_pending'));
-      default:
-        reasons.add(code);
-    }
-  }
-
-  final unique = <String>{};
-  return reasons.where(unique.add).toList(growable: false);
 }
 
 _DiskTone _diskTone(
@@ -1633,11 +1150,4 @@ String _diskSizeLabel(dynamic sizeBytes) {
   final size = sizeBytes is int ? sizeBytes.toDouble() : 0.0;
   final sizeGb = size / (1024 * 1024 * 1024);
   return '${sizeGb.toStringAsFixed(1)} GB';
-}
-
-double _alongsideSliderMax(InstallerState state) {
-  final maxSize = state.alongsideMaxLinuxSizeBytes > 0
-      ? state.alongsideMaxLinuxSizeBytes / (1024 * 1024 * 1024)
-      : 40.0;
-  return maxSize < 40 ? 40 : maxSize;
 }

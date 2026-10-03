@@ -1,3 +1,4 @@
+import '../../models/standard_storage_layout.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
 
@@ -60,11 +61,10 @@ class MountingStage {
     String rootFs,
   ) async {
     final efiPart = _partitionPath(selectedDisk, 1);
-    final swapPart = _partitionPath(selectedDisk, 2);
-    final rootPart = _partitionPath(selectedDisk, 3);
+    final rootPart = _partitionPath(selectedDisk, 2);
 
     // Root bölümünü bağla
-    if (!await _mountRoot(ctx, rootPart, rootFs)) {
+    if (!await _mountStandardRoot(ctx, rootPart)) {
       return StageResult.fail('Root bölümü bağlanamadı: $rootPart');
     }
 
@@ -72,8 +72,6 @@ class MountingStage {
     if (!await _mountEfi(ctx, efiPart)) {
       return StageResult.fail('EFI bölümü bağlanamadı: $efiPart');
     }
-
-    await ctx.runCmd('swapon', [swapPart], ctx.log, isMock: ctx.isMock);
 
     ctx.log('[AŞAMA 4] Tam disk bağlama tamamlandı.');
     return StageResult.ok(
@@ -227,6 +225,59 @@ class MountingStage {
         'Manuel bölüm bağlama tamamlandı.',
       ),
     );
+  }
+
+  Future<bool> _mountStandardRoot(StageContext ctx, String rootPart) async {
+    if (!await ctx.runCmd(
+      'mkdir',
+      ['-p', '/mnt'],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      return false;
+    }
+    // Explicit ID 5 ensures all five subvolumes are flat siblings.
+    if (!await ctx.runCmd(
+      'mount',
+      ['-o', 'subvolid=5', rootPart, '/mnt'],
+      ctx.log,
+      isMock: ctx.isMock,
+    )) {
+      return false;
+    }
+    for (final name in StandardStorageLayout.subvolumes.keys) {
+      if (!await ctx.runCmd(
+        'btrfs',
+        ['subvolume', 'create', '/mnt/$name'],
+        ctx.log,
+        isMock: ctx.isMock,
+      )) {
+        return false;
+      }
+    }
+    if (!await ctx.runCmd('umount', ['/mnt'], ctx.log, isMock: ctx.isMock)) {
+      return false;
+    }
+    for (final entry in StandardStorageLayout.subvolumes.entries) {
+      final target = entry.value == '/' ? '/mnt' : '/mnt${entry.value}';
+      if (!await ctx.runCmd(
+        'mkdir',
+        ['-p', target],
+        ctx.log,
+        isMock: ctx.isMock,
+      )) {
+        return false;
+      }
+      if (!await ctx.runCmd(
+        'mount',
+        ['-o', StandardStorageLayout.mountOptions(entry.key), rootPart, target],
+        ctx.log,
+        isMock: ctx.isMock,
+      )) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Root bölümünü bağlar. BTRFS ise subvolume oluşturur.

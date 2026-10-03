@@ -90,12 +90,11 @@ void main() {
       ], exitCode: exitCode);
     }
 
-    void addSwapResumeResponses(FakeCommandRunner fake) {
+    void addStandardStorageResponses(FakeCommandRunner fake) {
       fake.addResponse('sh', [
         '-c',
-        'grep -Eq "[[:space:]]swap[[:space:]]" /mnt/etc/fstab',
+        postInstallStandardStorageValidationScript,
       ]);
-      fake.addResponse('sh', ['-c', postInstallSwapResumeValidationScript]);
     }
 
     void addNoGpuDebugArgResponse(FakeCommandRunner fake, {int exitCode = 0}) {
@@ -144,7 +143,7 @@ void main() {
       if (btrfs) {
         fake.addResponse('sh', [
           '-c',
-          'grep -R -E "^[[:space:]]*options[[:space:]].*rootflags=subvol=@" /mnt/boot/loader/entries/*.conf >/dev/null',
+          'grep -R -E "^[[:space:]]*options[[:space:]].*rootflags=subvol=root" /mnt/boot/loader/entries/*.conf >/dev/null',
         ]);
       }
       fake.addResponse('findmnt', [
@@ -369,9 +368,9 @@ void main() {
       addNoGpuDebugArgResponse(fake);
       fake.addResponse('sh', [
         '-c',
-        'grep -q "rootflags=subvol=@" /mnt/etc/kernel/cmdline',
+        'grep -q "rootflags=subvol=root" /mnt/etc/kernel/cmdline',
       ]);
-      addSwapResumeResponses(fake);
+      addStandardStorageResponses(fake);
 
       final ctx = makeContext({
         'fileSystem': 'btrfs',
@@ -382,7 +381,35 @@ void main() {
       final result = await stage.execute(ctx);
 
       expect(result.success, true);
+      expect(
+        fake.wasCalledWith('sh', ['-c', postInstallSwapResumeValidationScript]),
+        isFalse,
+      );
     });
+
+    test(
+      'standard storage mismatch fails validation without requiring swap',
+      () async {
+        final fake = FakeCommandRunner();
+        addBootReferenceResponses(fake);
+        fake.addResponse('sh', [
+          '-c',
+          postInstallStandardStorageValidationScript,
+        ], exitCode: 1);
+        final result = await const PostInstallValidationStage().execute(
+          makeContext({'fileSystem': 'btrfs', 'partitionMethod': 'full'}, fake),
+        );
+        expect(result.success, isFalse);
+        expect(result.message, contains('Standard Btrfs'));
+        expect(
+          fake.wasCalledWith('sh', [
+            '-c',
+            postInstallSwapResumeValidationScript,
+          ]),
+          isFalse,
+        );
+      },
+    );
 
     test('live parametresi sızmışsa doğrulama düşer', () async {
       final fake = FakeCommandRunner(defaultSuccess: false);
@@ -653,9 +680,9 @@ void main() {
         addNoGpuDebugArgResponse(fake);
         fake.addResponse('sh', [
           '-c',
-          'grep -q "rootflags=subvol=@" /mnt/etc/kernel/cmdline',
+          'grep -q "rootflags=subvol=root" /mnt/etc/kernel/cmdline',
         ]);
-        addSwapResumeResponses(fake);
+        addStandardStorageResponses(fake);
 
         final ctx = makeContext({
           'fileSystem': 'btrfs',

@@ -77,8 +77,7 @@ class FormattingStage {
     );
 
     final efiPart = _partitionPath(selectedDisk, 1);
-    final swapPart = _partitionPath(selectedDisk, 2);
-    final rootPart = _partitionPath(selectedDisk, 3);
+    final rootPart = _partitionPath(selectedDisk, 2);
 
     // EFI bölümünü FAT32 olarak biçimlendir
     var planFailure = _requirePlannedDestructiveOperation(
@@ -96,16 +95,6 @@ class FormattingStage {
       return StageResult.fail('EFI bölümü biçimlendirilemedi: $efiPart');
     }
 
-    planFailure = _requirePlannedDestructiveOperation(
-      storagePlan,
-      type: 'format_swap',
-      target: swapPart,
-    );
-    if (planFailure != null) return planFailure;
-    if (!await ctx.runCmd('mkswap', [swapPart], ctx.log, isMock: ctx.isMock)) {
-      return StageResult.fail('SWAP bölümü biçimlendirilemedi: $swapPart');
-    }
-
     // Root bölümünü seçilen dosya sistemiyle biçimlendir
     planFailure = _requirePlannedDestructiveOperation(
       storagePlan,
@@ -117,7 +106,7 @@ class FormattingStage {
       return StageResult.fail('Root bölümü biçimlendirilemedi: $rootPart');
     }
 
-    ctx.state['_resolvedSwapPart'] = swapPart;
+    ctx.state.remove('_resolvedSwapPart');
     ctx.state['_resolvedRootPart'] = rootPart;
 
     ctx.log('[AŞAMA 3] Tam disk biçimlendirme tamamlandı.');

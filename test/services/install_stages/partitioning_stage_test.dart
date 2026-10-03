@@ -11,6 +11,12 @@ StageContext makeContext(
   FakeCommandRunner runner, {
   bool isMock = false,
 }) {
+  if (state['partitionMethod'] == 'full') {
+    runner.addResponse('blockdev', [
+      '--getsize64',
+      state['selectedDisk'] as String,
+    ], stdout: '${80 * 1024 * 1024 * 1024}');
+  }
   return StageContext(
     state: state,
     log: (msg) {}, // Sessiz log
@@ -58,9 +64,8 @@ void main() {
         expect(cmds[0], 'wipefs');
         expect(cmds[1], 'sgdisk'); // -Z (sıfırlama)
         expect(cmds[2], 'sgdisk'); // EFI bölümü
-        expect(cmds[3], 'sgdisk'); // SWAP bölümü
-        expect(cmds[4], 'sgdisk'); // Root bölümü
-        expect(cmds[5], 'partprobe');
+        expect(cmds[3], 'sgdisk'); // Root bölümü
+        expect(cmds[4], 'partprobe');
 
         // wipefs argüman kontrolü
         expect(
@@ -79,13 +84,13 @@ void main() {
         expect(sgdiskCommands[1].args, contains('1:0:+512M'));
         expect(sgdiskCommands[1].args, contains('1:ef00'));
 
-        // SWAP bölümü: hibernate uyumlu, RAM'e göre dinamik
-        expect(sgdiskCommands[2].args, contains('2:0:+8192M'));
-        expect(sgdiskCommands[2].args, contains('2:8200'));
-
-        // Root bölümü: kalan alan
-        expect(sgdiskCommands[3].args, contains('3:0:0'));
-        expect(sgdiskCommands[3].args, contains('3:8300'));
+        // Exactly two partitions: ESP and the remaining Btrfs system space.
+        expect(sgdiskCommands, hasLength(3));
+        expect(sgdiskCommands[2].args, contains('2:0:0'));
+        expect(sgdiskCommands[2].args, contains('2:8300'));
+        expect(state['_resolvedRootPart'], '/dev/sda2');
+        expect(state.containsKey('_resolvedSwapPart'), isFalse);
+        expect(fake.wasCommandCalled('grep'), isFalse);
 
         final storagePlan =
             jsonDecode(state['_storagePlan'] as String) as Map<String, dynamic>;
@@ -96,10 +101,8 @@ void main() {
         expect(destructiveTypes, [
           'wipe_disk',
           'create_efi',
-          'create_swap',
           'create_btrfs_root',
           'format_efi',
-          'format_swap',
           'format_btrfs_root',
         ]);
       },
@@ -191,8 +194,80 @@ void main() {
 
       expect(result.success, true);
 
+      expect(state['_resolvedRootPart'], '/dev/nvme0n1p2');
+      expect(state.containsKey('_resolvedSwapPart'), isFalse);
       // partprobe NVMe disk adıyla çağrılmalı
       expect(fake.wasCalledWith('partprobe', ['/dev/nvme0n1']), true);
+    });
+  });
+
+  group('full-disk safety and fallback', () {
+    test('temporary capacity floor is checked before wipe', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse('blockdev', ['--getsize64', '/dev/sda'], stdout: '1024');
+      final result = await const PartitioningStage().execute(
+        makeContext({
+          'selectedDisk': '/dev/sda',
+          'partitionMethod': 'full',
+        }, fake),
+      );
+      expect(result.success, isFalse);
+      expect(fake.wasCommandCalled('wipefs'), isFalse);
+      expect(fake.wasCommandCalled('sgdisk'), isFalse);
+    });
+
+    test('unreadable disk size fails before wipe', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse('blockdev', ['--getsize64', '/dev/sda'], exitCode: 1);
+      final result = await const PartitioningStage().execute(
+        makeContext({
+          'selectedDisk': '/dev/sda',
+          'partitionMethod': 'full',
+        }, fake),
+      );
+      expect(result.success, isFalse);
+      expect(fake.wasCommandCalled('wipefs'), isFalse);
+    });
+
+    test('parted fallback creates only ESP and Btrfs partition', () async {
+      final fake = FakeCommandRunner();
+      fake.addResponse('sh', [
+        '-c',
+        'command -v sgdisk >/dev/null 2>&1',
+      ], exitCode: 1);
+      final state = <String, dynamic>{
+        'selectedDisk': '/dev/mmcblk0',
+        'partitionMethod': 'full',
+      };
+      final result = await const PartitioningStage().execute(
+        makeContext(state, fake),
+      );
+      expect(result.success, isTrue);
+      final creates = fake.commandLog
+          .where(
+            (cmd) => cmd.command == 'parted' && cmd.args.contains('mkpart'),
+          )
+          .toList();
+      expect(creates, hasLength(2));
+      expect(creates[0].args, [
+        '-s',
+        '/dev/mmcblk0',
+        'mkpart',
+        'ESP',
+        'fat32',
+        '1MiB',
+        '513MiB',
+      ]);
+      expect(creates[1].args, [
+        '-s',
+        '/dev/mmcblk0',
+        'mkpart',
+        'ROOT',
+        '513MiB',
+        '100%',
+      ]);
+      expect(state['_resolvedRootPart'], '/dev/mmcblk0p2');
+      expect(state.containsKey('_resolvedSwapPart'), isFalse);
     });
   });
 

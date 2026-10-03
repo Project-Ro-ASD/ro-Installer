@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../models/storage_plan.dart';
+import '../../models/standard_storage_layout.dart';
 import '../storage_topology_guard.dart';
 import '../../utils/manual_partition_sizing.dart';
 import 'stage_context.dart';
@@ -9,7 +10,7 @@ import 'stage_result.dart';
 /// AŞAMA 2: Bölümleme (Partitioning)
 ///
 /// Seçilen yönteme göre disk bölümlerini oluşturur:
-/// - 'full': Tüm diski silip EFI + SWAP + Root oluşturur
+/// - 'full': Tüm diski silip EFI + Btrfs Root oluşturur
 /// - 'alongside': Mevcut sisteme zarar vermeden yanına SWAP + Root oluşturur
 /// - 'manual': Kullanıcının UI'da belirlediği planı uygular (format işlemi bir sonraki aşamada)
 ///
@@ -84,7 +85,7 @@ class PartitioningStage {
   }
 
   /// Tüm diski silip yeniden bölümlendirir:
-  /// EFI (512MB) + hibernate uyumlu SWAP + Root (kalan)
+  /// EFI (512 MiB) + Btrfs Root (kalan)
   Future<StageResult> _fullDiskPartition(
     StageContext ctx,
     String selectedDisk,
@@ -95,6 +96,25 @@ class PartitioningStage {
       'stage_progress_partition_reset_disk',
       'Disk sıfırlanıyor ve bağlantılar kesiliyor...',
     );
+
+    final diskBytes = await _readDiskSizeBytes(ctx, selectedDisk);
+    if (!ctx.isMock && diskBytes == null) {
+      return StageResult.fail('Hedef disk boyutu güvenli şekilde okunamadı.');
+    }
+    if (diskBytes != null &&
+        diskBytes < StandardStorageLayout.minimumDiskBytes) {
+      return StageResult.fail(
+        'Disk geçici prepared-root güvenlik sınırı için küçük. '
+        'Bu sınır nihai Ro-ASD minimumu değildir.',
+      );
+    }
+
+    final hasSgdisk = await _hasCommand(ctx, 'sgdisk');
+    if (!hasSgdisk && !await _hasCommand(ctx, 'parted')) {
+      return StageResult.fail(
+        'Disk araçları eksik: sgdisk ve parted bulunamadı.',
+      );
+    }
 
     // Wipefs ile disk imzalarını temizle
     final wipePlanFailure = _requirePlannedDestructiveOperation(
@@ -119,23 +139,6 @@ class PartitioningStage {
       {'disk': selectedDisk},
     );
 
-    final ramMB = await _getSystemRamMB(ctx);
-    final swapMB = _calculateSwapMB(ramMB);
-    final swapBytes = swapMB * 1024 * 1024;
-    final diskBytes = await _readDiskSizeBytes(ctx, selectedDisk);
-    if (diskBytes != null) {
-      final requiredBytes = 512 * 1024 * 1024 + swapBytes + _minRootBytes;
-      if (diskBytes < requiredBytes) {
-        return StageResult.fail(
-          'Disk hibernate uyumlu SWAP ve en az 40 GB root alanı için küçük. '
-          'Gereken minimum: ${_bytesToGiB(requiredBytes)} GB.',
-        );
-      }
-    }
-    ctx.log('Sistem RAM: ${ramMB}MB → Hibernate uyumlu SWAP: ${swapMB}MB');
-
-    final hasSgdisk = await _hasCommand(ctx, 'sgdisk');
-
     if (hasSgdisk) {
       final createEfiPlanFailure = _requirePlannedDestructiveOperation(
         storagePlan,
@@ -143,12 +146,6 @@ class PartitioningStage {
         target: selectedDisk,
       );
       if (createEfiPlanFailure != null) return createEfiPlanFailure;
-      final createSwapPlanFailure = _requirePlannedDestructiveOperation(
-        storagePlan,
-        type: 'create_swap',
-        target: selectedDisk,
-      );
-      if (createSwapPlanFailure != null) return createSwapPlanFailure;
       final createRootPlanFailure = _requirePlannedDestructiveOperation(
         storagePlan,
         type: 'create_btrfs_root',
@@ -178,37 +175,13 @@ class PartitioningStage {
 
       if (!await ctx.runCmd(
         'sgdisk',
-        [
-          '-n',
-          '2:0:+${swapMB}M',
-          '-t',
-          '2:8200',
-          '-c',
-          '2:RoASD_Swap',
-          selectedDisk,
-        ],
-        ctx.log,
-        isMock: ctx.isMock,
-      )) {
-        return StageResult.fail('SWAP bölümü oluşturulamadı.');
-      }
-
-      if (!await ctx.runCmd(
-        'sgdisk',
-        ['-n', '3:0:0', '-t', '3:8300', '-c', '3:RoASD_Root', selectedDisk],
+        ['-n', '2:0:0', '-t', '2:8300', '-c', '2:RoASD_Root', selectedDisk],
         ctx.log,
         isMock: ctx.isMock,
       )) {
         return StageResult.fail('Root bölümü oluşturulamadı.');
       }
     } else {
-      final hasParted = await _hasCommand(ctx, 'parted');
-      if (!hasParted) {
-        return StageResult.fail(
-          'Disk araclari eksik: sgdisk bulunamadi ve parted fallback yolu da mevcut degil.',
-        );
-      }
-
       ctx.log(
         '[UYARI] sgdisk bulunamadi, full kurulum icin parted fallback kullaniliyor.',
       );
@@ -219,12 +192,6 @@ class PartitioningStage {
         target: selectedDisk,
       );
       if (createEfiPlanFailure != null) return createEfiPlanFailure;
-      final createSwapPlanFailure = _requirePlannedDestructiveOperation(
-        storagePlan,
-        type: 'create_swap',
-        target: selectedDisk,
-      );
-      if (createSwapPlanFailure != null) return createSwapPlanFailure;
       final createRootPlanFailure = _requirePlannedDestructiveOperation(
         storagePlan,
         type: 'create_btrfs_root',
@@ -261,24 +228,7 @@ class PartitioningStage {
 
       if (!await ctx.runCmd(
         'parted',
-        [
-          '-s',
-          selectedDisk,
-          'mkpart',
-          'SWAP',
-          'linux-swap',
-          '513MiB',
-          '${513 + swapMB}MiB',
-        ],
-        ctx.log,
-        isMock: ctx.isMock,
-      )) {
-        return StageResult.fail('SWAP bölümü parted ile oluşturulamadı.');
-      }
-
-      if (!await ctx.runCmd(
-        'parted',
-        ['-s', selectedDisk, 'mkpart', 'ROOT', '${513 + swapMB}MiB', '100%'],
+        ['-s', selectedDisk, 'mkpart', 'ROOT', '513MiB', '100%'],
         ctx.log,
         isMock: ctx.isMock,
       )) {
@@ -290,13 +240,13 @@ class PartitioningStage {
     final rescanFailure = await _rescanDisk(ctx, selectedDisk);
     if (rescanFailure != null) return rescanFailure;
 
-    ctx.state['_resolvedSwapPart'] = _partitionPath(selectedDisk, 2);
-    ctx.state['_resolvedRootPart'] = _partitionPath(selectedDisk, 3);
+    ctx.state.remove('_resolvedSwapPart');
+    ctx.state['_resolvedRootPart'] = _partitionPath(selectedDisk, 2);
     ctx.log('[AŞAMA 2] Tam disk bölümleme tamamlandı.');
     return StageResult.ok(
       ctx.t(
         'stage_result_partition_full_done',
-        'Tam disk bölümleme tamamlandı: EFI + SWAP + Root',
+        'Tam disk bölümleme tamamlandı: EFI + Btrfs Root',
       ),
     );
   }
