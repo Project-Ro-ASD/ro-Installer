@@ -118,9 +118,7 @@ class RoInstallerApp extends StatelessWidget {
           localizationsDelegates: GlobalMaterialLocalizations.delegates,
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
-          themeMode: state.themeMode == 'dark'
-              ? ThemeMode.dark
-              : ThemeMode.light,
+          themeMode: ThemeMode.dark,
           debugShowCheckedModeBanner: false,
           builder: (context, child) {
             return Directionality(

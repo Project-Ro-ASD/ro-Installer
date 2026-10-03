@@ -1,39 +1,99 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 import 'package:ro_installer/l10n/installer_translation_catalog.dart';
+import 'package:ro_installer/screens/disk_selection_screen.dart';
+import 'package:ro_installer/services/command_runner.dart';
+import 'package:ro_installer/services/fake_command_runner.dart';
 import 'package:ro_installer/state/installer_state.dart';
+import 'package:ro_installer/theme/app_theme.dart';
 
 void main() {
   group('InstallerState interactive wizard', () {
     const expectedSteps = ['Welcome', 'Location', 'Account', 'Disk', 'Install'];
     late InstallerState state;
+    late FakeCommandRunner runner;
 
     setUp(() {
+      runner = FakeCommandRunner();
+      CommandRunner.setInstance(runner);
       state = InstallerState(translations: _catalog());
     });
 
     tearDown(() {
       state.dispose();
+      CommandRunner.resetInstance();
     });
 
     test('fresh state exposes only the transitional wizard steps', () {
       expect(state.steps, expectedSteps);
       expect(state.currentStep, 0);
-      expect(state.installType, 'standard');
       expect(state.partitionMethod, 'full');
       expect(state.selectedKernelChannelsList, ['stable']);
       expect(state.username, isEmpty);
       expect(state.password, isEmpty);
     });
 
-    test('legacy advanced and manual state does not expose removed pages', () {
-      state.updateInstallType('advanced');
-      state.updatePartitionMethod('manual');
-      state.updateKernel('experimental');
+    test('legacy storage data does not expose removed pages', () {
+      state.partitionMethod = 'manual';
+      state.manualPartitions.add({'mountPoint': '/'});
 
-      expect(state.installType, 'advanced');
       expect(state.partitionMethod, 'manual');
-      expect(state.selectedKernelChannelsList, ['stable', 'experimental']);
+      expect(state.manualPartitions, isNotEmpty);
       expect(state.steps, expectedSteps);
+    });
+
+    testWidgets('construction does not start network commands or polling', (
+      tester,
+    ) async {
+      expect(runner.commandLog, isEmpty);
+      await tester.pump(const Duration(seconds: 11));
+      expect(runner.commandLog, isEmpty);
+    });
+
+    test('kernel compatibility is fixed and cannot be mutated', () {
+      final channels = state.selectedKernelChannelsList;
+
+      expect(channels, ['stable']);
+      expect(() => channels.add('experimental'), throwsUnsupportedError);
+      expect(() => channels[0] = 'experimental', throwsUnsupportedError);
+      expect(state.selectedKernelChannelsList, ['stable']);
+    });
+
+    testWidgets('disk UI exposes only the existing standard-path controls', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1600, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      runner.addResponseForCommand('lsblk', stdout: '{"blockdevices":[]}');
+      state.selectedDisk = '/dev/test';
+      state.selectedDiskDetails = {
+        'name': '/dev/test',
+        'model': 'Test disk',
+        'size': 120 * 1024 * 1024 * 1024,
+      };
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: state,
+          child: MaterialApp(
+            theme: AppTheme.darkTheme,
+            home: const Scaffold(body: DiskSelectionScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('disk_full'), findsOneWidget);
+      expect(find.text('disk_alongside'), findsOneWidget);
+      expect(find.text('install_type_standard'), findsOneWidget);
+      expect(find.text('install_type_advanced'), findsNothing);
+      expect(find.text('type_adv_desc'), findsNothing);
+      expect(find.text('disk_manual'), findsNothing);
+      expect(find.text('disk_free_space_method'), findsNothing);
+      expect(runner.wasCommandCalled('nmcli'), isFalse);
     });
 
     test('navigation follows the shortened wizard and stops at Install', () {
@@ -152,24 +212,22 @@ void main() {
       expect(mexicoState.selectedKeyboard, 'la-latin1');
     });
 
-    test('standart akisa donunce gelismis bolumleme secimi tasinmaz', () {
-      state.updateInstallType('advanced');
-      state.updatePartitionMethod('free_space');
+    test('interactive partition updates retain standard-path restrictions', () {
       state.updateFreeSpaceSelection({
         'startSector': 2048,
         'endSector': 4096,
         'sizeBytes': 1024,
       });
+      state.updatePartitionMethod('free_space');
 
-      state.updateInstallType('standard');
-
-      expect(state.installType, 'standard');
       expect(state.partitionMethod, 'full');
       expect(state.selectedFreeSpace, isEmpty);
 
       state.updatePartitionMethod('manual');
-
       expect(state.partitionMethod, 'full');
+
+      state.updatePartitionMethod('alongside');
+      expect(state.partitionMethod, 'alongside');
     });
   });
 }
