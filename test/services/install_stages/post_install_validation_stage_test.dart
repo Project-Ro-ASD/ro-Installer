@@ -41,15 +41,6 @@ void main() {
       ], stdout: jsonEncode(installMetadata()));
     }
 
-    void addNoFedoraKernelResponse(FakeCommandRunner fake, {int exitCode = 0}) {
-      fake.addResponse('chroot', [
-        '/mnt',
-        'sh',
-        '-c',
-        postInstallNoFedoraKernelValidationScript,
-      ], exitCode: exitCode);
-    }
-
     void addBrandingResponse(FakeCommandRunner fake, {int exitCode = 0}) {
       fake.addResponse('chroot', [
         '/mnt',
@@ -136,15 +127,6 @@ void main() {
       ]);
     }
 
-    void addStableKernelResponse(FakeCommandRunner fake, {int exitCode = 0}) {
-      fake.addResponse('chroot', [
-        '/mnt',
-        'sh',
-        '-c',
-        postInstallStableKernelValidationScript,
-      ], exitCode: exitCode);
-    }
-
     void addBootloaderPackageResponse(
       FakeCommandRunner fake, {
       int exitCode = 0,
@@ -165,18 +147,6 @@ void main() {
         'sh',
         '-c',
         postInstallKernelImageValidationScript,
-      ], exitCode: exitCode);
-    }
-
-    void addExperimentalKernelResponse(
-      FakeCommandRunner fake, {
-      int exitCode = 0,
-    }) {
-      fake.addResponse('chroot', [
-        '/mnt',
-        'sh',
-        '-c',
-        postInstallExperimentalKernelValidationScript,
       ], exitCode: exitCode);
     }
 
@@ -312,8 +282,7 @@ void main() {
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
       ]);
-      addNoFedoraKernelResponse(fake);
-      addStableKernelResponse(fake);
+
       addRoRepoResponses(fake);
       addRoDesktopAppsResponses(fake);
       addRoThemeResponses(fake);
@@ -359,6 +328,15 @@ void main() {
       final result = await stage.execute(ctx);
 
       expect(result.success, true);
+      expect(
+        fake.commandLog.any(
+          (c) =>
+              c.args.join(' ').contains('rpm -qa') ||
+              c.args.join(' ').contains(r'rpm -q "$pkg"'),
+        ),
+        false,
+      );
+
       expect(
         fake.commandLog.any(
           (c) =>
@@ -410,8 +388,7 @@ void main() {
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
       ]);
-      addNoFedoraKernelResponse(fake);
-      addStableKernelResponse(fake);
+
       addRoRepoResponses(fake);
       addRoDesktopAppsResponses(fake);
       addRoThemeResponses(fake);
@@ -464,8 +441,7 @@ void main() {
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
       ]);
-      addNoFedoraKernelResponse(fake);
-      addStableKernelResponse(fake);
+
       addRoRepoResponses(fake);
       addRoDesktopAppsResponses(fake);
       addRoThemeResponses(fake);
@@ -518,8 +494,7 @@ void main() {
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
       ]);
-      addNoFedoraKernelResponse(fake);
-      addStableKernelResponse(fake);
+
       addRoRepoResponses(fake);
       addRoDesktopAppsResponses(fake);
       addRoThemeResponses(fake);
@@ -551,8 +526,7 @@ void main() {
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
       ]);
-      addNoFedoraKernelResponse(fake);
-      addStableKernelResponse(fake);
+
       addRoRepoResponses(fake);
       addRoDesktopAppsResponses(fake);
       addRoThemeResponses(fake);
@@ -585,140 +559,6 @@ void main() {
       expect(result.message, contains('Canlı oturum polkit kuralı'));
     });
 
-    test('Fedora stock kernel kalırsa stage düşer', () async {
-      final fake = FakeCommandRunner(defaultSuccess: false);
-      fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
-      fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-      addHandoffResponses(fake);
-      addBrandingResponse(fake);
-      fake.addResponse('sh', [
-        '-c',
-        'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
-      ]);
-      addNoFedoraKernelResponse(fake, exitCode: 1);
-
-      final ctx = makeContext({
-        'fileSystem': 'btrfs',
-        'partitionMethod': 'full',
-      }, fake);
-
-      final stage = const PostInstallValidationStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, false);
-      expect(
-        result.message,
-        'Fedora stock kernel paketleri hedef sistemde kalmış görünüyor.',
-      );
-    });
-
-    test(
-      'experimental secildiyse experimental kernel binary paketleri dogrulanir',
-      () async {
-        final fake = FakeCommandRunner(defaultSuccess: false);
-        fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
-        fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-        addHandoffResponses(fake);
-        addBrandingResponse(fake);
-        fake.addResponse('sh', [
-          '-c',
-          'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
-        ]);
-        addNoFedoraKernelResponse(fake);
-        addStableKernelResponse(fake);
-        addExperimentalKernelResponse(fake);
-        addRoRepoResponses(fake);
-        addRoDesktopAppsResponses(fake);
-        addRoThemeResponses(fake);
-        addInstallerRemovalResponses(fake);
-        addLiveUserCleanupResponses(fake);
-        addPlasmaLauncherResponse(fake);
-        addBootloaderPackageResponse(fake);
-        addKernelImageResponse(fake);
-        fake.addResponse('sh', [
-          '-c',
-          'ls /mnt/boot/initramfs-*.img >/dev/null 2>&1',
-        ]);
-        fake.addResponse('test', [
-          '-f',
-          '/mnt/boot/efi/EFI/fedora/shimx64.efi',
-        ]);
-        fake.addResponse('test', [
-          '-f',
-          '/mnt/boot/efi/EFI/fedora/grubx64.efi',
-        ]);
-        fake.addResponse('test', ['-f', '/mnt/boot/efi/EFI/fedora/grub.cfg']);
-        fake.addResponse('sh', [
-          '-c',
-          r'grep -q "configfile \$prefix/grub.cfg" /mnt/boot/efi/EFI/fedora/grub.cfg',
-        ]);
-        fake.addResponse('sh', [
-          '-c',
-          'ls /mnt/boot/efi/EFI/fedora/* >/dev/null 2>&1',
-        ]);
-        fake.addResponse('findmnt', [
-          '--verify',
-          '--tab-file',
-          '/mnt/etc/fstab',
-        ]);
-        addBootReferenceResponses(fake);
-        fake.addResponse('sh', [
-          '-c',
-          'if grep -R -E "rd.live.image|inst.stage2|CDLABEL|root=live:" /mnt/etc/kernel/cmdline /mnt/boot/loader/entries >/dev/null 2>&1; then exit 1; else exit 0; fi',
-        ]);
-        addNoGpuDebugArgResponse(fake);
-        fake.addResponse('sh', [
-          '-c',
-          'grep -q "rootflags=subvol=root" /mnt/etc/kernel/cmdline',
-        ]);
-        addStandardStorageResponses(fake);
-
-        final ctx = makeContext({
-          'fileSystem': 'btrfs',
-          'partitionMethod': 'full',
-          'selectedKernelChannels': ['stable', 'experimental'],
-        }, fake);
-
-        final stage = const PostInstallValidationStage();
-        final result = await stage.execute(ctx);
-
-        expect(result.success, true);
-      },
-    );
-
-    test(
-      'experimental secildiyse experimental kernel binary eksikliginde stage duser',
-      () async {
-        final fake = FakeCommandRunner(defaultSuccess: false);
-        fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
-        fake.addResponse('test', ['-f', '/mnt/etc/kernel/cmdline']);
-        addHandoffResponses(fake);
-        addBrandingResponse(fake);
-        fake.addResponse('sh', [
-          '-c',
-          'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
-        ]);
-        addNoFedoraKernelResponse(fake);
-        addStableKernelResponse(fake);
-        addExperimentalKernelResponse(fake, exitCode: 1);
-
-        final ctx = makeContext({
-          'fileSystem': 'btrfs',
-          'partitionMethod': 'full',
-          'selectedKernelChannels': ['stable', 'experimental'],
-        }, fake);
-
-        final stage = const PostInstallValidationStage();
-        final result = await stage.execute(ctx);
-
-        expect(result.success, false);
-        expect(
-          result.message,
-          'Experimental kernel binary paketleri hedef sistemde doğrulanamadı.',
-        );
-      },
-    );
-
     test('bootloader paketleri doğrulanamazsa stage düşer', () async {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse('test', ['-f', '/mnt/etc/fstab']);
@@ -729,8 +569,7 @@ void main() {
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
       ]);
-      addNoFedoraKernelResponse(fake);
-      addStableKernelResponse(fake);
+
       addRoRepoResponses(fake);
       addRoDesktopAppsResponses(fake);
       addRoThemeResponses(fake);
@@ -764,8 +603,7 @@ void main() {
         '-c',
         'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
       ]);
-      addNoFedoraKernelResponse(fake);
-      addStableKernelResponse(fake);
+
       addRoRepoResponses(fake);
       addRoDesktopAppsResponses(fake, exitCode: 1);
 
