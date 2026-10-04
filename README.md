@@ -112,6 +112,49 @@ harness requires `RO_INSTALLER_TEST_ISO`. Missing or unreadable input stops
 before building the Installer or launching QEMU. No repository-local ISO is
 selected automatically.
 
+The automated install harness accepts these `QEMU_DISPLAY_MODE` values:
+
+| Mode | Use |
+| --- | --- |
+| `headless` (default) | CI / unattended, no display window |
+| `gui` | Native QEMU display |
+| `spice` | Recommended local interactive mode with clipboard |
+
+```bash
+RO_INSTALLER_TEST_ISO=/absolute/path/to/Ro-ASD-44-integration-0001-x86_64.iso \
+QEMU_DISPLAY_MODE=spice \
+./test_qemu_vm.sh auto
+```
+
+Host requirements are `qemu-system-x86_64`, `qemu-img`, and OVMF firmware
+(Fedora packages: `qemu-system-x86`, `qemu-img`, `edk2-ovmf`). Only `spice`
+requires a SPICE-enabled QEMU build and `remote-viewer` (`virt-viewer`, version
+8.0 or newer for UNIX socket connection files). Preflight checks the viewer and
+QEMU UNIX socket capability before building or starting the installation.
+
+SPICE uses `$RUN_DIR/spice.sock` in a private per-run directory, with no TCP
+listener, password, or credentials. QEMU runs with `-display none` and the
+standard `com.redhat.spice.0` virtio-serial agent channel. The harness waits up
+to 10 seconds for the socket, then launches `remote-viewer "$RUN_DIR/spice.vv"`.
+Viewer output is retained in `$RUN_DIR/remote-viewer.log`. Closing the viewer
+leaves QEMU and the automated test running; cleanup terminates both processes
+best-effort and retains the run directory and logs after failures. Manual mode
+also supports SPICE; its existing native-window behavior remains for other modes.
+
+Guest clipboard requires `spice-vdagent` running in the Compose-produced live
+image. It belongs to the live image environment, not Installer dependencies.
+The clipboard path is host desktop → remote-viewer → SPICE → virtio-serial
+vdagent channel → spice-vdagent in the live guest. QMP does not synchronize
+clipboard content, and no custom clipboard scripts or SSH are used.
+
+SPICE provides interactive viewing/input only. Automation remains external
+Compose ISO → UEFI boot → QMP boot menu interaction → QMP Ctrl+Alt+T → command
+injection → 9p mount → `test_qemu_guest_runner.sh` → Installer → reboot →
+`RO_INSTALLER_VM_BOOT_OK`. The serial smoke marker remains authoritative,
+independent of the viewer's exit status. Run the focused harness tests without
+booting QEMU with `python3 test/scripts/qemu_spice_test.py`; they also run in
+the normal Flutter test suite and stable gate.
+
 The install harness builds the current Flutter Linux release binary and exposes
 the current bundle and sanitized profile through a 9p host share. The live guest
 runs that Installer against a disposable VM disk, reboots, and the harness

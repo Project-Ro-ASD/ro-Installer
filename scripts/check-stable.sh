@@ -67,6 +67,9 @@ check_shell_syntax() {
 
 run_check "shell script syntax" check_shell_syntax
 
+run_check "QEMU SPICE harness tests (no VM boot)" \
+  python3 test/scripts/qemu_spice_test.py
+
 run_check "QMP helper python syntax" \
   python3 -m py_compile linux/qmp_send_keys.py
 
