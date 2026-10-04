@@ -1,104 +1,29 @@
+import 'prepared_kernel_artifacts.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
 
-const bootloaderKernelInstallScript = r'''
-set -e
-found=0
-preferred_kver=""
-preferred_image=""
-stable_module_versions="$(rpm -ql ro-kernel-stable-core ro-kernel-stable-modules 2>/dev/null | awk -F/ '
-  $2 == "lib" && $3 == "modules" && $4 != "" { print $4 }
-  $2 == "usr" && $3 == "lib" && $4 == "modules" && $5 != "" { print $5 }
-' | sort -u)"
-experimental_module_versions="$(rpm -ql ro-kernel-experimental-core ro-kernel-experimental-modules 2>/dev/null | awk -F/ '
-  $2 == "lib" && $3 == "modules" && $4 != "" { print $4 }
-  $2 == "usr" && $3 == "lib" && $4 == "modules" && $5 != "" { print $5 }
-' | sort -u)"
-ro_module_versions="$(printf '%s\n%s\n' "$stable_module_versions" "$experimental_module_versions" | awk 'NF' | sort -u)"
-is_ro_kernel() {
-  case "$1" in
-    *ro_stable*|*ro-stable*|*ro_experimental*|*ro-experimental*) return 0 ;;
-  esac
-  if [ -n "$ro_module_versions" ] && printf '%s\n' "$ro_module_versions" | grep -Fxq "$1"; then
-    return 0
-  fi
-  return 1
-}
-is_stable_kernel() {
-  case "$1" in
-    *ro_stable*|*ro-stable*) return 0 ;;
-  esac
-  if [ -n "$stable_module_versions" ] && printf '%s\n' "$stable_module_versions" | grep -Fxq "$1"; then
-    return 0
-  fi
-  return 1
-}
-for kver in $(find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V); do
-  kdir="/lib/modules/$kver"
-  image="/boot/vmlinuz-$kver"
-  if [ ! -f "$image" ]; then
-    image="$kdir/vmlinuz"
-  fi
-  if ! is_ro_kernel "$kver"; then
-    echo "Non-Ro kernel module directory found: $kver" >&2
-    exit 1
-  fi
-  if [ ! -f "$image" ]; then
-    echo "kernel image not found for $kver" >&2
-    exit 1
-  fi
+const bootloaderKernelInstallScript =
+    'set -e\n$preparedKernelDiscoveryScript'
+    r'''
+candidates="$(discover_prepared_kernels)"
+while IFS="$(printf '\t')" read -r kver image; do
+  echo "Preparing BLS entry for kernel: $kver"
   kernel-install add "$kver" "$image"
-  if is_stable_kernel "$kver"; then
-    preferred_kver="$kver"
-    preferred_image="$image"
-  elif [ -z "$preferred_image" ]; then
-    preferred_kver="$kver"
-    preferred_image="$image"
-  fi
-  found=1
-done
-[ "$found" -eq 1 ]
-if [ -z "$preferred_image" ]; then
-  echo "No Ro kernel found; refusing to generate a stock Fedora boot target" >&2
-  exit 1
-fi
-if [ -n "$preferred_image" ] && command -v grubby >/dev/null 2>&1; then
-  grubby --set-default "$preferred_image" || true
-  echo "preferred default kernel: $preferred_kver"
-fi
+done <<CANDIDATES
+$candidates
+CANDIDATES
 ''';
 
-const bootloaderDracutScript = r'''
-set -e
-found=0
-stable_module_versions="$(rpm -ql ro-kernel-stable-core ro-kernel-stable-modules 2>/dev/null | awk -F/ '
-  $2 == "lib" && $3 == "modules" && $4 != "" { print $4 }
-  $2 == "usr" && $3 == "lib" && $4 == "modules" && $5 != "" { print $5 }
-' | sort -u)"
-experimental_module_versions="$(rpm -ql ro-kernel-experimental-core ro-kernel-experimental-modules 2>/dev/null | awk -F/ '
-  $2 == "lib" && $3 == "modules" && $4 != "" { print $4 }
-  $2 == "usr" && $3 == "lib" && $4 == "modules" && $5 != "" { print $5 }
-' | sort -u)"
-ro_module_versions="$(printf '%s\n%s\n' "$stable_module_versions" "$experimental_module_versions" | awk 'NF' | sort -u)"
-is_ro_kernel() {
-  case "$1" in
-    *ro_stable*|*ro-stable*|*ro_experimental*|*ro-experimental*) return 0 ;;
-  esac
-  if [ -n "$ro_module_versions" ] && printf '%s\n' "$ro_module_versions" | grep -Fxq "$1"; then
-    return 0
-  fi
-  return 1
-}
-for kver in $(find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V); do
-  if ! is_ro_kernel "$kver"; then
-    echo "Skipping non-Ro kernel initramfs generation: $kver" >&2
-    continue
-  fi
-  echo "Generating initramfs for Ro kernel: $kver"
+const bootloaderDracutScript =
+    'set -e\n$preparedKernelDiscoveryScript'
+    r'''
+candidates="$(discover_prepared_kernels)"
+while IFS="$(printf '\t')" read -r kver image; do
+  echo "Generating initramfs for kernel: $kver"
   dracut -f "/boot/initramfs-$kver.img" "$kver"
-  found=1
-done
-[ "$found" -eq 1 ]
+done <<CANDIDATES
+$candidates
+CANDIDATES
 ''';
 
 /// AŞAMA 7: Bootloader (Önyükleyici Kurulumu)
@@ -118,6 +43,38 @@ class BootloaderStage {
   const BootloaderStage();
 
   Future<StageResult> execute(StageContext ctx) async {
+    if ((ctx.state['partitionMethod'] ?? 'full') != 'full' ||
+        (ctx.state['fileSystem'] ?? 'btrfs') != 'btrfs') {
+      return StageResult.fail(
+        'Bootloader requires the standard full/Btrfs layout.',
+      );
+    }
+    if (!ctx.isMock) {
+      final rootMount = await ctx.commandRunner.run('findmnt', [
+        '-rn',
+        '-o',
+        'FSTYPE,FSROOT',
+        '--mountpoint',
+        '/mnt',
+      ]);
+      final separateBoot = await ctx.commandRunner.run('findmnt', [
+        '-rn',
+        '--mountpoint',
+        '/mnt/boot',
+      ]);
+      final rootFields = rootMount.stdout.trim().split(RegExp(r'\s+'));
+      if (!rootMount.started ||
+          rootMount.exitCode != 0 ||
+          (rootFields.length != 2 ||
+              rootFields[0] != 'btrfs' ||
+              rootFields[1] != '/root') ||
+          !separateBoot.started ||
+          separateBoot.exitCode != 1) {
+        return StageResult.fail(
+          'Bootloader requires root subvolume root and no separate /boot mount.',
+        );
+      }
+    }
     ctx.log('════════════════════════════════════════════');
     ctx.log('[AŞAMA 7] Bootloader Kurulumu Başlatılıyor');
     ctx.log('════════════════════════════════════════════');
@@ -135,7 +92,9 @@ class BootloaderStage {
       'SOURCE',
       '/mnt/boot/efi',
     ]);
-    if (efiCheckResult.exitCode != 0 || efiCheckResult.stdout.trim().isEmpty) {
+    if (!efiCheckResult.started ||
+        efiCheckResult.exitCode != 0 ||
+        efiCheckResult.stdout.trim().isEmpty) {
       if (!ctx.isMock) {
         ctx.log('HATA: /mnt/boot/efi bağlı değil! Bootloader kurulamaz.');
         return StageResult.fail('EFI bölümü /mnt/boot/efi\'ye bağlı değil.');
@@ -156,39 +115,14 @@ class BootloaderStage {
       '/mnt',
     ]);
     final rootUuid = uuidResult.stdout.trim();
-    if (rootUuid.isEmpty && !ctx.isMock) {
+    if ((!uuidResult.started || uuidResult.exitCode != 0 || rootUuid.isEmpty) &&
+        !ctx.isMock) {
       return StageResult.fail('Root bölümü UUID tespiti başarısız.');
     }
     final cmdlineUuid = ctx.isMock ? '1234-abcd' : rootUuid;
-    final rootFs = (ctx.state['fileSystem'] ?? 'btrfs').toString();
-    if (rootFs != 'btrfs') {
-      return StageResult.fail(
-        'Ro-ASD boot zinciri yalnızca Btrfs root ile desteklenir: $rootFs',
-      );
-    }
-    final needsBtrfsRootflags = rootFs == 'btrfs';
-    final rootSubvolume = (ctx.state['partitionMethod'] ?? 'full') == 'full'
-        ? 'root'
-        : '@';
-    final rootFlags = needsBtrfsRootflags
-        ? ' rootflags=subvol=$rootSubvolume'
-        : '';
-    final swapDevice = _resolveSwapDevice(ctx.state);
-    final resumeUuid = swapDevice == null
-        ? null
-        : await _lookupDeviceUuid(ctx, swapDevice);
-    if (swapDevice != null && resumeUuid == null && !ctx.isMock) {
-      return StageResult.fail(
-        'Hibernate resume için SWAP UUID tespit edilemedi: $swapDevice',
-      );
-    }
-    final resumeArg = resumeUuid == null ? '' : ' resume=UUID=$resumeUuid';
-    final grubCmdline = resumeUuid == null
-        ? 'rhgb quiet'
-        : 'resume=UUID=$resumeUuid rhgb quiet';
     final cmdlineWrite = await _requireCommand(ctx, 'sh', [
       '-c',
-      'echo "root=UUID=$cmdlineUuid ro$rootFlags$resumeArg rhgb quiet" > /mnt/etc/kernel/cmdline',
+      'echo "root=UUID=$cmdlineUuid ro rootflags=subvol=root rhgb quiet" > /mnt/etc/kernel/cmdline',
     ], '/etc/kernel/cmdline yazılamadı.');
     if (cmdlineWrite != null) return cmdlineWrite;
 
@@ -209,7 +143,7 @@ GRUB_DISTRIBUTOR="\$(sed 's, release .*\$,,g' /etc/system-release)"
 GRUB_DEFAULT=saved
 GRUB_DISABLE_SUBMENU=true
 GRUB_TERMINAL_OUTPUT="console"
-GRUB_CMDLINE_LINUX="$grubCmdline"
+GRUB_CMDLINE_LINUX="rhgb quiet"
 GRUB_DISABLE_RECOVERY="true"
 GRUB_ENABLE_BLSCFG=true
 GRUB_DISABLE_OS_PROBER=false
@@ -241,9 +175,7 @@ EOF
       'Bootloader girişleri oluşturuluyor (BLS)...',
     );
 
-    // Yüklü kernel sürümlerini bul ve her biri için BLS .conf dosyası oluştur.
-    // Ro kernel paketleri /boot/vmlinuz-$kver üretir; bazı Fedora akışlarında
-    // /lib/modules/$kver/vmlinuz da bulunabilir.
+    // Prepare every complete kernel supplied by Compose without selecting a channel.
     final kernelInstallResult = await _requireCommand(ctx, 'chroot', [
       '/mnt',
       'sh',
@@ -271,51 +203,14 @@ EOF
     ], 'grubx64.efi ESP üzerinde bulunamadı.');
     if (failure != null) return failure;
 
-    final rootSourceResult = await ctx.commandRunner.run('findmnt', [
-      '-rn',
-      '-o',
-      'SOURCE',
-      '/mnt',
-    ]);
-    final bootSourceResult = await ctx.commandRunner.run('findmnt', [
-      '-rn',
-      '-o',
-      'SOURCE',
-      '/mnt/boot',
-    ]);
-    final bootUuidResult = await ctx.commandRunner.run('findmnt', [
-      '-rn',
-      '-o',
-      'UUID',
-      '/mnt/boot',
-    ]);
-
-    final rootSource = rootSourceResult.stdout.trim();
-    final bootSource = bootSourceResult.stdout.trim();
-    final bootUuid = bootUuidResult.stdout.trim();
-    final hasSeparateBoot =
-        bootSourceResult.exitCode == 0 &&
-        bootSource.isNotEmpty &&
-        bootSource != rootSource;
-
-    if (hasSeparateBoot && bootUuid.isEmpty && !ctx.isMock) {
-      return StageResult.fail('/boot için GRUB prefix UUID tespiti başarısız.');
-    }
-
-    final usesManagedBtrfsSubvolume = !hasSeparateBoot && rootFs == 'btrfs';
-    final prefixPath = hasSeparateBoot
-        ? '/grub2'
-        : (usesManagedBtrfsSubvolume ? '/@/boot/grub2' : '/boot/grub2');
-    final prefixUuid = ctx.isMock
-        ? '5678-efgh'
-        : (hasSeparateBoot ? bootUuid : rootUuid);
+    final prefixUuid = cmdlineUuid;
 
     failure = await _requireCommand(ctx, 'sh', [
       '-c',
       '''
 cat > /mnt/boot/efi/EFI/fedora/grub.cfg << 'EOF'
 search --no-floppy --fs-uuid --set=dev $prefixUuid
-set prefix=(\$dev)$prefixPath
+set prefix=(\$dev)/root/boot/grub2
 
 export prefix
 configfile \$prefix/grub.cfg
@@ -416,53 +311,6 @@ EOF
       return _EfiPartition(classicMatch.group(1)!, classicMatch.group(2)!);
     }
 
-    return null;
-  }
-
-  String? _resolveSwapDevice(Map<String, dynamic> state) {
-    final partitionMethod = (state['partitionMethod'] ?? 'full').toString();
-    if (partitionMethod == 'full') return null;
-    final resolved = (state['_resolvedSwapPart'] ?? '').toString();
-    if (resolved.isNotEmpty) return resolved;
-
-    if (partitionMethod == 'manual') {
-      final manualPartitions =
-          state['manualPartitions'] as List<dynamic>? ?? const [];
-      for (final part in manualPartitions) {
-        if (part is Map<String, dynamic> &&
-            part['isFreeSpace'] != true &&
-            part['mount'] == '[SWAP]') {
-          final name = (part['name'] ?? '').toString();
-          if (name.isNotEmpty) {
-            return name;
-          }
-        }
-      }
-    }
-
-    if (partitionMethod == 'free_space') {
-      return null;
-    }
-
-    return null;
-  }
-
-  Future<String?> _lookupDeviceUuid(StageContext ctx, String device) async {
-    if (ctx.isMock) {
-      return 'mock-swap-uuid';
-    }
-
-    final result = await ctx.commandRunner.run('blkid', [
-      '-s',
-      'UUID',
-      '-o',
-      'value',
-      device,
-    ]);
-    final uuid = result.stdout.trim();
-    if (result.exitCode == 0 && uuid.isNotEmpty) {
-      return uuid;
-    }
     return null;
   }
 }

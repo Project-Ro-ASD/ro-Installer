@@ -1,35 +1,9 @@
 import 'dart:convert';
 
 import '../../models/installer_handoff.dart';
+import 'prepared_kernel_artifacts.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
-
-const postInstallNoFedoraKernelValidationScript = r'''
-if rpm -qa | grep -Eq '^(kernel|kernel-core|kernel-modules|kernel-modules-core|kernel-modules-extra|kernel-devel|kernel-devel-matched|kernel-debug|kernel-debug-core|kernel-debug-modules|kernel-debug-modules-core|kernel-debug-modules-extra|kernel-debug-devel|kernel-uki|kernel-uki-core|kernel-uki-modules|kernel-uki-modules-core|kernel-uki-modules-extra)-[0-9]'; then
-  rpm -qa | grep -E '^(kernel|kernel-core|kernel-modules|kernel-modules-core|kernel-modules-extra|kernel-devel|kernel-devel-matched|kernel-debug|kernel-debug-core|kernel-debug-modules|kernel-debug-modules-core|kernel-debug-modules-extra|kernel-debug-devel|kernel-uki|kernel-uki-core|kernel-uki-modules|kernel-uki-modules-core|kernel-uki-modules-extra)-[0-9]' >&2 || true
-  exit 1
-fi
-''';
-
-const postInstallStableKernelValidationScript = r'''
-for pkg in \
-  ro-kernel-stable \
-  ro-kernel-stable-core \
-  ro-kernel-stable-modules \
-  ro-kernel-stable-devel; do
-  rpm -q "$pkg" >/dev/null 2>&1 || rpm -qa | grep -Eq "^${pkg}-" || exit 1
-done
-''';
-
-const postInstallExperimentalKernelValidationScript = r'''
-for pkg in \
-  ro-kernel-experimental \
-  ro-kernel-experimental-core \
-  ro-kernel-experimental-modules \
-  ro-kernel-experimental-devel; do
-  rpm -q "$pkg" >/dev/null 2>&1 || rpm -qa | grep -Eq "^${pkg}-" || exit 1
-done
-''';
 
 const postInstallRoRepoValidationScript = r'''
 set -e
@@ -108,15 +82,15 @@ fi
 validate_executable_runtime "$ro_control_bin"
 ''';
 
-const postInstallKernelImageValidationScript = r'''
-for kdir in /lib/modules/*; do
-  [ -d "$kdir" ] || continue
-  kver="${kdir##*/}"
-  if [ -f "/boot/vmlinuz-$kver" ] || [ -f "$kdir/vmlinuz" ]; then
-    exit 0
-  fi
-done
-exit 1
+const postInstallKernelImageValidationScript =
+    'set -e\n$preparedKernelDiscoveryScript'
+    r'''
+candidates="$(discover_prepared_kernels)"
+while IFS="$(printf '\t')" read -r kver image; do
+  test -s "/boot/initramfs-$kver.img"
+done <<CANDIDATES
+$candidates
+CANDIDATES
 ''';
 
 const postInstallNoLiveUserSddmValidationScript = r'''
@@ -278,35 +252,6 @@ class PostInstallValidationStage {
       'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
     ], 'BLS giriş dosyaları bulunamadı.');
     if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'chroot',
-      ['/mnt', 'sh', '-c', postInstallNoFedoraKernelValidationScript],
-      'Fedora stock kernel paketleri hedef sistemde kalmış görünüyor.',
-    );
-    if (failure != null) return failure;
-
-    final selectedKernelChannels = _selectedKernelChannels(ctx.state);
-    if (selectedKernelChannels.contains('stable')) {
-      failure = await _requireCommand(ctx, 'chroot', [
-        '/mnt',
-        'sh',
-        '-c',
-        postInstallStableKernelValidationScript,
-      ], 'Stable Ro kernel paketleri hedef sistemde doğrulanamadı.');
-      if (failure != null) return failure;
-    }
-
-    if (selectedKernelChannels.contains('experimental')) {
-      failure = await _requireCommand(
-        ctx,
-        'chroot',
-        ['/mnt', 'sh', '-c', postInstallExperimentalKernelValidationScript],
-        'Experimental kernel binary paketleri hedef sistemde doğrulanamadı.',
-      );
-      if (failure != null) return failure;
-    }
 
     failure = await _requireCommand(
       ctx,
@@ -750,34 +695,4 @@ bool _installationShouldHaveSwap(Map<String, dynamic> state) {
   }
 
   return false;
-}
-
-Set<String> _selectedKernelChannels(Map<String, dynamic> state) {
-  final raw = state['selectedKernelChannels'];
-  if (raw is Iterable) {
-    final channels = raw
-        .map((entry) => entry.toString().trim().toLowerCase())
-        .where((entry) => entry.isNotEmpty)
-        .toSet();
-    return channels.isEmpty ? {'stable'} : channels;
-  }
-
-  if (raw is String && raw.trim().isNotEmpty) {
-    final channels = raw
-        .split(RegExp(r'[, ]+'))
-        .map((entry) => entry.trim().toLowerCase())
-        .where((entry) => entry.isNotEmpty)
-        .toSet();
-    return channels.isEmpty ? {'stable'} : channels;
-  }
-
-  final legacyKernel = (state['kernel'] ?? state['kernelType'] ?? '')
-      .toString()
-      .trim()
-      .toLowerCase();
-  if (legacyKernel == 'experimental') {
-    return {'stable', 'experimental'};
-  }
-
-  return {'stable'};
 }
