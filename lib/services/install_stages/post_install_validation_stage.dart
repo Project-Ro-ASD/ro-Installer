@@ -5,83 +5,6 @@ import 'prepared_kernel_artifacts.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
 
-const postInstallRoRepoValidationScript = r'''
-set -e
-test -f /etc/yum.repos.d/ro-repo.repo
-test -f /etc/yum.repos.d/ro-repo-noarch.repo
-test -f /etc/yum.repos.d/ro-kernel-stable-copr.repo
-test -f /etc/yum.repos.d/ro-kernel-experimental-copr.repo
-grep -q 'https://project-ro-asd.github.io/Ro-Repo/$basearch/' /etc/yum.repos.d/ro-repo.repo
-grep -q 'https://project-ro-asd.github.io/Ro-Repo/noarch/' /etc/yum.repos.d/ro-repo-noarch.repo
-grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
-grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo.repo
-grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo.repo
-grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
-grep -q '^repo_gpgcheck=1$' /etc/yum.repos.d/ro-repo-noarch.repo
-grep -q '^gpgkey=https://project-ro-asd.github.io/Ro-Repo/RPM-GPG-KEY-ro-asd$' /etc/yum.repos.d/ro-repo-noarch.repo
-grep -q 'hynkzz/ro-kernel-stable' /etc/yum.repos.d/ro-kernel-stable-copr.repo
-grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
-grep -q '^repo_gpgcheck=0$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
-grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-kernel-stable/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-stable-copr.repo
-grep -q 'hynkzz/ro-Kernel-Experimental' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
-grep -q '^gpgcheck=1$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
-grep -q '^repo_gpgcheck=0$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
-grep -q '^gpgkey=https://download.copr.fedorainfracloud.org/results/hynkzz/ro-Kernel-Experimental/pubkey.gpg$' /etc/yum.repos.d/ro-kernel-experimental-copr.repo
-''';
-
-const postInstallRoDesktopAppsValidationScript = r'''
-set -e
-validate_executable_runtime() {
-  binary="$1"
-  file_info=""
-  ldd_output=""
-
-  test -x "$binary"
-
-  if command -v file >/dev/null 2>&1; then
-    file_info="$(file -L "$binary")"
-    echo "[INFO] $file_info"
-    case "$file_info" in
-      *"ELF "*"dynamically linked"*)
-        ldd -r "$binary"
-        ;;
-      *"ELF "*"statically linked"*|*"script"*|*"text executable"*)
-        echo "[INFO] $binary is not a dynamic ELF executable; ldd -r is not applicable."
-        ;;
-      *)
-        echo "[ERROR] Unsupported executable type for $binary: $file_info" >&2
-        return 1
-        ;;
-    esac
-    return 0
-  fi
-
-  if ldd_output="$(ldd -r "$binary" 2>&1)"; then
-    printf '%s\n' "$ldd_output"
-    return 0
-  fi
-
-  printf '%s\n' "$ldd_output" >&2
-  case "$ldd_output" in
-    *"not a dynamic executable"*)
-      echo "[INFO] $binary is not a dynamic ELF executable; ldd -r is not applicable."
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-rpm -q ro-assist ro-control
-ro_assist_bin="$(command -v ro-assist)"
-ro_control_bin="$(command -v ro-control)"
-validate_executable_runtime "$ro_assist_bin"
-if [ -x /usr/libexec/ro-assist/ro-assist ]; then
-  validate_executable_runtime /usr/libexec/ro-assist/ro-assist
-fi
-validate_executable_runtime "$ro_control_bin"
-''';
-
 const postInstallKernelImageValidationScript =
     'set -e\n$preparedKernelDiscoveryScript'
     r'''
@@ -94,25 +17,13 @@ CANDIDATES
 ''';
 
 const postInstallNoLiveUserSddmValidationScript = r'''
-if grep -R -I -E '(^User=liveuser$|liveuser)' \
-  /mnt/etc/sddm.conf \
-  /mnt/etc/sddm.conf.d \
-  /mnt/var/lib/sddm \
-  /mnt/var/lib/AccountsService 2>/dev/null; then
-  exit 1
-fi
-''';
-
-const postInstallBrandingValidationScript = r'''
 set -e
-test -f /usr/lib/os-release
-grep -q '^NAME="Ro-ASD"$' /usr/lib/os-release
-grep -q '^PRETTY_NAME="Ro-ASD"$' /usr/lib/os-release
-grep -q '^VARIANT_ID=roasd$' /usr/lib/os-release
-for release_file in /etc/fedora-release /etc/system-release /etc/issue /etc/issue.net; do
-  [ -e "$release_file" ] || continue
-  grep -q '^Ro-ASD' "$release_file"
-  ! grep -qi 'Fedora' "$release_file"
+for path in /mnt/etc/sddm.conf /mnt/etc/sddm.conf.d /mnt/var/lib/sddm /mnt/var/lib/AccountsService; do
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    status=0
+    grep -R -I -E '(^User=liveuser$|liveuser)' "$path" >/dev/null 2>&1 || status=$?
+    [ "$status" -eq 1 ]
+  fi
 done
 ''';
 
@@ -151,33 +62,73 @@ done < <(
 exit "$bad"
 ''';
 
-const postInstallSwapResumeValidationScript = r'''
-swap_uuid="$(awk '$3 == "swap" && $1 ~ /^UUID=/ { sub(/^UUID=/, "", $1); print $1; exit }' /mnt/etc/fstab)"
-test -n "$swap_uuid"
-grep -Eq "(^|[[:space:]])resume=UUID=${swap_uuid}([[:space:]]|$)" /mnt/etc/kernel/cmdline
-grep -R -E "^[[:space:]]*options[[:space:]].*resume=UUID=${swap_uuid}([[:space:]]|$)" /mnt/boot/loader/entries/*.conf >/dev/null
+const postInstallNoGpuDebugArgsValidationScript = r'''
+status=0
+grep -R -E '(^|[[:space:]])(nomodeset|ro\.live\.software_render=1|ro\.live\.session=[^[:space:]]*|nouveau\.config=[^[:space:]]*|nouveau\.modeset=0|i915\.modeset=0|xe\.modeset=0|rd\.driver\.blacklist=[^[:space:]]*(nouveau|i915|xe)|modprobe\.blacklist=[^[:space:]]*(nouveau|i915|xe)|blacklist=(nouveau|i915|xe))([[:space:]]|$)' /mnt/etc/kernel/cmdline /mnt/boot/loader/entries >/dev/null 2>&1 || status=$?
+[ "$status" -eq 1 ]
 ''';
 
-const postInstallNoGpuDebugArgsValidationScript = r'''
-if grep -R -E '(^|[[:space:]])(nomodeset|ro\.live\.software_render=1|ro\.live\.session=[^[:space:]]*|nouveau\.config=[^[:space:]]*|nouveau\.modeset=0|i915\.modeset=0|xe\.modeset=0|rd\.driver\.blacklist=[^[:space:]]*(nouveau|i915|xe)|modprobe\.blacklist=[^[:space:]]*(nouveau|i915|xe)|blacklist=(nouveau|i915|xe))([[:space:]]|$)' /mnt/etc/kernel/cmdline /mnt/boot/loader/entries >/dev/null 2>&1; then
-  exit 1
+/// IDs are checked without printing their contents. Absolute D-Bus links are
+/// interpreted in the target namespace, rather than followed on the live host.
+const postInstallMachineIdentityValidationScript = r'''
+set -e
+test -f /mnt/etc/machine-id
+test -r /mnt/etc/machine-id
+test ! -L /mnt/etc/machine-id
+[ "$(wc -c < /mnt/etc/machine-id)" -le 33 ]
+identity="$(cat /mnt/etc/machine-id)"
+[ "${#identity}" -eq 32 ]
+case "$identity" in
+  *[!0123456789abcdefABCDEF]*|00000000000000000000000000000000) exit 1 ;;
+esac
+if [ -r /etc/machine-id ]; then
+  live_identity="$(cat /etc/machine-id)"
+  [ "$(printf '%s' "$identity" | tr A-F a-f)" != "$(printf '%s' "$live_identity" | tr A-F a-f)" ]
 fi
+dbus=/mnt/var/lib/dbus/machine-id
+if [ -L "$dbus" ]; then
+  link="$(readlink "$dbus")"
+  [ "$link" = /etc/machine-id ] ||
+    [ "$(readlink -f "$dbus")" = /mnt/etc/machine-id ]
+else
+  test -f "$dbus"
+  test -r "$dbus"
+  cmp -s /mnt/etc/machine-id "$dbus"
+fi
+''';
+
+/// Status 1 alone is ambiguous: RPM database/tool failures must not pass.
+/// Enumerate the DB successfully and require the C-locale absence diagnostic.
+const postInstallInstallerRemovalValidationScript = r'''
+set -e
+export LC_ALL=C
+packages="$(rpm -qa --qf '%{NAME}\n')"
+status=0
+result="$(rpm -q ro-installer 2>&1)" || status=$?
+[ "$status" -eq 1 ]
+[ "$result" = "package ro-installer is not installed" ]
+if printf '%s\n' "$packages" | grep -Fxq ro-installer; then exit 1; fi
 ''';
 
 const postInstallStandardStorageValidationScript = r'''
 set -e
-root_uuid="$(findmnt -rn -o UUID --mountpoint /mnt)"
-test -n "$root_uuid"
+root_uuid="$1"
+efi_uuid="$2"
 while read -r subvol mountpoint; do
   target="/mnt$mountpoint"
   [ "$mountpoint" != / ] || target=/mnt
   actual="$(findmnt -rn -o FSTYPE,UUID,FSROOT --mountpoint "$target")"
-  [ "$actual" = "btrfs $root_uuid /$subvol" ]
+  set -- $actual
+  [ "$#" -eq 3 ]
+  [ "$1" = btrfs ] && [ "$2" = "$root_uuid" ] && [ "$3" = "/$subvol" ] || exit 1
   awk -v uuid="UUID=$root_uuid" -v point="$mountpoint" -v subvol="$subvol" '
-    $1 == uuid && $2 == point && $3 == "btrfs" {
-      n=split($4, opts, ","); for (i=1; i<=n; i++) if (opts[i] == "subvol=" subvol) found++
+    $2 == point {
+      rows++
+      if ($1 != uuid || $3 != "btrfs") exit 1
+      n=split($4, opts, ",")
+      for (i=1; i<=n; i++) if (opts[i] == "subvol=" subvol) found++
     }
-    END { exit found != 1 }
+    END { if (rows != 1 || found != 1) exit 1 }
   ' /mnt/etc/fstab
 done <<'LAYOUT'
 root /
@@ -186,38 +137,113 @@ var_log /var/log
 var_cache /var/cache
 var_tmp /var/tmp
 LAYOUT
-! awk '$3 == "swap" { found=1 } END { exit !found }' /mnt/etc/fstab || exit 1
-! findmnt -rn --mountpoint /mnt/boot >/dev/null || exit 1
-test -r /mnt/etc/kernel/cmdline
-grep -Eq '(^|[[:space:]])rootflags=subvol=root([[:space:]]|$)' /mnt/etc/kernel/cmdline
-! grep -E '(^|[[:space:]])resume=UUID=' /mnt/etc/kernel/cmdline || exit 1
-for entry in /mnt/boot/loader/entries/*.conf; do
-  test -r "$entry"
-  grep -Eq "^[[:space:]]*options[[:space:]].*root=UUID=${root_uuid}([[:space:]]|$)" "$entry"
-  grep -Eq '^[[:space:]]*options[[:space:]].*rootflags=subvol=root([[:space:]]|$)' "$entry"
-  ! grep -E '^[[:space:]]*options[[:space:]].*resume=UUID=' "$entry" || exit 1
-done
+actual="$(findmnt -rn -o FSTYPE,UUID --mountpoint /mnt/boot/efi)"
+set -- $actual
+[ "$#" -eq 2 ] && [ "$1" = vfat ] && [ "$2" = "$efi_uuid" ] || exit 1
+awk -v uuid="UUID=$efi_uuid" '
+  $2 == "/boot/efi" { rows++; if ($1 != uuid || $3 != "vfat") bad=1 }
+  $3 == "swap" || $2 == "/boot" { bad=1 }
+  END { exit bad || rows != 1 }
+' /mnt/etc/fstab
+status=0
+findmnt -rn --mountpoint /mnt/boot >/dev/null || status=$?
+[ "$status" -eq 1 ]
 ''';
 
-/// AŞAMA 8: Kurulum Sonrası Doğrulama
-///
-/// Kurulumun "tamamlandı" sayılabilmesi için hedef sistemde
-/// boot için kritik dosya ve girdileri doğrular:
-/// - /etc/fstab mevcut mu
-/// - /etc/kernel/cmdline mevcut mu
-/// - BLS girdileri mevcut mu
-/// - fstab sözdizimi doğrulanıyor mu
-/// - fstab, kernel cmdline ve BLS kök/EFI/resume UUID'leri tutarlı mı
-/// - Live ISO parametreleri hedef sisteme sızmış mı
-/// - Standard Btrfs root/home/var mount ve boot argümanları tutarlı mı
+/// Validate installed options everywhere, then match each prepared kernel to a
+/// BLS entry by version and actual referenced artifacts, independent of filename.
+const postInstallBlsValidationScript =
+    'set -e\n$preparedKernelDiscoveryScript'
+    r'''
+root_uuid="$1"
+validate_options() {
+  awk -v uuid="root=UUID=$root_uuid" '
+    {
+      for (i=1; i<=NF; i++) {
+        if ($i == uuid) root++
+        if ($i == "rootflags=subvol=root") subvol++
+        if ($i ~ /^root=/ && $i != uuid) bad=1
+        if ($i ~ /^rootflags=/ && $i != "rootflags=subvol=root") bad=1
+        if ($i ~ /^resume=/ || $i ~ /rd.live.image|inst.stage2|CDLABEL|root=live:/) bad=1
+      }
+    }
+    END { exit bad || root != 1 || subvol != 1 }
+  '
+}
+resolve_boot_path() {
+  case "$1" in /*) ;; *) return 1 ;; esac
+  case "$1" in */../*|*/..|*/./*) return 1 ;; esac
+  if [ -f "/boot$1" ] && [ -s "/boot$1" ]; then
+    printf '%s\n' "/boot$1"
+  elif [ -f "$1" ] && [ -s "$1" ]; then
+    printf '%s\n' "$1"
+  else
+    return 1
+  fi
+}
+test -r /etc/kernel/cmdline
+validate_options < /etc/kernel/cmdline
+for entry in /boot/loader/entries/*.conf; do
+  test -r "$entry"
+  options="$(awk '$1 == "options" { $1=""; print }' "$entry")"
+  printf '%s\n' "$options" | validate_options
+done
+candidates="$(discover_prepared_kernels)"
+while IFS="$(printf '\t')" read -r kver image; do
+  matched=0
+  for entry in /boot/loader/entries/*.conf; do
+    version="$(awk '$1 == "version" { print $2 }' "$entry")"
+    [ "$version" = "$kver" ] || continue
+    linux="$(awk '$1 == "linux" { print $2 }' "$entry")"
+    linux_file="$(resolve_boot_path "$linux")" || continue
+    cmp -s "$linux_file" "$image" || continue
+    initrd_matched=0
+    initrd_valid=1
+    for initrd in $(awk '$1 == "initrd" { for (i=2; i<=NF; i++) print $i }' "$entry"); do
+      initrd_file="$(resolve_boot_path "$initrd")" || { initrd_valid=0; break; }
+      if cmp -s "$initrd_file" "/boot/initramfs-$kver.img"; then initrd_matched=1; fi
+    done
+    if [ "$initrd_valid" -eq 1 ] && [ "$initrd_matched" -eq 1 ]; then matched=1; break; fi
+  done
+  if [ "$matched" -ne 1 ]; then
+    echo "No coherent BLS entry for prepared kernel: $kver" >&2
+    exit 1
+  fi
+done <<CANDIDATES
+$candidates
+CANDIDATES
+''';
+
+const postInstallGrubStubValidationScript = r'''
+set -e
+root_uuid="$1"
+stub=/mnt/boot/efi/EFI/fedora/grub.cfg
+test -r "$stub"
+awk -v search="search --no-floppy --fs-uuid --set=dev $root_uuid" '
+  $1 == "search" { searches++; if ($0 != search) bad=1 }
+  $1 == "set" && $2 ~ /^prefix=/ {
+    prefixes++; if ($0 != "set prefix=($dev)/root/boot/grub2") bad=1
+  }
+  $1 == "configfile" { redirects++; if ($0 != "configfile $prefix/grub.cfg") bad=1 }
+  END { exit bad || searches != 1 || prefixes != 1 || redirects != 1 }
+' "$stub"
+if grep -Fq '/@/boot/grub2' "$stub"; then exit 1; fi
+test -s /mnt/boot/grub2/grub.cfg
+''';
+
+/// Stage 8 verifies deployed storage, boot artifacts, cleanup, identity and
+/// firstboot handoff. It does not enforce Compose product composition policy.
 class PostInstallValidationStage {
   const PostInstallValidationStage();
 
   Future<StageResult> execute(StageContext ctx) async {
-    ctx.log('════════════════════════════════════════════');
-    ctx.log('[AŞAMA 8] Kurulum Sonrası Doğrulama Başlatılıyor');
-    ctx.log('════════════════════════════════════════════');
-
+    if ((ctx.state['partitionMethod'] ?? 'full') != 'full' ||
+        (ctx.state['fileSystem'] ?? 'btrfs') != 'btrfs') {
+      return StageResult.fail(
+        'Technical validation requires full/Btrfs storage.',
+      );
+    }
+    ctx.log('[AŞAMA 8] Teknik kurulum doğrulaması başlatılıyor.');
     ctx.progress(
       0.97,
       'stage_progress_post_validate_boot',
@@ -227,225 +253,62 @@ class PostInstallValidationStage {
     StageResult? failure = await _requireCommand(ctx, 'test', [
       '-f',
       '/mnt/etc/fstab',
-    ], '/mnt/etc/fstab bulunamadı.');
+    ], '/etc/fstab bulunamadı.');
     if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '-f',
-      '/mnt/etc/kernel/cmdline',
-    ], '/mnt/etc/kernel/cmdline bulunamadı.');
-    if (failure != null) return failure;
-
     failure = await _validateHandoff(ctx);
     if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      postInstallMachineIdentityValidationScript,
+    ], 'Hedef machine-id veya D-Bus kimliği geçersiz.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      postInstallInstallerRemovalValidationScript,
+    ], 'Installer RPM kaldırılması veya hedef RPM veritabanı doğrulanamadı.');
+    if (failure != null) return failure;
 
+    for (final path in [
+      '/usr/bin/ro-installer',
+      '/usr/bin/ro_installer',
+      '/usr/libexec/ro-installer-launcher.sh',
+      '/usr/share/polkit-1/actions/org.roasd.installer.policy',
+      '/etc/polkit-1/rules.d/49-ro-installer-live.rules',
+      '/etc/sudoers.d/ro-installer-live',
+    ]) {
+      failure = await _requireCommand(ctx, 'test', [
+        '!',
+        '-e',
+        '/mnt$path',
+      ], 'Installer/live dosyası hedefte kalmış: $path');
+      if (failure != null) return failure;
+      failure = await _requireCommand(ctx, 'test', [
+        '!',
+        '-L',
+        '/mnt$path',
+      ], 'Installer/live symlink hedefte kalmış: $path');
+      if (failure != null) return failure;
+    }
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      'status=0; getent passwd liveuser >/dev/null || status=\$?; [ "\$status" -eq 2 ]',
+    ], 'liveuser hesabı kalmış veya hesap veritabanı okunamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      postInstallNoLiveUserSddmValidationScript,
+    ], 'SDDM liveuser/autologin kalıntısı hedefe sızmış.');
+    if (failure != null) return failure;
     failure = await _requireCommand(ctx, 'chroot', [
       '/mnt',
       'bash',
       '-c',
-      postInstallBrandingValidationScript,
-    ], 'Ro-ASD sistem kimliği hedef sistemde doğrulanamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'ls /mnt/boot/loader/entries/*.conf >/dev/null 2>&1',
-    ], 'BLS giriş dosyaları bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'chroot',
-      ['/mnt', 'sh', '-c', postInstallRoRepoValidationScript],
-      'Ro repo ve kernel COPR repo dosyaları hedef sistemde doğrulanamadı.',
-    );
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'chroot',
-      ['/mnt', 'sh', '-c', postInstallRoDesktopAppsValidationScript],
-      'Ro uygulamaları hedef sistemde doğrulanamadı: ro-assist, ro-control.',
-    );
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'chroot', [
-      '/mnt',
-      'rpm',
-      '-q',
-      'ro-theme',
-    ], 'Ro tema paketi hedef sistemde doğrulanamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '-f',
-      '/mnt/usr/share/plasma/look-and-feel/org.ro.dark/metadata.json',
-    ], 'Ro dark global theme hedef sistemde bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '-f',
-      '/mnt/usr/share/color-schemes/RoDark.colors',
-    ], 'RoDark renk şeması hedef sistemde bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '-f',
-      '/mnt/usr/share/sddm/themes/Ro/Main.qml',
-    ], 'Ro SDDM teması hedef sistemde bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '-f',
-      '/mnt/usr/share/plymouth/themes/ro-theme/ro-theme.plymouth',
-    ], 'Ro Plymouth teması hedef sistemde bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -q "^LookAndFeelPackage=org.ro.dark\$" /mnt/etc/xdg/kdeglobals && grep -q "^ColorScheme=RoDark\$" /mnt/etc/xdg/kdeglobals',
-    ], 'Ro tema KDE varsayılanları hedef sistemde etkin değil.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -q "^name=RoDark\$" /mnt/etc/xdg/plasmarc',
-    ], 'RoDark Plasma style hedef sistemde varsayılan değil.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -q "^Theme=org.ro.dark\$" /mnt/etc/xdg/ksplashrc',
-    ], 'Ro dark splash teması hedef sistemde varsayılan değil.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '!',
-      '-e',
-      '/mnt/usr/bin/ro-installer',
-    ], 'ro-installer kurulu sistemde kalmış görünüyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '!',
-      '-e',
-      '/mnt/usr/bin/ro_installer',
-    ], 'ro_installer kurulu sistemde kalmış görünüyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '!',
-      '-e',
-      '/mnt/usr/libexec/ro-installer-launcher.sh',
-    ], 'ro-installer launcher kurulu sistemde kalmış görünüyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '!',
-      '-e',
-      '/mnt/usr/share/polkit-1/actions/org.roasd.installer.policy',
-    ], 'ro-installer polkit policy kurulu sistemde kalmış görünüyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '!',
-      '-e',
-      '/mnt/etc/polkit-1/rules.d/49-ro-installer-live.rules',
-    ], 'Canlı oturum polkit kuralı hedef sisteme sızmış görünüyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'test', [
-      '!',
-      '-e',
-      '/mnt/etc/sudoers.d/ro-installer-live',
-    ], 'Canlı oturum sudoers kuralı hedef sisteme sızmış görünüyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'chroot', [
-      '/mnt',
-      'sh',
-      '-c',
-      '! getent passwd liveuser >/dev/null 2>&1',
-    ], 'liveuser hesabı hedef sistemde kalmış görünüyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      postInstallNoLiveUserSddmValidationScript,
-    ], 'SDDM liveuser kalıntısı hedef sisteme sızmış görünüyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'chroot',
-      ['/mnt', 'bash', '-c', postInstallPlasmaLauncherValidationScript],
-      'Plasma panelinde eksik .desktop dosyasına işaret eden launcher kalmış görünüyor.',
-    );
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'chroot', [
-      '/mnt',
-      'rpm',
-      '-q',
-      'dracut',
-      'grub2-efi-x64',
-      'shim-x64',
-    ], 'Bootloader için gerekli paketler hedef sistemde doğrulanamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'chroot', [
-      '/mnt',
-      'sh',
-      '-c',
-      postInstallKernelImageValidationScript,
-    ], 'Kernel modül sürümüyle eşleşen kernel imajı bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'ls /mnt/boot/initramfs-*.img >/dev/null 2>&1',
-    ], 'Initramfs dosyası /mnt/boot altında bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'test',
-      ['-f', '/mnt/boot/efi/EFI/fedora/shimx64.efi'],
-      'EFI shim dosyası /mnt/boot/efi/EFI/fedora/shimx64.efi bulunamadı.',
-    );
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'test',
-      ['-f', '/mnt/boot/efi/EFI/fedora/grubx64.efi'],
-      'EFI GRUB binary dosyası /mnt/boot/efi/EFI/fedora/grubx64.efi bulunamadı.',
-    );
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'test',
-      ['-f', '/mnt/boot/efi/EFI/fedora/grub.cfg'],
-      'EFI GRUB stub dosyası /mnt/boot/efi/EFI/fedora/grub.cfg bulunamadı.',
-    );
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'sh',
-      [
-        '-c',
-        r'grep -q "configfile \$prefix/grub.cfg" /mnt/boot/efi/EFI/fedora/grub.cfg',
-      ],
-      'EFI GRUB stub dosyası /boot/grub2/grub.cfg yönlendirmesini içermiyor.',
-    );
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'ls /mnt/boot/efi/EFI/fedora/* >/dev/null 2>&1',
-    ], 'EFI boot dosyaları /mnt/boot/efi/EFI/fedora altında bulunamadı.');
+      postInstallPlasmaLauncherValidationScript,
+    ], 'Plasma launcher hedefi bulunamadı.');
     if (failure != null) return failure;
 
     failure = await _requireCommand(ctx, 'findmnt', [
@@ -454,67 +317,55 @@ class PostInstallValidationStage {
       '/mnt/etc/fstab',
     ], '/etc/fstab doğrulaması başarısız.');
     if (failure != null) return failure;
-
-    final rootFs = (ctx.state['fileSystem'] ?? 'btrfs').toString();
-    failure = await _validateBootReferences(ctx, rootFs);
+    final rootUuid = await _readUuid(ctx, '/mnt');
+    if (rootUuid == null) return StageResult.fail('Root UUID okunamadı.');
+    final efiUuid = await _readUuid(ctx, '/mnt/boot/efi');
+    if (efiUuid == null) return StageResult.fail('EFI UUID okunamadı.');
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      postInstallStandardStorageValidationScript,
+      'storage-validation',
+      rootUuid,
+      efiUuid,
+    ], 'Standart Btrfs mount/fstab veya ESP sözleşmesi tutarsız.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      postInstallKernelImageValidationScript,
+    ], 'Tam kernel adayı veya eşleşen initramfs bulunamadı.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'chroot', [
+      '/mnt',
+      'sh',
+      '-c',
+      postInstallBlsValidationScript,
+      'bls-validation',
+      rootUuid,
+    ], 'Kernel cmdline veya kernel başına BLS referansları tutarsız.');
+    if (failure != null) return failure;
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      postInstallNoGpuDebugArgsValidationScript,
+    ], 'Live/debug GPU boot argümanları hedefe sızmış.');
+    if (failure != null) return failure;
+    for (final binary in ['shimx64.efi', 'grubx64.efi']) {
+      failure = await _requireCommand(ctx, 'test', [
+        '-s',
+        '/mnt/boot/efi/EFI/fedora/$binary',
+      ], 'EFI boot binary bulunamadı veya boş: $binary');
+      if (failure != null) return failure;
+    }
+    failure = await _requireCommand(ctx, 'sh', [
+      '-c',
+      postInstallGrubStubValidationScript,
+      'grub-validation',
+      rootUuid,
+    ], 'GRUB stub UUID/prefix/yönlendirme veya ana grub.cfg tutarsız.');
     if (failure != null) return failure;
 
-    if (!await ctx.runCmd(
-      'sh',
-      [
-        '-c',
-        'if grep -R -E "rd.live.image|inst.stage2|CDLABEL|root=live:" /mnt/etc/kernel/cmdline /mnt/boot/loader/entries >/dev/null 2>&1; then exit 1; else exit 0; fi',
-      ],
-      ctx.log,
-      isMock: ctx.isMock,
-    )) {
-      return StageResult.fail(
-        'Live ISO boot parametreleri hedef sisteme sızmış görünüyor.',
-      );
-    }
-
-    failure = await _requireCommand(
-      ctx,
-      'sh',
-      ['-c', postInstallNoGpuDebugArgsValidationScript],
-      'Live/debug grafik boot parametreleri hedef sisteme sızmış görünüyor.',
-    );
-    if (failure != null) return failure;
-
-    if (rootFs == 'btrfs') {
-      final subvolume = (ctx.state['partitionMethod'] ?? 'full') == 'full'
-          ? 'root'
-          : '@';
-      failure = await _requireCommand(ctx, 'sh', [
-        '-c',
-        'grep -q "rootflags=subvol=$subvolume" /mnt/etc/kernel/cmdline',
-      ], 'BTRFS kurulumunda beklenen root subvolume boot argümanı eksik.');
-      if (failure != null) return failure;
-    }
-
-    if ((ctx.state['partitionMethod'] ?? 'full') == 'full') {
-      failure = await _requireCommand(ctx, 'sh', [
-        '-c',
-        postInstallStandardStorageValidationScript,
-      ], 'Standard Btrfs mount/fstab veya swap/resume sözleşmesi tutarsız.');
-      if (failure != null) return failure;
-    }
-
-    if (_installationShouldHaveSwap(ctx.state)) {
-      failure = await _requireCommand(ctx, 'sh', [
-        '-c',
-        'grep -Eq "[[:space:]]swap[[:space:]]" /mnt/etc/fstab',
-      ], 'Hibernate için SWAP fstab girdisi eksik.');
-      if (failure != null) return failure;
-
-      failure = await _requireCommand(ctx, 'sh', [
-        '-c',
-        postInstallSwapResumeValidationScript,
-      ], 'Hibernate için resume UUID, fstab SWAP girdisiyle eşleşmiyor.');
-      if (failure != null) return failure;
-    }
-
-    ctx.log('[AŞAMA 8] Kurulum sonrası doğrulama başarıyla tamamlandı.');
+    ctx.log('[AŞAMA 8] Teknik doğrulama tamamlandı.');
     return StageResult.ok(
       ctx.t(
         'stage_result_post_validation_done',
@@ -527,106 +378,29 @@ class PostInstallValidationStage {
     StageContext ctx,
     String cmd,
     List<String> args,
-    String errorMessage, {
-    List<int> allowedExitCodes = const [0],
-  }) async {
-    final ok = await ctx.runCmd(
-      cmd,
-      args,
-      ctx.log,
-      isMock: ctx.isMock,
-      allowedExitCodes: allowedExitCodes,
-    );
-    if (ok) {
-      return null;
-    }
-
+    String errorMessage,
+  ) async {
+    final ok = await ctx.runCmd(cmd, args, ctx.log, isMock: ctx.isMock);
+    if (ok) return null;
     ctx.log('HATA: $errorMessage');
     return StageResult.fail(errorMessage);
   }
 
-  Future<StageResult?> _validateBootReferences(
-    StageContext ctx,
-    String rootFs,
-  ) async {
-    final rootUuid = await _readFindmntValue(
-      ctx,
-      mountPoint: '/mnt',
-      field: 'UUID',
-      errorMessage: 'Root bölümü UUID değeri okunamadı.',
-    );
-    if (rootUuid == null) {
-      return StageResult.fail('Root bölümü UUID değeri okunamadı.');
-    }
-
-    var failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -Eq "^UUID=$rootUuid[[:space:]]+/[[:space:]]" /mnt/etc/fstab',
-    ], '/etc/fstab root bölüm UUID girdisini içermiyor.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'sh',
-      [
-        '-c',
-        'grep -Eq "(^|[[:space:]])root=UUID=$rootUuid([[:space:]]|\$)" /mnt/etc/kernel/cmdline',
-      ],
-      '/etc/kernel/cmdline root=UUID değerini hedef root bölümüyle eşleştirmiyor.',
-    );
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -R -E "^[[:space:]]*linux[[:space:]]+/[^[:space:]]*vmlinuz[^[:space:]]*" /mnt/boot/loader/entries/*.conf >/dev/null',
-    ], 'BLS girişlerinde kernel imajı yolu bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -R -E "^[[:space:]]*initrd[[:space:]]+/[^[:space:]]*initramfs[^[:space:]]*" /mnt/boot/loader/entries/*.conf >/dev/null',
-    ], 'BLS girişlerinde initramfs yolu bulunamadı.');
-    if (failure != null) return failure;
-
-    failure = await _requireCommand(
-      ctx,
-      'sh',
-      [
-        '-c',
-        'grep -R -E "^[[:space:]]*options[[:space:]].*root=UUID=$rootUuid([[:space:]]|\$)" /mnt/boot/loader/entries/*.conf >/dev/null',
-      ],
-      'BLS girişleri root=UUID değerini hedef root bölümüyle eşleştirmiyor.',
-    );
-    if (failure != null) return failure;
-
-    if (rootFs == 'btrfs') {
-      final subvolume = (ctx.state['partitionMethod'] ?? 'full') == 'full'
-          ? 'root'
-          : '@';
-      failure = await _requireCommand(ctx, 'sh', [
-        '-c',
-        'grep -R -E "^[[:space:]]*options[[:space:]].*rootflags=subvol=$subvolume" /mnt/boot/loader/entries/*.conf >/dev/null',
-      ], 'BTRFS kurulumunda BLS root subvolume argümanı eksik.');
-      if (failure != null) return failure;
-    }
-
-    final efiUuid = await _readFindmntValue(
-      ctx,
-      mountPoint: '/mnt/boot/efi',
-      field: 'UUID',
-      errorMessage: 'EFI bölümü UUID değeri okunamadı.',
-    );
-    if (efiUuid == null) {
-      return StageResult.fail('EFI bölümü UUID değeri okunamadı.');
-    }
-
-    failure = await _requireCommand(ctx, 'sh', [
-      '-c',
-      'grep -Eq "^UUID=$efiUuid[[:space:]]+/boot/efi[[:space:]]+vfat[[:space:]]" /mnt/etc/fstab',
-    ], '/etc/fstab EFI bölüm UUID girdisini içermiyor.');
-    if (failure != null) return failure;
-
-    return null;
+  Future<String?> _readUuid(StageContext ctx, String mountPoint) async {
+    if (ctx.isMock) return mountPoint == '/mnt' ? 'MOCK-ROOT' : 'MOCK-EFI';
+    final result = await ctx.commandRunner.run('findmnt', [
+      '-rn',
+      '-o',
+      'UUID',
+      '--mountpoint',
+      mountPoint,
+    ]);
+    final value = result.stdout.trim();
+    return result.started &&
+            result.exitCode == 0 &&
+            RegExp(r'^[A-Za-z0-9-]+$').hasMatch(value)
+        ? value
+        : null;
   }
 
   Future<StageResult?> _validateHandoff(StageContext ctx) async {
@@ -650,49 +424,4 @@ class PostInstallValidationStage {
       'Firstboot seed veya install metadata v1 sözleşmesi geçersiz.',
     );
   }
-
-  Future<String?> _readFindmntValue(
-    StageContext ctx, {
-    required String mountPoint,
-    required String field,
-    required String errorMessage,
-  }) async {
-    if (ctx.isMock) {
-      return mountPoint == '/mnt/boot/efi' ? 'MOCK-EFI-UUID' : 'MOCK-ROOT-UUID';
-    }
-
-    final result = await ctx.commandRunner.run('findmnt', [
-      '-rn',
-      '-o',
-      field,
-      mountPoint,
-    ]);
-    final value = result.stdout.trim().split('\n').first.trim();
-    if (result.exitCode == 0 && value.isNotEmpty) {
-      return value;
-    }
-
-    ctx.log('HATA: $errorMessage');
-    return null;
-  }
-}
-
-bool _installationShouldHaveSwap(Map<String, dynamic> state) {
-  final partitionMethod = (state['partitionMethod'] ?? 'full').toString();
-  if (partitionMethod == 'alongside' || partitionMethod == 'free_space') {
-    return true;
-  }
-
-  if (partitionMethod == 'manual') {
-    final manualPartitions =
-        state['manualPartitions'] as List<dynamic>? ?? const [];
-    return manualPartitions.any(
-      (part) =>
-          part is Map<String, dynamic> &&
-          part['isFreeSpace'] != true &&
-          part['mount'] == '[SWAP]',
-    );
-  }
-
-  return false;
 }
