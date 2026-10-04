@@ -35,6 +35,9 @@ HOST_MOUNT_IN_GUEST="${HOST_MOUNT_IN_GUEST:-/run/ro-host}"
 DISK_IMAGE="$RUN_DIR/test_disk.qcow2"
 SERIAL_LOG="$RUN_DIR/serial.log"
 QMP_SOCKET="$RUN_DIR/qmp.sock"
+SPICE_SOCKET="$RUN_DIR/spice.sock"
+SPICE_VIEWER_FILE="$RUN_DIR/spice.vv"
+VIEWER_LOG="$RUN_DIR/remote-viewer.log"
 OVMF_VARS_COPY="$RUN_DIR/OVMF_VARS.fd"
 HOST_VM_LOG_DIR="$RUN_DIR/guest-logs"
 GENERATED_PROFILE_RELATIVE_PATH="outputs/vm/$STAMP/auto_profile.json"
@@ -70,6 +73,10 @@ host_sh() {
 }
 
 cleanup() {
+  if [ -n "${VIEWER_PID:-}" ] && kill -0 "$VIEWER_PID" 2>/dev/null; then
+    kill "$VIEWER_PID" 2>/dev/null || true
+    wait "$VIEWER_PID" 2>/dev/null || true
+  fi
   if [ -n "${QEMU_PID:-}" ] && kill -0 "$QEMU_PID" 2>/dev/null; then
     kill "$QEMU_PID" 2>/dev/null || true
     wait "$QEMU_PID" 2>/dev/null || true
@@ -86,8 +93,70 @@ require_cmd() {
 
 require_host_cmd() {
   if ! host_sh "command -v '$1' >/dev/null 2>&1"; then
-    fail "$1 bulunamadi."
+    fail "Host command $1 not found. Install the corresponding host package (Fedora: qemu-system-x86, qemu-img; SPICE viewer: virt-viewer)."
   fi
+}
+
+preflight_display() {
+  case "$QEMU_DISPLAY_MODE" in
+    headless|gui) ;;
+    spice)
+      require_host_cmd remote-viewer
+      local spice_help
+      if ! spice_help="$(run_host qemu-system-x86_64 -spice help 2>&1)" ||
+          ! grep -q 'unix=' <<< "$spice_help"; then
+        fail "QEMU lacks SPICE UNIX socket support. Install a SPICE-enabled qemu-system-x86 build. Details: $spice_help"
+      fi
+      # Restrict access to the unauthenticated local development endpoint.
+      chmod 700 "$RUN_DIR"
+      ;;
+    *)
+      fail "Gecersiz QEMU_DISPLAY_MODE: $QEMU_DISPLAY_MODE (headless|gui|spice)"
+      ;;
+  esac
+}
+
+configure_display() {
+  DISPLAY_ARGS=()
+  case "$QEMU_DISPLAY_MODE" in
+    headless) DISPLAY_ARGS=(-display none) ;;
+    gui) ;;
+    spice)
+      DISPLAY_ARGS=(
+        -display none
+        -spice "unix=on,addr=$SPICE_SOCKET,disable-ticketing=on"
+        -device virtio-serial-pci
+        -chardev spicevmc,id=vdagent,name=vdagent
+        -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
+      )
+      ;;
+    *) fail "Gecersiz QEMU_DISPLAY_MODE: $QEMU_DISPLAY_MODE (headless|gui|spice)" ;;
+  esac
+}
+
+wait_for_spice_socket() {
+  local deadline=$((SECONDS + 10))
+  while true; do
+    if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+      fail "QEMU exited before SPICE was ready: $SPICE_SOCKET (run artifacts: $RUN_DIR)"
+    fi
+    [ ! -S "$SPICE_SOCKET" ] || return 0
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      fail "SPICE socket not ready after 10 seconds: $SPICE_SOCKET (run artifacts: $RUN_DIR)"
+    fi
+    sleep 1
+  done
+}
+
+launch_spice_viewer() {
+  [ "$QEMU_DISPLAY_MODE" = "spice" ] || return 0
+  wait_for_spice_socket
+  # remote-viewer's connection file avoids URI escaping of the socket path.
+  printf '[virt-viewer]\ntype=spice\nunix-path=%s\n' "$SPICE_SOCKET" > "$SPICE_VIEWER_FILE"
+  "${HOST_PREFIX[@]}" remote-viewer "$SPICE_VIEWER_FILE" > "$VIEWER_LOG" 2>&1 &
+  VIEWER_PID="$!"
+  info "SPICE viewer PID: $VIEWER_PID; log: $VIEWER_LOG"
+  # Viewer exit status never determines the installation/smoke result.
 }
 
 resolve_host_compilers() {
@@ -330,7 +399,12 @@ run_manual_mode() {
   info "Profil tabanli guest runner hazir: $PROJECT_DIR/test_qemu_guest_runner.sh"
   warn "Bu modda komut enjeksiyonu yapilmaz; VM ekrani ile siz ilgilenirsiniz."
 
-  run_host qemu-system-x86_64 \
+  DISPLAY_ARGS=()
+  if [ "$QEMU_DISPLAY_MODE" = "spice" ]; then
+    configure_display
+  fi
+
+  "${HOST_PREFIX[@]}" qemu-system-x86_64 \
     -name "ro-installer-manual" \
     -enable-kvm \
     -m "$MEMORY_MB" \
@@ -345,27 +419,20 @@ run_manual_mode() {
     -net nic,model=virtio -net user \
     -vga virtio \
     -serial file:"$SERIAL_LOG" \
-    -boot order=c,once=d,menu=on
+    "${DISPLAY_ARGS[@]}" \
+    -boot order=c,once=d,menu=on &
+
+  QEMU_PID="$!"
+  launch_spice_viewer
+  wait "$QEMU_PID"
 }
 
 launch_auto_vm() {
-  local display_args=()
-
-  case "$QEMU_DISPLAY_MODE" in
-    headless)
-      display_args=(-display none)
-      ;;
-    gui)
-      display_args=()
-      ;;
-    *)
-      fail "Gecersiz QEMU_DISPLAY_MODE: $QEMU_DISPLAY_MODE (headless|gui)"
-      ;;
-  esac
+  configure_display
 
   info "QEMU otomatik test ortami baslatiliyor (display: $QEMU_DISPLAY_MODE)..."
 
-  run_host qemu-system-x86_64 \
+  "${HOST_PREFIX[@]}" qemu-system-x86_64 \
     -name "ro-installer-auto" \
     -enable-kvm \
     -m "$MEMORY_MB" \
@@ -379,12 +446,13 @@ launch_auto_vm() {
     -device virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=hostshare \
     -net nic,model=virtio -net user \
     -vga virtio \
-    "${display_args[@]}" \
+    "${DISPLAY_ARGS[@]}" \
     -serial file:"$SERIAL_LOG" \
     -qmp unix:"$QMP_SOCKET",server=on,wait=off \
     -boot order=c,once=d,menu=off &
 
   QEMU_PID="$!"
+  launch_spice_viewer
   wait_for_qmp_socket
   info "QEMU PID: $QEMU_PID"
 }
@@ -496,6 +564,7 @@ ISO_FILE="$(resolve_iso)"
 require_host_cmd qemu-system-x86_64
 require_host_cmd qemu-img
 require_cmd python3
+preflight_display
 
 FLUTTER_BIN="$(resolve_flutter)"
 PROFILE_SOURCE_PATH="$(resolve_profile_source)"
