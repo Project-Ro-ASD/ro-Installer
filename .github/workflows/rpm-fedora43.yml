@@ -69,7 +69,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Build RPM
-        run: scripts/01-build-rpm.sh --no-chain --source-mode git --require-clean-git
+        run: scripts/01-build-rpm.sh --source-mode git --require-clean-git
 
       - name: Show build manifest
         if: always()

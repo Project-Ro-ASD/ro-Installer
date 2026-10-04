@@ -125,26 +125,17 @@ Kullanim:
   scripts/01-build-rpm.sh [secenekler]
 
 Secenekler:
-  --no-chain            RPM'den sonra ISO adimini calistirma.
-  --source-iso PATH     Zincir calisacaksa kaynak Fedora KDE ISO yolu.
-  --beta N|betaN        Zincir calisacaksa ISO beta numarasini sabitle.
   --version X.Y.Z       RPM versiyonu (varsayilan: pubspec.yaml).
   --release N           RPM release numarasi (varsayilan: pubspec build no ya da 1).
   --source-mode MODE    Kaynak paket modu: worktree veya git (varsayilan: worktree).
   --require-clean-git   Release kosusunda kirli git agacini reddet.
   --allow-nodeps        rpmbuild dependency kapisini atla; release kaniti sayilmaz.
-  --no-host-auto-install
-                         Zincir ISO build eksik host araclarini dnf ile kurmasin.
   -h, --help            Yardim metni.
 EOF
 }
 
-CHAIN_ISO=1
-SOURCE_ISO=""
-BETA_ARG=""
 APP_VERSION=""
 APP_RELEASE=""
-ISO_NO_HOST_AUTO_INSTALL=0
 SOURCE_MODE="${RO_INSTALLER_RPM_SOURCE_MODE:-worktree}"
 REQUIRE_CLEAN_GIT=0
 ALLOW_NODEPS=0
@@ -152,20 +143,6 @@ ORIGINAL_ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --no-chain)
-      CHAIN_ISO=0
-      shift
-      ;;
-    --source-iso)
-      [[ $# -ge 2 ]] || die "--source-iso bir deger ister."
-      SOURCE_ISO="$2"
-      shift 2
-      ;;
-    --beta)
-      [[ $# -ge 2 ]] || die "--beta bir deger ister."
-      BETA_ARG="$2"
-      shift 2
-      ;;
     --version)
       [[ $# -ge 2 ]] || die "--version bir deger ister."
       APP_VERSION="$2"
@@ -187,10 +164,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-nodeps)
       ALLOW_NODEPS=1
-      shift
-      ;;
-    --no-host-auto-install)
-      ISO_NO_HOST_AUTO_INSTALL=1
       shift
       ;;
     -h|--help)
@@ -289,10 +262,6 @@ SOURCE_EXCLUDES=(
   "outputs/"
   "rpm-outputs"
   "rpm-outputs/"
-  "iso-release"
-  "iso-release/"
-  "iso-realese"
-  "iso-realese/"
   "linux/flutter/ephemeral"
   "linux/flutter/ephemeral/"
   "__pycache__"
@@ -357,10 +326,6 @@ audit_staged_source() {
         -path './outputs/*' -o \
         -path './rpm-outputs' -o \
         -path './rpm-outputs/*' -o \
-        -path './iso-release' -o \
-        -path './iso-release/*' -o \
-        -path './iso-realese' -o \
-        -path './iso-realese/*' -o \
         -path './linux/flutter/ephemeral' -o \
         -path './linux/flutter/ephemeral/*' -o \
         -path './__pycache__' -o \
@@ -384,7 +349,7 @@ audit_source_tarball() {
   local tarball="$1"
   local bad
   bad="$(
-    tar -tzf "${tarball}" | grep -E '(^|/)(\.git|\.idea|\.codex|\.agents|\.dart_tool|build|coverage|docs/old|gerçeksistemdenloglar|outputs|rpm-outputs|iso-release|iso-realese|linux/flutter/ephemeral|__pycache__)(/|$)|(^|/)(COPR|durum|eksikler|implementation_plan|kernel-black-screen-diagnostics|optimizasyon|plan|test)\.md$|(^|/)docs/(road|road-plan|git-yukleme-notu|grafik-driver-politikasi|profesyonel-installer-ana-plani|ro-apps-packaging-notu|siyah-ekran-kernel-notlari|sonraki-adim-notu|yeni-makine-qemu-rehberi)\.md$|\.(iso|qcow2|fd|rpm|src\.rpm|tar\.gz|pyc|log)$' | head -n 50 || true
+    tar -tzf "${tarball}" | grep -E '(^|/)(\.git|\.idea|\.codex|\.agents|\.dart_tool|build|coverage|docs/old|gerçeksistemdenloglar|outputs|rpm-outputs|linux/flutter/ephemeral|__pycache__)(/|$)|(^|/)(COPR|durum|eksikler|implementation_plan|kernel-black-screen-diagnostics|optimizasyon|plan|test)\.md$|(^|/)docs/(road|road-plan|git-yukleme-notu|grafik-driver-politikasi|profesyonel-installer-ana-plani|ro-apps-packaging-notu|siyah-ekran-kernel-notlari|sonraki-adim-notu|yeni-makine-qemu-rehberi)\.md$|\.(iso|qcow2|fd|rpm|src\.rpm|tar\.gz|pyc|log)$' | head -n 50 || true
   )"
   [[ -z "${bad}" ]] || die "Kaynak tarball kirli dosya iceriyor: ${bad}"
 }
@@ -501,24 +466,5 @@ log "RPM sha256: ${FINAL_RPM_SHA256}"
 log "RPM sha256 dosyasi: ${FINAL_RPM_SHA256_FILE}"
 log "RPM build manifesti: ${RPM_BUILD_MANIFEST}"
 log "Log dosyasi: ${LOG_FILE}"
-
-if [[ ${CHAIN_ISO} -eq 1 ]]; then
-  ISO_SCRIPT="${SCRIPT_DIR}/02-build-iso.sh"
-  [[ -x "${ISO_SCRIPT}" ]] || die "ISO script'i calistirilabilir degil: ${ISO_SCRIPT}"
-
-  ISO_CMD=("${ISO_SCRIPT}" "--rpm" "${FINAL_RPM}")
-  if [[ -n "${SOURCE_ISO}" ]]; then
-    ISO_CMD+=("--source-iso" "${SOURCE_ISO}")
-  fi
-  if [[ -n "${BETA_ARG}" ]]; then
-    ISO_CMD+=("--beta" "${BETA_ARG}")
-  fi
-  if [[ ${ISO_NO_HOST_AUTO_INSTALL} -eq 1 ]]; then
-    ISO_CMD+=("--no-host-auto-install")
-  fi
-
-  log "RPM tamamlandi, ISO asamasina geciliyor..."
-  "${ISO_CMD[@]}"
-fi
 
 log "Asama tamamlandi."

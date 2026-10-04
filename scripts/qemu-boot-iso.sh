@@ -45,12 +45,11 @@ Kullanim:
   scripts/qemu-boot-iso.sh [secenekler]
 
 Amac:
-  iso-release altinda uretilen Ro-ASD ISO'yu UEFI/OVMF ile QEMU'da baslatir.
+  Harici Ro-Compose test ISO'sunu UEFI/OVMF ile QEMU'da baslatir.
   Installer'i otomatik calistirmaz; once ISO boot ve live masaustu kontrolu icindir.
 
 Secenekler:
-  --iso PATH        Test edilecek ISO. Varsayilan: RO_ASD_TEST_ISO, latest-iso-path.txt,
-                    sonra iso-release/Ro-ASD-beta*.iso icindeki en yeni dosya.
+  --iso PATH        Harici Compose test ISO yolu; veya RO_ASD_TEST_ISO tanimlayin.
   --gui            QEMU penceresi ac. Varsayilan mod.
   --headless       Grafik pencere acmadan baslat. Erken crash kontrolu icin kullanisli.
   --timeout SEC    Bu sure dolunca QEMU hala calisiyorsa testi basarili sayip kapatir.
@@ -70,11 +69,9 @@ Secenekler:
   -h, --help       Yardim.
 
 Ornekler:
-  scripts/qemu-boot-iso.sh
-  scripts/qemu-boot-iso.sh --iso iso-release/Ro-ASD-beta1.iso --memory 8192
-  scripts/qemu-boot-iso.sh --boot-entry debug --video virtio
-  scripts/qemu-boot-iso.sh --headless --timeout 180 --boot-entry text
-  scripts/qemu-boot-iso.sh --boot-entry text --ssh-port 2222
+  scripts/qemu-boot-iso.sh --iso /path/to/compose-test.iso --memory 8192
+  RO_ASD_TEST_ISO=/path/to/compose-test.iso scripts/qemu-boot-iso.sh --check
+  scripts/qemu-boot-iso.sh --iso /path/to/compose-test.iso --headless --timeout 180 --boot-entry text
 EOF
 }
 
@@ -209,51 +206,12 @@ require_tools() {
 }
 
 resolve_iso() {
-  local candidate=""
-
-  if [[ -n "${ISO_PATH}" ]]; then
-    if [[ "${ISO_PATH}" != /* ]]; then
-      candidate="${REPO_ROOT}/${ISO_PATH}"
-    else
-      candidate="${ISO_PATH}"
-    fi
-    [[ -f "${candidate}" ]] || fail "ISO bulunamadi: ${ISO_PATH}"
-    printf '%s\n' "${candidate}"
-    return 0
-  fi
-
-  local latest_file latest_dir
-  for latest_file in \
-    "${REPO_ROOT}/iso-release/latest-iso-path.txt" \
-    "${REPO_ROOT}/iso-realese/latest-iso-path.txt"; do
-    if [[ -f "${latest_file}" ]]; then
-      candidate="$(<"${latest_file}")"
-      if [[ -f "${candidate}" ]]; then
-        printf '%s\n' "${candidate}"
-        return 0
-      fi
-
-      latest_dir="$(dirname "${latest_file}")"
-      local rebased="${latest_dir}/$(basename "${candidate}")"
-      if [[ -f "${rebased}" ]]; then
-        warn "latest-iso-path.txt eski makine yolunu gosteriyor; mevcut repo icindeki dosya kullaniliyor: ${rebased}"
-        printf '%s\n' "${rebased}"
-        return 0
-      fi
-    fi
-  done
-
-  local newest=""
-  for latest_dir in "${REPO_ROOT}/iso-release" "${REPO_ROOT}/iso-realese"; do
-    while IFS= read -r -d '' candidate; do
-      if [[ -z "${newest}" || "${candidate}" -nt "${newest}" ]]; then
-        newest="${candidate}"
-      fi
-    done < <(find "${latest_dir}" -maxdepth 1 -type f -name 'Ro-ASD-beta*.iso' -print0 2>/dev/null)
-  done
-
-  [[ -n "${newest}" ]] || fail "Uretilmis Ro-ASD ISO bulunamadi. Once scripts/02-build-iso.sh ile ISO uretin veya --iso PATH verin."
-  printf '%s\n' "${newest}"
+  [[ -n "${ISO_PATH}" ]] ||
+    fail "An external Compose-produced test ISO is required. Pass --iso PATH or set RO_ASD_TEST_ISO."
+  local candidate="${ISO_PATH}"
+  [[ "${candidate}" == /* ]] || candidate="${REPO_ROOT}/${candidate}"
+  [[ -f "${candidate}" && -r "${candidate}" ]] || fail "ISO not found or unreadable: ${ISO_PATH}"
+  printf '%s\n' "${candidate}"
 }
 
 resolve_ovmf() {
@@ -281,8 +239,8 @@ resolve_ovmf() {
   exit 1
 }
 
-require_tools
 ISO_FILE="$(resolve_iso)"
+require_tools
 mapfile -t OVMF_INFO < <(resolve_ovmf)
 OVMF_CODE="${OVMF_INFO[0]}"
 OVMF_VARS_TEMPLATE="${OVMF_INFO[1]}"

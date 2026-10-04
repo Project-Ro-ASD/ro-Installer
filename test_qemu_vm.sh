@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Varsayılan akış:
 # 1. Linux release binary derlenir
-# 2. Fedora Live ISO bir kez ISO'dan açılır
+# 2. Harici Compose test ISO bir kez açılır
 # 3. QMP üzerinden Live oturuma komut enjekte edilir
 # 4. Guest tarafında profil tabanlı otomatik kurulum başlatılır
 # 5. Kurulu sistem reboot eder
@@ -124,43 +124,11 @@ resolve_flutter() {
 
 resolve_iso() {
   local explicit="${RO_INSTALLER_TEST_ISO:-}"
-  if [ -n "$explicit" ]; then
-    [ -f "$explicit" ] || fail "Belirtilen ISO bulunamadi: $explicit"
-    printf '%s\n' "$explicit"
-    return 0
-  fi
-
-  local latest_file latest_dir candidate found newest search_dir
-  for latest_file in \
-    "$PROJECT_DIR/iso-release/latest-iso-path.txt" \
-    "$PROJECT_DIR/iso-realese/latest-iso-path.txt"; do
-    if [ -f "$latest_file" ]; then
-      candidate="$(cat "$latest_file")"
-      if [ -f "$candidate" ]; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-
-      latest_dir="$(dirname "$latest_file")"
-      candidate="$latest_dir/$(basename "$candidate")"
-      if [ -f "$candidate" ]; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-    fi
-  done
-
-  newest=""
-  for search_dir in "$PROJECT_DIR/iso-release" "$PROJECT_DIR/iso-realese" "$PROJECT_DIR"; do
-    [ -d "$search_dir" ] || continue
-    found="$(find "$search_dir" -maxdepth 1 -type f \( -name 'Ro-ASD-beta*.iso' -o -name '*.iso' \) | sort | tail -n 1)"
-    if [ -n "$found" ] && { [ -z "$newest" ] || [ "$found" -nt "$newest" ]; }; then
-      newest="$found"
-    fi
-  done
-
-  [ -n "$newest" ] || fail "Ro-ASD/Fedora Live ISO bulunamadi. RO_INSTALLER_TEST_ISO ile yol verebilirsiniz."
-  printf '%s\n' "$newest"
+  [ -n "$explicit" ] ||
+    fail "An external Compose-produced test ISO is required. Set RO_INSTALLER_TEST_ISO."
+  [ -f "$explicit" ] && [ -r "$explicit" ] || fail "ISO not found or unreadable: $explicit"
+  [[ "$explicit" == /* ]] || explicit="$(pwd)/$explicit"
+  printf '%s\n' "$explicit"
 }
 
 resolve_profile_source() {
@@ -523,12 +491,13 @@ print_failure_context() {
   fi
 }
 
+ISO_FILE="$(resolve_iso)"
+
 require_host_cmd qemu-system-x86_64
 require_host_cmd qemu-img
 require_cmd python3
 
 FLUTTER_BIN="$(resolve_flutter)"
-ISO_FILE="$(resolve_iso)"
 PROFILE_SOURCE_PATH="$(resolve_profile_source)"
 mapfile -t OVMF_INFO < <(host_sh '
 if [ -f "/usr/share/edk2/ovmf/OVMF_CODE.fd" ]; then

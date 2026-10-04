@@ -2,8 +2,6 @@
 /coverage/ export-ignore
 /outputs/ export-ignore
 /rpm-outputs/ export-ignore
-/iso-release/ export-ignore
-/iso-realese/ export-ignore
 /docs/road.md export-ignore
 /docs/road-plan.md export-ignore
 /docs/old/ export-ignore
