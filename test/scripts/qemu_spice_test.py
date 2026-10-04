@@ -36,8 +36,8 @@ from pathlib import Path
 args = sys.argv[1:]
 root = Path(os.environ['RUN_DIR'])
 if args == ['-spice', 'help']:
-    print('unix=<bool (on/off)>' if os.environ.get('SPICE_SUPPORTED', '1') == '1' else 'unsupported')
-    sys.exit(0)
+    print('  unix=<bool (on/off)>' if os.environ.get('SPICE_SUPPORTED', '1') == '1' else 'unsupported', file=sys.stderr)
+    sys.exit(1)
 (root / 'qemu-args.json').write_text(json.dumps(args))
 if os.environ.get('QEMU_EXITS') == '1': sys.exit(1)
 sockets = []
@@ -119,10 +119,28 @@ require_host_cmd() {
             self.assertEqual(result.returncode == 0, mode != 'spice')
             if mode == 'spice': self.assertIn('virt-viewer', result.stderr)
 
+    def test_capability_help_with_nonzero_exit_succeeds_preflight(self):
+        help_result = subprocess.run(
+            [str(self.tools / 'qemu-system-x86_64'), '-spice', 'help'],
+            env=dict(os.environ, RUN_DIR=str(self.run_dir)),
+            capture_output=True, text=True)
+        self.assertEqual(help_result.returncode, 1)
+        self.assertIn('  unix=<bool (on/off)>', help_result.stderr)
+        result = self.shell('preflight_display')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.run_dir / 'qemu-args.json').exists())
+
+    def test_non_capability_unix_text_fails_preflight(self):
+        result = self.shell('run_host() { echo "error: unix= is unsupported" >&2; return 1; }; '
+                            'preflight_display')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Details: error: unix= is unsupported', result.stderr)
+
     def test_unsupported_qemu_fails_preflight(self):
         result = self.shell('preflight_display', SPICE_SUPPORTED='0')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('QEMU lacks SPICE UNIX socket support', result.stderr)
+        self.assertIn('Details: unsupported', result.stderr)
         self.assertFalse((self.run_dir / 'qemu-args.json').exists())
 
     def test_auto_configuration_and_viewer_exit_do_not_affect_smoke(self):

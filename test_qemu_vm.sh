@@ -103,8 +103,9 @@ preflight_display() {
     spice)
       require_host_cmd remote-viewer
       local spice_help
-      if ! spice_help="$(run_host qemu-system-x86_64 -spice help 2>&1)" ||
-          ! grep -q 'unix=' <<< "$spice_help"; then
+      # QEMU may print valid capability help and still exit non-zero.
+      spice_help="$(run_host qemu-system-x86_64 -spice help 2>&1 || true)"
+      if ! grep -q '^[[:space:]]*unix=' <<< "$spice_help"; then
         fail "QEMU lacks SPICE UNIX socket support. Install a SPICE-enabled qemu-system-x86 build. Details: $spice_help"
       fi
       # Restrict access to the unauthenticated local development endpoint.
