@@ -9,6 +9,8 @@ import 'package:ro_installer/services/install_stages/stage_context.dart';
 
 const rootUuid = '11111111-2222-3333-4444-555555555555';
 const efiUuid = 'ABCD-1234';
+const fedoraBlsVersion = '7.2.8-200.fc44.x86_64';
+const fedoraBlsEntry = 'boot/loader/entries/arbitrary-$fedoraBlsVersion.conf';
 const cleanupPaths = [
   '/usr/bin/ro-installer',
   '/usr/bin/ro_installer',
@@ -233,6 +235,19 @@ esac
       'title Prepared kernel\nversion $version\nlinux /vmlinuz-$version\n'
           'initrd /initramfs-$version.img\n'
           'options root=UUID=$rootUuid ro rootflags=subvol=root rhgb quiet\n',
+    );
+  }
+
+  void fedoraBls() {
+    kernel(fedoraBlsVersion);
+    write(
+      fedoraBlsEntry,
+      'title Fedora Linux\n'
+      'version $fedoraBlsVersion\n'
+      'linux /root/boot/vmlinuz-$fedoraBlsVersion\n'
+      'initrd /root/boot/initramfs-$fedoraBlsVersion.img '
+      r'$tuned_initrd'
+      '\noptions root=UUID=$rootUuid ro rootflags=subvol=root rhgb quiet\n',
     );
   }
 
@@ -750,6 +765,148 @@ void main() {
           0,
         );
       });
+    }
+    test(
+      'real Fedora 44 Btrfs BLS with optional tuned initrd passes',
+      () async {
+        target.fedoraBls();
+        final result = await target.run(
+          postInstallBlsValidationScript,
+          args: [rootUuid],
+        );
+        expect(result.exitCode, 0, reason: result.stderr.toString());
+      },
+    );
+    test(
+      'Fedora Btrfs BLS concrete initramfs without tuned token passes',
+      () async {
+        target.fedoraBls();
+        target.replace(fedoraBlsEntry, r' $tuned_initrd', '');
+        expect(
+          (await target.run(
+            postInstallBlsValidationScript,
+            args: [rootUuid],
+          )).exitCode,
+          0,
+        );
+      },
+    );
+    test('BLS accepts directly existing installed-root artifacts', () async {
+      target.fedoraBls();
+      for (final name in [
+        'vmlinuz-$fedoraBlsVersion',
+        'initramfs-$fedoraBlsVersion.img',
+      ]) {
+        target.replace(
+          fedoraBlsEntry,
+          '/root/boot/$name',
+          target.file('boot/$name').path,
+        );
+      }
+      expect(
+        (await target.run(
+          postInstallBlsValidationScript,
+          args: [rootUuid],
+        )).exitCode,
+        0,
+      );
+    });
+    for (final change in {
+      'wrong version': ['version $fedoraBlsVersion', 'version wrong-version'],
+      'kernel file mismatch': [
+        '/root/boot/vmlinuz-$fedoraBlsVersion',
+        '/root/boot/wrong-kernel',
+      ],
+      'wrong concrete initramfs': [
+        '/root/boot/initramfs-$fedoraBlsVersion.img',
+        '/root/boot/initramfs-wrong.img',
+      ],
+      'missing BLS initrd': [
+        'initrd /root/boot/initramfs-$fedoraBlsVersion.img '
+            r'$tuned_initrd',
+        '',
+      ],
+      'only tuned token': ['/root/boot/initramfs-$fedoraBlsVersion.img ', ''],
+      'unknown symbolic token': [r'$tuned_initrd', r'$anything'],
+      'unknown braced symbolic token': [r'$tuned_initrd', r'${tuned_initrd}'],
+      'unresolved additional concrete initrd': [
+        r'$tuned_initrd',
+        '/root/boot/missing-initrd',
+      ],
+      'wrong root UUID': ['root=UUID=$rootUuid', 'root=UUID=wrong'],
+      'missing rootflags': ['rootflags=subvol=root', ''],
+      'live image': ['rhgb quiet', 'rhgb quiet rd.live.image'],
+      'live installer stage': ['rhgb quiet', 'rhgb quiet inst.stage2=live'],
+      'live CD label': ['rhgb quiet', 'rhgb quiet CDLABEL=live'],
+    }.entries) {
+      test('real Fedora BLS rejects ${change.key}', () async {
+        target.fedoraBls();
+        target.write('boot/wrong-kernel', 'wrong kernel bytes');
+        target.write('boot/initramfs-wrong.img', 'wrong initramfs bytes');
+        target.replace(fedoraBlsEntry, change.value[0], change.value[1]);
+        expect(
+          (await target.run(
+            postInstallBlsValidationScript,
+            args: [rootUuid],
+          )).exitCode,
+          isNot(0),
+        );
+      });
+    }
+    test('real Fedora BLS missing concrete initramfs file fails', () async {
+      target.fedoraBls();
+      target.file('boot/initramfs-$fedoraBlsVersion.img').deleteSync();
+      expect(
+        (await target.run(
+          postInstallBlsValidationScript,
+          args: [rootUuid],
+        )).exitCode,
+        isNot(0),
+      );
+    });
+    for (final name in [
+      'vmlinuz-$fedoraBlsVersion',
+      'initramfs-$fedoraBlsVersion.img',
+    ]) {
+      for (final prefix in [
+        '/root/boot/./',
+        '/root/boot/../boot/',
+        '/root/boot//',
+      ]) {
+        test('real Fedora BLS rejects unsafe path $prefix$name', () async {
+          target.fedoraBls();
+          target.replace(fedoraBlsEntry, '/root/boot/$name', '$prefix$name');
+          expect(
+            (await target.run(
+              postInstallBlsValidationScript,
+              args: [rootUuid],
+            )).exitCode,
+            isNot(0),
+          );
+        });
+      }
+      test(
+        'real Fedora BLS rejects unsupported /root prefix for $name',
+        () async {
+          target.fedoraBls();
+          Directory('${target.root.path}/boot/token').createSync();
+          target
+              .file('boot/$name')
+              .copySync('${target.root.path}/boot/token/$name');
+          target.replace(
+            fedoraBlsEntry,
+            '/root/boot/$name',
+            '/root/token/$name',
+          );
+          expect(
+            (await target.run(
+              postInstallBlsValidationScript,
+              args: [rootUuid],
+            )).exitCode,
+            isNot(0),
+          );
+        },
+      );
     }
     test(
       'BLS filename and copied artifact names are package-neutral',

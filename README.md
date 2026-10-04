@@ -56,8 +56,11 @@ and the v1 firstboot handoff. Repository, kernel composition, application, theme
 and distro branding policy belong to Ro-Compose.
 
 Installer-owned ISO production, static ISO composition audit, and ISO payload
-extraction benchmarking have been removed. Dedicated Compose installer-test
-profile integration and complete QEMU E2E acceptance remain future work.
+extraction benchmarking have been removed. Compose now provides the
+`installer-test-iso` target and an external integration ISO for Installer E2E.
+The canonical installed product profile is `desktop-standard`, with `live-iso`
+and `installer-test-iso` as Compose targets. Full install/reboot E2E acceptance
+remains in progress until a real run reaches `RO_INSTALLER_VM_BOOT_OK`.
 
 Destructive disk operations remain guarded by storage planning and validation.
 The current stable path rejects LUKS, LVM, RAID, multipath, and nested storage
@@ -151,7 +154,12 @@ SPICE provides interactive viewing/input only. Automation remains external
 Compose ISO → UEFI boot → QMP boot menu interaction → QMP Ctrl+Alt+T → command
 injection → 9p mount → `test_qemu_guest_runner.sh` → Installer → reboot →
 `RO_INSTALLER_VM_BOOT_OK`. The serial smoke marker remains authoritative,
-independent of the viewer's exit status. Run the focused harness tests without
+independent of the viewer's exit status. After QMP Ctrl+Alt+T, the harness waits
+`GUEST_TERMINAL_OPEN_WAIT_SECONDS` (default 6, integer range 0–60), then sends
+Enter, waits one second, sends Ctrl+C and Enter, and waits one second before
+command text.
+The one-line mkdir → 9p mount → guest runner chain uses `&&`, so a failed
+preparation step stops the runner. Run the focused harness tests without
 booting QEMU with `python3 test/scripts/qemu_spice_test.py`; they also run in
 the normal Flutter test suite and stable gate.
 
@@ -161,8 +169,9 @@ runs that Installer against a disposable VM disk, reboots, and the harness
 observes the existing installed-target smoke marker. Serial logs, guest runner
 state, Installer session/failure artifacts, and boot markers remain available.
 This mechanism does not require the external ISO to contain the same Installer
-build. A dedicated Compose installer-test profile and complete E2E acceptance
-are not implemented by this change.
+build. The external Compose `installer-test-iso` integration image is available;
+full installation, technical validation, reboot, and smoke-marker acceptance
+are still in progress.
 
 RPM packaging is independent: `scripts/01-build-rpm.sh` writes the source
 tarball, RPM, checksum, manifest, and latest RPM pointers, then exits. It performs

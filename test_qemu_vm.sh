@@ -24,6 +24,7 @@ DISK_SIZE="${DISK_SIZE:-64G}"
 MEMORY_MB="${MEMORY_MB:-4096}"
 CPU_COUNT="${CPU_COUNT:-4}"
 LIVE_BOOT_WAIT_SECONDS="${LIVE_BOOT_WAIT_SECONDS:-120}"
+GUEST_TERMINAL_OPEN_WAIT_SECONDS="${GUEST_TERMINAL_OPEN_WAIT_SECONDS:-6}"
 AUTO_TEST_TIMEOUT_SECONDS="${AUTO_TEST_TIMEOUT_SECONDS:-1800}"
 GUEST_RUNNER_START_TIMEOUT_SECONDS="${GUEST_RUNNER_START_TIMEOUT_SECONDS:-300}"
 QMP_KEY_DELAY_MS="${QMP_KEY_DELAY_MS:-90}"
@@ -460,6 +461,8 @@ launch_auto_vm() {
 
 send_guest_command() {
   local command_text="$1"
+  [[ "$GUEST_TERMINAL_OPEN_WAIT_SECONDS" =~ ^([0-9]|[1-5][0-9]|60)$ ]] ||
+    fail "GUEST_TERMINAL_OPEN_WAIT_SECONDS must be an integer from 0 to 60."
 
   info "Live ortamda komut enjeksiyonu icin $LIVE_BOOT_WAIT_SECONDS saniye bekleniyor..."
   sleep "$LIVE_BOOT_WAIT_SECONDS"
@@ -470,7 +473,20 @@ send_guest_command() {
     --delay-ms "$QMP_KEY_DELAY_MS" \
     --combo ctrl-alt-t
 
-  sleep 3
+  sleep "$GUEST_TERMINAL_OPEN_WAIT_SECONDS"
+
+  # Settle the prompt and cancel partial input before sending command text.
+  python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
+    --socket "$QMP_SOCKET" \
+    --combo ret
+  sleep 1
+  python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
+    --socket "$QMP_SOCKET" \
+    --combo ctrl-c
+  python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
+    --socket "$QMP_SOCKET" \
+    --combo ret
+  sleep 1
 
   info "Guest terminaline runner komutu gonderiliyor..."
   python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
@@ -608,7 +624,7 @@ if [ "$MODE" != "auto" ]; then
   fail "Gecersiz mod: $MODE (kullanim: ./test_qemu_vm.sh [auto|manual] [profil])"
 fi
 
-RUN_DIALOG_COMMAND="sudo mkdir -p $HOST_MOUNT_IN_GUEST; sudo mount -t 9p -o trans=virtio hostshare $HOST_MOUNT_IN_GUEST; sh $HOST_MOUNT_IN_GUEST/test_qemu_guest_runner.sh $HOST_MOUNT_IN_GUEST/$GENERATED_PROFILE_RELATIVE_PATH"
+RUN_DIALOG_COMMAND="sudo mkdir -p $HOST_MOUNT_IN_GUEST && sudo mount -t 9p -o trans=virtio hostshare $HOST_MOUNT_IN_GUEST && sh $HOST_MOUNT_IN_GUEST/test_qemu_guest_runner.sh $HOST_MOUNT_IN_GUEST/$GENERATED_PROFILE_RELATIVE_PATH"
 
 launch_auto_vm
 select_live_boot_entry
