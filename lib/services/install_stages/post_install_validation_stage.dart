@@ -172,14 +172,22 @@ validate_options() {
 }
 resolve_boot_path() {
   case "$1" in /*) ;; *) return 1 ;; esac
-  case "$1" in */../*|*/..|*/./*) return 1 ;; esac
-  if [ -f "/boot$1" ] && [ -s "/boot$1" ]; then
-    printf '%s\n' "/boot$1"
-  elif [ -f "$1" ] && [ -s "$1" ]; then
-    printf '%s\n' "$1"
-  else
-    return 1
-  fi
+  case "$1" in */../*|*/..|*/./*|*/.|*//*) return 1 ;; esac
+  case "$1" in
+    # GRUB sees the Btrfs top level; validation runs inside the root subvolume.
+    /root/boot/*) boot_file="/boot/${1#/root/boot/}" ;;
+    /root|/root/*) return 1 ;;
+    *)
+      if [ -f "$1" ] && [ -s "$1" ]; then
+        boot_file="$1"
+      else
+        # Traditional BLS paths are relative to the boot filesystem.
+        boot_file="/boot$1"
+      fi
+      ;;
+  esac
+  test -f "$boot_file" && test -s "$boot_file" || return 1
+  printf '%s\n' "$boot_file"
 }
 test -r /etc/kernel/cmdline
 validate_options < /etc/kernel/cmdline
@@ -199,10 +207,18 @@ while IFS="$(printf '\t')" read -r kver image; do
     cmp -s "$linux_file" "$image" || continue
     initrd_matched=0
     initrd_valid=1
-    for initrd in $(awk '$1 == "initrd" { for (i=2; i<=NF; i++) print $i }' "$entry"); do
+    initrds="$(awk '$1 == "initrd" { for (i=2; i<=NF; i++) print $i }' "$entry")"
+    while IFS= read -r initrd; do
+      [ -n "$initrd" ] || continue
+      case "$initrd" in
+        '$tuned_initrd') continue ;;
+        *'$'*) initrd_valid=0; break ;;
+      esac
       initrd_file="$(resolve_boot_path "$initrd")" || { initrd_valid=0; break; }
       if cmp -s "$initrd_file" "/boot/initramfs-$kver.img"; then initrd_matched=1; fi
-    done
+    done <<INITRDS
+$initrds
+INITRDS
     if [ "$initrd_valid" -eq 1 ] && [ "$initrd_matched" -eq 1 ]; then matched=1; break; fi
   done
   if [ "$matched" -ne 1 ]; then

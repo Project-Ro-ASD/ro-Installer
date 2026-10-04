@@ -20,7 +20,12 @@ FUNCTIONS = '\n'.join(function(name) for name in [
     'info', 'warn', 'fail', 'run_host', 'cleanup', 'preflight_display',
     'configure_display', 'wait_for_spice_socket', 'launch_spice_viewer',
     'wait_for_qmp_socket', 'launch_auto_vm', 'monitor_auto_test',
+    'send_guest_command',
 ])
+TERMINAL_WAIT_SETTING = re.search(
+    r'^GUEST_TERMINAL_OPEN_WAIT_SECONDS=.*$', SOURCE, re.MULTILINE).group()
+GUEST_COMMAND_SETTING = re.search(
+    r'^RUN_DIALOG_COMMAND=.*$', SOURCE, re.MULTILINE).group()
 
 
 class SpiceHarnessTest(unittest.TestCase):
@@ -80,13 +85,16 @@ DISK_IMAGE="$RUN_DIR/disk.qcow2"
 OVMF_CODE=code.fd OVMF_VARS_COPY=vars.fd ISO_FILE=live.iso
 MEMORY_MB=4096 CPU_COUNT=4 AUTO_TEST_TIMEOUT_SECONDS=2
 GUEST_RUNNER_START_TIMEOUT_SECONDS=300
+LIVE_BOOT_WAIT_SECONDS=0 QMP_KEY_DELAY_MS=90
+HOST_MOUNT_IN_GUEST=/run/ro-host
+GENERATED_PROFILE_RELATIVE_PATH=outputs/vm/fixture/auto_profile.json
 mkdir -p "$HOST_VM_LOG_DIR"
 require_host_cmd() {
   echo "$1" >> "$RUN_DIR/required"
   command -v "$1" >/dev/null || fail "missing $1 (virt-viewer)"
 }
 '''
-        return subprocess.run(['bash', '-c', setup + FUNCTIONS +
+        return subprocess.run(['bash', '-c', setup + TERMINAL_WAIT_SETTING + '\n' + FUNCTIONS +
                                '\ntrap cleanup EXIT\n' + commands],
                               env=env, capture_output=True, text=True, timeout=20)
 
@@ -224,6 +232,77 @@ require_host_cmd() {
             with self.assertRaises(ProcessLookupError): os.kill(int(pid), 0)
         self.assertTrue((self.run_dir / 'serial.log').exists())
         self.assertTrue((self.run_dir / 'remote-viewer.log').exists())
+
+    def qmp_trace_helper(self):
+        (self.run_dir / 'linux').mkdir()
+        (self.run_dir / 'linux/qmp_send_keys.py').write_text('''
+import json, os, sys
+from pathlib import Path
+with (Path(os.environ['RUN_DIR']) / 'input-trace').open('a') as trace:
+    trace.write(json.dumps(['qmp'] + sys.argv[1:]) + '\\n')
+''')
+
+    def test_qmp_settles_and_synchronizes_before_command_text(self):
+        self.qmp_trace_helper()
+        for wait in ['6', '9']:
+            with self.subTest(wait=wait):
+                trace = self.run_dir / 'input-trace'
+                trace.unlink(missing_ok=True)
+                result = self.shell(
+                    'sleep() { printf \'["sleep", "%s"]\\n\' "$1" >> "$RUN_DIR/input-trace"; }; '
+                    + GUEST_COMMAND_SETTING + '\nsend_guest_command "$RUN_DIALOG_COMMAND"',
+                    **({} if wait == '6' else {'GUEST_TERMINAL_OPEN_WAIT_SECONDS': wait}))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                events = [json.loads(line) for line in trace.read_text().splitlines()]
+                operations = [
+                    ('sleep', event[1]) if event[0] == 'sleep' else
+                    ('combo', event[event.index('--combo') + 1]) if '--combo' in event else
+                    ('text', event[event.index('--text') + 1]) for event in events]
+                self.assertEqual(operations[:8], [
+                    ('sleep', '0'), ('combo', 'ctrl-alt-t'), ('sleep', wait),
+                    ('combo', 'ret'), ('sleep', '1'), ('combo', 'ctrl-c'),
+                    ('combo', 'ret'), ('sleep', '1')])
+                self.assertEqual(len(operations), 9)
+                self.assertEqual(operations[-1][0], 'text')
+                self.assertEqual(operations[-1][1],
+                                 'sudo mkdir -p /run/ro-host && '
+                                 'sudo mount -t 9p -o trans=virtio hostshare /run/ro-host && '
+                                 'sh /run/ro-host/test_qemu_guest_runner.sh '
+                                 '/run/ro-host/outputs/vm/fixture/auto_profile.json')
+                self.assertNotIn(';', operations[-1][1])
+                for event in events:
+                    if event[0] == 'qmp':
+                        self.assertEqual(event[event.index('--socket') + 1],
+                                         str(self.run_dir / 'qmp.sock'))
+                self.assertIn('--enter', events[-1])
+
+    def test_terminal_settle_delay_is_bounded(self):
+        for value in ['-1', '61', 'infinity', '1.5']:
+            result = self.shell('send_guest_command "must never be typed"',
+                                GUEST_TERMINAL_OPEN_WAIT_SECONDS=value)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('integer from 0 to 60', result.stderr)
+
+    def test_guest_command_stops_on_mkdir_or_mount_failure(self):
+        self.tool('sudo', '''#!/bin/sh
+echo "$1" >> "$RUN_DIR/command-trace"
+case "$1" in
+  mkdir) exit "$MKDIR_STATUS" ;;
+  mount) exit "$MOUNT_STATUS" ;;
+esac
+exit 99
+''')
+        self.tool('sh', '#!/bin/bash\necho runner >> "$RUN_DIR/command-trace"\nexit 0\n')
+        for mkdir, mount, expected in [('1', '0', ['mkdir']),
+                                        ('0', '1', ['mkdir', 'mount']),
+                                        ('0', '0', ['mkdir', 'mount', 'runner'])]:
+            with self.subTest(mkdir=mkdir, mount=mount):
+                trace = self.run_dir / 'command-trace'
+                trace.unlink(missing_ok=True)
+                result = self.shell(GUEST_COMMAND_SETTING + '\neval "$RUN_DIALOG_COMMAND"',
+                                    MKDIR_STATUS=mkdir, MOUNT_STATUS=mount)
+                self.assertEqual(result.returncode == 0, mkdir == mount == '0')
+                self.assertEqual(trace.read_text().splitlines(), expected)
 
     def test_qmp_injection_and_smoke_contract(self):
         for name, expected in [
