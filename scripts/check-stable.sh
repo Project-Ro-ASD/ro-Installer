@@ -170,6 +170,25 @@ require_github_rpm_ci_hygiene() {
 
 run_check "GitHub RPM source ve artefakt hijyeni" require_github_rpm_ci_hygiene
 
+require_fedora44_packaging_baseline() {
+  local workflow=".github/workflows/rpm-fedora44.yml"
+  [[ -f "$workflow" && ! -e .github/workflows/rpm-fedora43.yml ]] || return 1
+  rg -q '^      image: fedora:44$' "$workflow" || return 1
+  rg -q 'scripts/01-build-rpm.sh --source-mode git --require-clean-git' "$workflow" || return 1
+  rg -q '^          name: ro-installer-rpm-fedora44$' "$workflow" || return 1
+  if rg -q 'name:.*fedora43' "$workflow"; then return 1; fi
+  rg -Fq 'RPM_PATH="$(cat rpm-outputs/latest-rpm-path.txt)"' "$workflow" || return 1
+  rg -Fq 'test -f "$RPM_PATH"' "$workflow" || return 1
+  rg -Fq "rpm -qp --qf '%{NAME} %{VERSION} %{RELEASE} %{ARCH}\\n' \"\$RPM_PATH\"" "$workflow" || return 1
+  rg -Fq "RPM_RELEASE=\"\$(rpm -qp --qf '%{RELEASE}' \"\$RPM_PATH\")\"" "$workflow" || return 1
+  rg -Fq '*.fc44) ;;' "$workflow" || return 1
+  rg -Fq '*) echo "Expected Fedora 44 RPM release, got: $RPM_RELEASE" >&2; exit 1 ;;' "$workflow" || return 1
+  rg -Fq 'dnf -y --setopt=install_weak_deps=False install "$RPM_PATH"' "$workflow" || return 1
+  rg -q '^          rpm -q ro-installer$' "$workflow" || return 1
+}
+
+run_check "Fedora 44 RPM packaging baseline" require_fedora44_packaging_baseline
+
 require_qemu_test_contract() {
   local script
   for script in scripts/qemu-boot-iso.sh scripts/test-qemu.sh; do

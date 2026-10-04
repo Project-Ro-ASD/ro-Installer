@@ -7,8 +7,8 @@ URL:            https://github.com/Project-Ro-ASD/ro-Installer
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      x86_64
 
-# Flutter SDK is provided by the build wrapper or CI because Fedora 43 does not
-# ship a supported flutter RPM in the base repositories.
+# The Flutter SDK is supplied by the build wrapper or CI rather than being
+# taken from the Fedora buildroot repositories.
 BuildRequires:  clang
 BuildRequires:  cmake
 BuildRequires:  ninja-build
@@ -39,8 +39,8 @@ Requires:       shim-x64
 %description
 Ro-Installer is the graphical and profile-driven system installer for Ro-ASD,
 a Fedora KDE based Linux distribution. It provides staged disk preparation,
-partitioning, formatting, file copy, chroot configuration, bootloader setup,
-and post-install validation.
+partitioning, formatting, prepared-filesystem deployment, target finalization,
+bootloader setup, and technical post-install validation.
 
 %prep
 %autosetup -n %{name}-%{version}

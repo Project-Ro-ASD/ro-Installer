@@ -74,8 +74,8 @@ topologies before destructive disk writes.
 - `test/`: unit, service, stage, profile, storage, log, and script contract tests.
 - `tool/`: development checks, including the i18n audit.
 - `ro-installer.spec`: RPM packaging.
-- `.github/workflows/`: CI automation. The existing Fedora 43 RPM workflow is
-  retained; that exact Fedora release is not an architectural requirement.
+- `.github/workflows/`: CI automation. Fedora 44 is the current supported RPM packaging/CI
+  baseline; that exact Fedora release is not an architectural requirement.
 
 ## Testing
 

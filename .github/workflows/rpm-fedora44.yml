@@ -1,4 +1,4 @@
-name: RPM Fedora 43
+name: RPM Fedora 44
 
 on:
   workflow_dispatch:
@@ -16,18 +16,18 @@ permissions:
   contents: write
 
 concurrency:
-  group: rpm-fedora43-${{ github.ref }}
+  group: rpm-fedora44-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-rpm:
-    name: Build ro-installer RPM on Fedora 43
+    name: Build ro-installer RPM on Fedora 44
     runs-on: ubuntu-latest
     container:
-      image: fedora:43
+      image: fedora:44
 
     steps:
-      - name: Install Fedora 43 build dependencies
+      - name: Install Fedora 44 build dependencies
         run: |
           dnf -y --setopt=install_weak_deps=False install \
             git \
@@ -71,6 +71,20 @@ jobs:
       - name: Build RPM
         run: scripts/01-build-rpm.sh --source-mode git --require-clean-git
 
+      - name: Verify Fedora 44 RPM and installability
+        run: |
+          set -euo pipefail
+          RPM_PATH="$(cat rpm-outputs/latest-rpm-path.txt)"
+          test -f "$RPM_PATH"
+          rpm -qp --qf '%{NAME} %{VERSION} %{RELEASE} %{ARCH}\n' "$RPM_PATH"
+          RPM_RELEASE="$(rpm -qp --qf '%{RELEASE}' "$RPM_PATH")"
+          case "$RPM_RELEASE" in
+            *.fc44) ;;
+            *) echo "Expected Fedora 44 RPM release, got: $RPM_RELEASE" >&2; exit 1 ;;
+          esac
+          dnf -y --setopt=install_weak_deps=False install "$RPM_PATH"
+          rpm -q ro-installer
+
       - name: Show build manifest
         if: always()
         run: |
@@ -82,7 +96,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ro-installer-rpm-fedora43
+          name: ro-installer-rpm-fedora44
           if-no-files-found: error
           path: |
             rpm-outputs/*.rpm
