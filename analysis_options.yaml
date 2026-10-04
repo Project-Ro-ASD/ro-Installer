@@ -14,7 +14,6 @@ analyzer:
     - build/**
     - outputs/**
     - rpm-outputs/**
-    - iso-realese/**
     - Ro-Theme/**
 
 linter:

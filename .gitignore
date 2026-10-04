@@ -52,8 +52,6 @@ app.*.map.json
 
 # Local VM test artifacts
 /outputs/
-/iso-release/
-/iso-realese/
 /rpm-outputs/
 *.iso
 *.rpm

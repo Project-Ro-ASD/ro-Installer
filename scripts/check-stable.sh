@@ -55,8 +55,7 @@ require_cmd() {
 require_cmd rg || true
 require_cmd python3 || true
 
-# Legacy ISO helpers remain syntax-checked while they are in the repository;
-# their composition and release policies are not Installer product invariants.
+# Syntax-check the active Installer packaging and external-ISO test helpers.
 check_shell_syntax() {
   local file
   local result=0
@@ -99,8 +98,8 @@ forbid_pattern \
   '(^|[[:space:]])gpgcheck=0($|[[:space:]])' \
   lib scripts ro-installer.spec
 
-# Ro-Compose owns repository wiring, image composition, and baseline kernel
-# policy. Do not require the legacy Ro/COPR/ISO release-policy implementation.
+# Ro-Compose owns repository wiring, image composition, and baseline kernels.
+# Installer gates retain architecture-neutral RPM source hygiene.
 run_check "COPR source tarball hijyeni" \
   sh -c 'rg -q "git archive" .copr/Makefile && rg -q "Source tarball contains forbidden files" .copr/Makefile && rg -q "sha256sum" .copr/Makefile && rg -q "/docs/old/ export-ignore" .gitattributes && rg -q "/docs/road.md export-ignore" .gitattributes && rg -q "/docs/road-plan.md export-ignore" .gitattributes && rg -q "/gerçeksistemdenloglar/ export-ignore" .gitattributes && ! rg -q "cp -a \\." .copr/Makefile'
 
@@ -163,7 +162,7 @@ run_check "dokuman yasam dongusu ve aktif markdown siniri" require_document_life
 require_github_rpm_ci_hygiene() {
   # Retain source cleanliness and RPM evidence without pinning a Fedora release,
   # workflow filename, SDK path, or action version.
-  rg -q 'scripts/01-build-rpm.sh --no-chain --source-mode git --require-clean-git' .github/workflows/*.yml || return 1
+  rg -q 'scripts/01-build-rpm.sh --source-mode git --require-clean-git' .github/workflows/*.yml || return 1
   rg -q 'actions/upload-artifact@' .github/workflows/*.yml || return 1
   rg -q 'rpm-outputs/\*.rpm' .github/workflows/*.yml || return 1
   rg -q 'latest-rpm-manifest.txt' .github/workflows/*.yml || return 1
@@ -172,6 +171,19 @@ require_github_rpm_ci_hygiene() {
 run_check "GitHub RPM source ve artefakt hijyeni" require_github_rpm_ci_hygiene
 
 require_qemu_test_contract() {
+  local script
+  for script in scripts/qemu-boot-iso.sh scripts/test-qemu.sh; do
+    rg -q 'RO_ASD_TEST_ISO' "${script}" || return 1
+  done
+  for script in scripts/qemu-boot-iso.sh scripts/test-qemu.sh test_qemu_vm.sh; do
+    rg -q 'external Compose-produced test ISO is required' "${script}" || return 1
+  done
+  ! rg -n 'iso-release|iso-realese|latest-iso|Ro-ASD-beta|find .*\*\.iso' scripts/qemu-boot-iso.sh scripts/test-qemu.sh test_qemu_vm.sh || return 1
+  rg -q 'RO_INSTALLER_GUEST_RUNNER_START' test_qemu_guest_runner.sh || return 1
+  rg -q 'RO_INSTALLER_VM_BOOT_OK' test_qemu_vm.sh || return 1
+  rg -q 'hostshare' test_qemu_vm.sh || return 1
+  rg -q 'build/linux/x64/release/bundle/ro_installer' test_qemu_guest_runner.sh || return 1
+
   rg -q 'qemu-boot-iso.sh' scripts/test-qemu.sh || return 1
   rg -q 'test_qemu_vm.sh' scripts/test-qemu.sh || return 1
   rg -q 'suite.*smoke' scripts/test-qemu.sh || return 1
@@ -202,6 +214,20 @@ require_qemu_test_contract() {
 }
 
 run_check "QEMU install test ve log sozlesmesi" require_qemu_test_contract
+
+require_external_iso_boundary() {
+  local file
+  for file in scripts/build-iso.sh scripts/02-build-iso.sh scripts/03-audit-iso.sh scripts/04-benchmark-copy-paths.sh kernel.txt; do
+    [[ ! -e "${file}" ]] || return 1
+  done
+  ! rg -n --glob '!check-stable.sh' \
+    'build-iso\.sh|audit-iso\.sh|benchmark-copy-paths\.sh|iso-(release|realese)/latest-iso|CHAIN_ISO|(^|[[:space:]])(xorriso|mksquashfs|mkisofs|genisoimage)([[:space:]]|$)' \
+    scripts linux/*.sh test_qemu_vm.sh test_qemu_guest_runner.sh || return 1
+  ! rg -q -- '--no-chain|--source-iso|--beta|--no-host-auto-install' scripts/01-build-rpm.sh || return 1
+  ! rg -q -- '--suite audit|--skip-audit|--allow-unsigned-ro-repo' scripts/test-qemu.sh || return 1
+}
+
+run_check "Installer ISO uretmez; test ISO harici giristir" require_external_iso_boundary
 
 forbid_pattern \
   "live sudo politikasi NOPASSWD ALL degil" \

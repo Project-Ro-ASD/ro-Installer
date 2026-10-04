@@ -29,7 +29,7 @@ selection/channel policy, or replacing Fedora kernels with custom kernels.
 ## Standard Storage Contract
 
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
-and no dedicated disk swap partition. The planned rollback-aware Btrfs layout is:
+and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:
 
 | Subvolume | Mount point |
 | --- | --- |
@@ -50,12 +50,14 @@ promise Btrfs snapshot/rollback/recovery features on them.
 
 ## Implementation Status
 
-The architecture and storage contracts above define the direction of the
-project; they are not a claim that the runtime migration is complete. The
-current code still includes legacy install flows, target configuration,
-repository/kernel policy, and ISO remix/audit tooling. Those responsibilities
-will be realigned in later focused changes. This documentation and stable-gate
-realignment does not change installer UI, stages, storage, or bootloader behavior.
+The current installation contract uses full-disk Btrfs deployment, narrow target
+finalization, package-neutral prepared-kernel boot setup, technical validation,
+and the v1 firstboot handoff. Repository, kernel composition, application, theme,
+and distro branding policy belong to Ro-Compose.
+
+Installer-owned ISO production, static ISO composition audit, and ISO payload
+extraction benchmarking have been removed. Dedicated Compose installer-test
+profile integration and complete QEMU E2E acceptance remain future work.
 
 Destructive disk operations remain guarded by storage planning and validation.
 The current stable path rejects LUKS, LVM, RAID, multipath, and nested storage
@@ -67,8 +69,8 @@ topologies before destructive disk writes.
 - `lib/`: Flutter UI, installer state, services, storage planning, and stages.
 - `assets/`: product images, branding, and localization data.
 - `linux/`: Linux desktop integration, launcher, policy, and helper scripts.
-- `scripts/`: RPM packaging, stable-gate automation, QEMU helpers, and retained
-  legacy ISO tooling.
+- `scripts/`: RPM packaging, stable-gate automation, and external-ISO QEMU test
+  helpers.
 - `test/`: unit, service, stage, profile, storage, log, and script contract tests.
 - `tool/`: development checks, including the i18n audit.
 - `ro-installer.spec`: RPM packaging.
@@ -91,9 +93,37 @@ The stable gate retains shell/Python syntax, Flutter analysis/tests, i18n,
 destructive-disk safeguards, password/command redaction coverage, restricted
 sudo policy, RPM source/build hygiene, and diagnostic/log artifact contracts.
 It does not require Installer-owned ISO composition, repository wiring, COPR
-kernel policy, or a custom-kernel-only release policy. Legacy scripts remain
-syntax-checked while present; passing this gate does not prove that the runtime
-has completed the architecture migration.
+kernel policy, or a custom-kernel-only release policy. Remaining shell scripts
+are syntax-checked; the gate also guards the external-ISO testing boundary.
+
+Ro-Installer does not build or remix test ISOs. QEMU integration requires a
+known-good external Compose-produced live/test ISO, supplied explicitly:
+
+```bash
+scripts/test-qemu.sh --suite check --iso /path/to/compose-test.iso
+RO_ASD_TEST_ISO=/path/to/compose-test.iso scripts/test-qemu.sh --suite smoke
+scripts/test-qemu.sh --suite install --iso /path/to/compose-test.iso
+RO_INSTALLER_TEST_ISO=/path/to/compose-test.iso ./test_qemu_vm.sh auto
+```
+
+The QEMU suites are `check`, `boot`, `smoke`, `install`, and `all`. The boot
+helper and wrapper accept `--iso PATH` or `RO_ASD_TEST_ISO`; the full install
+harness requires `RO_INSTALLER_TEST_ISO`. Missing or unreadable input stops
+before building the Installer or launching QEMU. No repository-local ISO is
+selected automatically.
+
+The install harness builds the current Flutter Linux release binary and exposes
+the current bundle and sanitized profile through a 9p host share. The live guest
+runs that Installer against a disposable VM disk, reboots, and the harness
+observes the existing installed-target smoke marker. Serial logs, guest runner
+state, Installer session/failure artifacts, and boot markers remain available.
+This mechanism does not require the external ISO to contain the same Installer
+build. A dedicated Compose installer-test profile and complete E2E acceptance
+are not implemented by this change.
+
+RPM packaging is independent: `scripts/01-build-rpm.sh` writes the source
+tarball, RPM, checksum, manifest, and latest RPM pointers, then exits. It performs
+no ISO action. `scripts/refresh-local-paths.sh` repairs local RPM pointers only.
 
 Storage, bootloader, RPM, and QEMU changes should include the relevant artifact
 or log evidence in the pull request. The existing RPM workflow publishes RPM

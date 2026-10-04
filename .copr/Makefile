@@ -68,10 +68,6 @@ srpm:
 		    --exclude "outputs/" \
 		    --exclude "rpm-outputs" \
 		    --exclude "rpm-outputs/" \
-		    --exclude "iso-release" \
-		    --exclude "iso-release/" \
-		    --exclude "iso-realese" \
-		    --exclude "iso-realese/" \
 		    --exclude "linux/flutter/ephemeral" \
 		    --exclude "linux/flutter/ephemeral/" \
 		    --exclude "__pycache__" \
@@ -94,7 +90,7 @@ srpm:
 		  tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C "$$staging" -czf "$$tarball" "$$name-$$version"; \
 		  rm -rf "$$staging"; \
 		fi; \
-		bad=$$(tar -tzf "$$tarball" | grep -E '(^|/)(\.git|\.idea|\.codex|\.agents|\.dart_tool|build|coverage|docs/old|gerçeksistemdenloglar|outputs|rpm-outputs|iso-release|iso-realese|linux/flutter/ephemeral|__pycache__)(/|$$)|(^|/)(COPR|durum|eksikler|implementation_plan|kernel-black-screen-diagnostics|optimizasyon|plan|test)\.md$$|(^|/)docs/(road|road-plan|git-yukleme-notu|grafik-driver-politikasi|profesyonel-installer-ana-plani|ro-apps-packaging-notu|siyah-ekran-kernel-notlari|sonraki-adim-notu|yeni-makine-qemu-rehberi)\.md$$|\.(iso|qcow2|fd|rpm|src\.rpm|tar\.gz|pyc|log)$$' | head -n 50 || true); \
+		bad=$$(tar -tzf "$$tarball" | grep -E '(^|/)(\.git|\.idea|\.codex|\.agents|\.dart_tool|build|coverage|docs/old|gerçeksistemdenloglar|outputs|rpm-outputs|linux/flutter/ephemeral|__pycache__)(/|$$)|(^|/)(COPR|durum|eksikler|implementation_plan|kernel-black-screen-diagnostics|optimizasyon|plan|test)\.md$$|(^|/)docs/(road|road-plan|git-yukleme-notu|grafik-driver-politikasi|profesyonel-installer-ana-plani|ro-apps-packaging-notu|siyah-ekran-kernel-notlari|sonraki-adim-notu|yeni-makine-qemu-rehberi)\.md$$|\.(iso|qcow2|fd|rpm|src\.rpm|tar\.gz|pyc|log)$$' | head -n 50 || true); \
 		if [ -n "$$bad" ]; then \
 		  echo "Source tarball contains forbidden files:"; \
 		  echo "$$bad"; \

@@ -35,18 +35,15 @@ Usage:
 
 Suites:
   --suite check     Resolve ISO, QEMU tools, and OVMF only.
-  --suite audit     Run static ISO audit only.
   --suite boot      Run QEMU ISO boot only.
-  --suite smoke     Run static ISO audit + headless QEMU boot. Default.
+  --suite smoke     Run short headless external-ISO boot. Default.
   --suite install   Run profile-based full installer VM test.
   --suite all       Run smoke + full installer VM test.
 
 Options:
-  --iso PATH              ISO to test. Default: iso-release/latest-iso-path.txt,
-                          then newest iso-release/Ro-ASD-beta*.iso.
+  --iso PATH              External Compose test ISO; or set RO_ASD_TEST_ISO.
   --profile PATH          Installer profile for --suite install.
                           Default: test/fixtures/profile_full_btrfs.json.
-  --skip-audit            Skip static ISO audit in smoke/install/all suites.
   --gui                   Open a QEMU window. Also applies to full install.
   --headless              Run QEMU without a display. Default.
   --timeout SEC           Boot smoke timeout. Default: 240.
@@ -58,10 +55,6 @@ Options:
   --boot-entry NAME       qemu-boot-iso GRUB entry. Default: text.
   --ssh-port PORT         Host SSH forward for qemu-boot-iso. Default: 0.
   --no-kvm                Use TCG for boot/check suites. Full install needs KVM.
-  --allow-unsigned-ro-repo
-                          Forward the test-only unsigned Ro-Repo policy to
-                          static audit. Auto-enabled when ISO build manifest
-                          records allow_unsigned_ro_repo=1.
   -h, --help              Show help.
 EOF
 }
@@ -86,102 +79,12 @@ shell_join() {
 }
 
 resolve_iso() {
-  local candidate=""
-  local latest_file latest_dir newest
-
-  if [[ -n "${ISO_PATH}" ]]; then
-    candidate="$(normalize_path "${ISO_PATH}")"
-    [[ -f "${candidate}" ]] || fail "ISO not found: ${ISO_PATH}"
-    printf '%s\n' "${candidate}"
-    return 0
-  fi
-
-  for latest_file in \
-    "${REPO_ROOT}/iso-release/latest-iso-path.txt" \
-    "${REPO_ROOT}/iso-realese/latest-iso-path.txt"; do
-    if [[ -f "${latest_file}" ]]; then
-      candidate="$(<"${latest_file}")"
-      if [[ -f "${candidate}" ]]; then
-        printf '%s\n' "${candidate}"
-        return 0
-      fi
-
-      latest_dir="$(dirname "${latest_file}")"
-      candidate="${latest_dir}/$(basename "${candidate}")"
-      if [[ -f "${candidate}" ]]; then
-        printf '%s\n' "${candidate}"
-        return 0
-      fi
-    fi
-  done
-
-  newest=""
-  for latest_dir in "${REPO_ROOT}/iso-release" "${REPO_ROOT}/iso-realese"; do
-    while IFS= read -r -d '' candidate; do
-      if [[ -z "${newest}" || "${candidate}" -nt "${newest}" ]]; then
-        newest="${candidate}"
-      fi
-    done < <(find "${latest_dir}" -maxdepth 1 -type f -name 'Ro-ASD-beta*.iso' -print0 2>/dev/null)
-  done
-
-  [[ -n "${newest}" ]] || fail "No Ro-ASD ISO found. Build one with scripts/build-iso.sh or pass --iso PATH."
-  printf '%s\n' "${newest}"
-}
-
-read_key_value() {
-  local file="$1"
-  local key="$2"
-  awk -F= -v key="${key}" '$1 == key {print substr($0, length($1) + 2); exit}' "${file}"
-}
-
-detect_audit_policy_from_manifest() {
-  [[ "${AUDIT_ALLOW_UNSIGNED_RO_REPO}" == "auto" ]] || return 0
-
-  local sidecar_manifest
-  local extracted_manifest
-  local tmpdir=""
-  local value=""
-
-  sidecar_manifest="$(dirname "${RESOLVED_ISO}")/$(basename "${RESOLVED_ISO}" .iso).build-manifest.txt"
-  if [[ -f "${sidecar_manifest}" ]]; then
-    value="$(read_key_value "${sidecar_manifest}" allow_unsigned_ro_repo || true)"
-  elif command -v xorriso >/dev/null 2>&1; then
-    tmpdir="$(mktemp -d)"
-    extracted_manifest="${tmpdir}/ro-build-manifest.txt"
-    if xorriso -osirrox on -indev "${RESOLVED_ISO}" -extract /ro-build-manifest.txt "${extracted_manifest}" -end >/dev/null 2>&1; then
-      value="$(read_key_value "${extracted_manifest}" allow_unsigned_ro_repo || true)"
-    fi
-    rm -rf "${tmpdir}"
-  fi
-
-  if [[ "${value}" == "1" ]]; then
-    AUDIT_ALLOW_UNSIGNED_RO_REPO=1
-  else
-    AUDIT_ALLOW_UNSIGNED_RO_REPO=0
-  fi
-}
-
-audit_will_run() {
-  case "${SUITE}" in
-    audit)
-      return 0
-      ;;
-    smoke|install|all)
-      [[ ${SKIP_AUDIT} -eq 0 ]]
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-run_static_audit() {
-  local cmd=("${SCRIPT_DIR}/03-audit-iso.sh" "${RESOLVED_ISO}")
-  if [[ "${AUDIT_ALLOW_UNSIGNED_RO_REPO}" == "1" ]]; then
-    cmd+=(--allow-unsigned-ro-repo)
-  fi
-  info "Static ISO audit: $(shell_join "${cmd[@]}")"
-  "${cmd[@]}"
+  [[ -n "${ISO_PATH}" ]] ||
+    fail "An external Compose-produced test ISO is required. Pass --iso PATH or set RO_ASD_TEST_ISO." >&2
+  local candidate
+  candidate="$(normalize_path "${ISO_PATH}")"
+  [[ -f "${candidate}" && -r "${candidate}" ]] || fail "ISO not found or unreadable: ${ISO_PATH}" >&2
+  printf '%s\n' "${candidate}"
 }
 
 qemu_boot_args() {
@@ -241,9 +144,8 @@ run_full_install() {
 }
 
 SUITE="smoke"
-ISO_PATH=""
+ISO_PATH="${RO_ASD_TEST_ISO:-}"
 PROFILE_PATH="test/fixtures/profile_full_btrfs.json"
-SKIP_AUDIT=0
 QEMU_MODE="headless"
 TIMEOUT_SECONDS=240
 INSTALL_TIMEOUT_SECONDS=1800
@@ -254,7 +156,6 @@ VIDEO_BACKEND="virtio"
 BOOT_ENTRY="text"
 SSH_PORT=0
 NO_KVM=0
-AUDIT_ALLOW_UNSIGNED_RO_REPO="auto"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -272,10 +173,6 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || fail "--profile needs a value."
       PROFILE_PATH="$2"
       shift 2
-      ;;
-    --skip-audit)
-      SKIP_AUDIT=1
-      shift
       ;;
     --gui)
       QEMU_MODE="gui"
@@ -329,10 +226,6 @@ while [[ $# -gt 0 ]]; do
       NO_KVM=1
       shift
       ;;
-    --allow-unsigned-ro-repo)
-      AUDIT_ALLOW_UNSIGNED_RO_REPO=1
-      shift
-      ;;
     -h|--help)
       usage
       exit 0
@@ -344,8 +237,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${SUITE}" in
-  check|audit|boot|smoke|install|all) ;;
-  *) fail "--suite must be one of: check, audit, boot, smoke, install, all. Got: ${SUITE}" ;;
+  check|boot|smoke|install|all) ;;
+  *) fail "--suite must be one of: check, boot, smoke, install, all. Got: ${SUITE}" ;;
 esac
 
 for numeric in TIMEOUT_SECONDS INSTALL_TIMEOUT_SECONDS MEMORY_MB CPU_COUNT SSH_PORT; do
@@ -355,39 +248,27 @@ done
 
 cd "${REPO_ROOT}"
 RESOLVED_ISO="$(resolve_iso)"
-if audit_will_run; then
-  detect_audit_policy_from_manifest
-fi
 
 info "Ro-ASD QEMU test started."
 info "Repo: ${REPO_ROOT}"
 info "ISO: ${RESOLVED_ISO}"
 info "Suite: ${SUITE}"
-if audit_will_run && [[ "${AUDIT_ALLOW_UNSIGNED_RO_REPO}" == "1" ]]; then
-  info "[WARN] Static audit will accept unsigned Ro-Repo because this is a test ISO policy."
-fi
 info "Wrapper log: ${LOG_FILE}"
 
 case "${SUITE}" in
   check)
     run_qemu_check
     ;;
-  audit)
-    run_static_audit
-    ;;
   boot)
     run_boot_smoke
     ;;
   smoke)
-    [[ ${SKIP_AUDIT} -eq 1 ]] || run_static_audit
     run_boot_smoke
     ;;
   install)
-    [[ ${SKIP_AUDIT} -eq 1 ]] || run_static_audit
     run_full_install
     ;;
   all)
-    [[ ${SKIP_AUDIT} -eq 1 ]] || run_static_audit
     run_boot_smoke
     run_full_install
     ;;
