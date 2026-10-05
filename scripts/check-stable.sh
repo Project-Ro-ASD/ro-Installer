@@ -70,8 +70,11 @@ run_check "shell script syntax" check_shell_syntax
 run_check "QEMU SPICE harness tests (no VM boot)" \
   python3 test/scripts/qemu_spice_test.py
 
-run_check "QMP helper python syntax" \
-  python3 -m py_compile linux/qmp_send_keys.py
+run_check "QMP/QGA helper python syntax" \
+  python3 -m py_compile linux/qmp_send_keys.py linux/qga_client.py
+
+run_check "QGA transport tests (fake Unix server)" \
+  python3 test/scripts/qga_client_test.py
 
 if command -v flutter >/dev/null 2>&1; then
   run_check "flutter analyze" flutter analyze
@@ -219,11 +222,15 @@ require_qemu_test_contract() {
   rg -q 'HOST_VM_LOG_DIR="\$RUN_DIR/guest-logs"' test_qemu_vm.sh || return 1
   rg -q 'Installer failure summary bulundu' test_qemu_vm.sh || return 1
   rg -q 'RO_INSTALLER_GUEST_RUNNER_INSTALL_EXIT' test_qemu_guest_runner.sh || return 1
-  rg -q 'GUEST_RUNNER_START_TIMEOUT_SECONDS' test_qemu_vm.sh || return 1
+  rg -q 'QGA_READY_TIMEOUT_SECONDS' test_qemu_vm.sh || return 1
   rg -Fq 'QEMU_DISPLAY_MODE="${QEMU_DISPLAY_MODE:-headless}"' test_qemu_vm.sh || return 1
   rg -Fq 'QEMU_DISPLAY_MODE="${QEMU_MODE}"' scripts/test-qemu.sh || return 1
   rg -q 'Guest runner baslangic marker' test_qemu_vm.sh || return 1
-  rg -Fq 'QMP_KEY_DELAY_MS="${QMP_KEY_DELAY_MS:-90}"' test_qemu_vm.sh || return 1
+  rg -q 'org.qemu.guest_agent.0' test_qemu_vm.sh || return 1
+  rg -q 'RO_INSTALLER_AUTO_REBOOT=0' test_qemu_vm.sh || return 1
+  rg -q 'runner-logs-copied-0' test_qemu_vm.sh || return 1
+  rg -q 'orchestrate_guest_install' test_qemu_vm.sh || return 1
+  ! rg -q -- '--text|ctrl-alt-t|GUEST_TERMINAL_OPEN_WAIT_SECONDS' test_qemu_vm.sh || return 1
   ! rg -q 'version=9p2000' test_qemu_vm.sh || return 1
   ! rg -q 'RO_INSTALLER_VM_LOG_DIR=\$GUEST_VM_LOG_DIR' test_qemu_vm.sh || return 1
   rg -Fq 'HOST_MOUNT_IN_GUEST="${HOST_MOUNT_IN_GUEST:-/run/ro-host}"' test_qemu_vm.sh || return 1

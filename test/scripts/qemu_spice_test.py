@@ -20,12 +20,9 @@ FUNCTIONS = '\n'.join(function(name) for name in [
     'info', 'warn', 'fail', 'run_host', 'cleanup', 'preflight_display',
     'configure_display', 'wait_for_spice_socket', 'launch_spice_viewer',
     'wait_for_qmp_socket', 'launch_auto_vm', 'monitor_auto_test',
-    'send_guest_command',
+    'wait_for_qga_ready', 'run_guest_install', 'verify_guest_artifacts',
+    'reboot_guest', 'orchestrate_guest_install',
 ])
-TERMINAL_WAIT_SETTING = re.search(
-    r'^GUEST_TERMINAL_OPEN_WAIT_SECONDS=.*$', SOURCE, re.MULTILINE).group()
-GUEST_COMMAND_SETTING = re.search(
-    r'^RUN_DIALOG_COMMAND=.*$', SOURCE, re.MULTILINE).group()
 
 
 class SpiceHarnessTest(unittest.TestCase):
@@ -78,14 +75,15 @@ SPICE_SOCKET="$RUN_DIR/spice.sock"
 SPICE_VIEWER_FILE="$RUN_DIR/spice.vv"
 VIEWER_LOG="$RUN_DIR/remote-viewer.log"
 QMP_SOCKET="$RUN_DIR/qmp.sock"
+QGA_SOCKET="$RUN_DIR/qga.sock"
+QGA_LOG="$RUN_DIR/qga.log"
+QGA_READY_TIMEOUT_SECONDS=1
 SERIAL_LOG="$RUN_DIR/serial.log"
 PROJECT_DIR="$RUN_DIR"
 HOST_VM_LOG_DIR="$RUN_DIR/guest-logs"
 DISK_IMAGE="$RUN_DIR/disk.qcow2"
 OVMF_CODE=code.fd OVMF_VARS_COPY=vars.fd ISO_FILE=live.iso
 MEMORY_MB=4096 CPU_COUNT=4 AUTO_TEST_TIMEOUT_SECONDS=2
-GUEST_RUNNER_START_TIMEOUT_SECONDS=300
-LIVE_BOOT_WAIT_SECONDS=0 QMP_KEY_DELAY_MS=90
 HOST_MOUNT_IN_GUEST=/run/ro-host
 GENERATED_PROFILE_RELATIVE_PATH=outputs/vm/fixture/auto_profile.json
 mkdir -p "$HOST_VM_LOG_DIR"
@@ -94,7 +92,7 @@ require_host_cmd() {
   command -v "$1" >/dev/null || fail "missing $1 (virt-viewer)"
 }
 '''
-        return subprocess.run(['bash', '-c', setup + TERMINAL_WAIT_SETTING + '\n' + FUNCTIONS +
+        return subprocess.run(['bash', '-c', setup + '\n' + FUNCTIONS +
                                '\ntrap cleanup EXIT\n' + commands],
                               env=env, capture_output=True, text=True, timeout=20)
 
@@ -163,9 +161,9 @@ require_host_cmd() {
         self.assertEqual(value('-spice'),
                          f'unix=on,addr={self.run_dir}/spice.sock,disable-ticketing=on')
         self.assertNotIn('port=', value('-spice'))
-        self.assertEqual(args.count('virtio-serial-pci'), 1)
+        self.assertEqual(args.count('virtio-serial-pci,id=virtio_serial0'), 1)
         self.assertIn('spicevmc,id=vdagent,name=vdagent', args)
-        self.assertIn('virtserialport,chardev=vdagent,name=com.redhat.spice.0', args)
+        self.assertIn('virtserialport,bus=virtio_serial0.0,nr=2,chardev=vdagent,name=com.redhat.spice.0', args)
         self.assertEqual(value('-qmp'), f'unix:{self.run_dir}/qmp.sock,server=on,wait=off')
         self.assertEqual(value('-serial'), f'file:{self.run_dir}/serial.log')
         self.assertIn('virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=hostshare', args)
@@ -233,89 +231,181 @@ require_host_cmd() {
         self.assertTrue((self.run_dir / 'serial.log').exists())
         self.assertTrue((self.run_dir / 'remote-viewer.log').exists())
 
-    def qmp_trace_helper(self):
-        (self.run_dir / 'linux').mkdir()
-        (self.run_dir / 'linux/qmp_send_keys.py').write_text('''
+    def qga_trace_helper(self):
+        (self.run_dir / 'linux').mkdir(exist_ok=True)
+        (self.run_dir / 'linux/qga_client.py').write_text(r"""
 import json, os, sys
 from pathlib import Path
-with (Path(os.environ['RUN_DIR']) / 'input-trace').open('a') as trace:
-    trace.write(json.dumps(['qmp'] + sys.argv[1:]) + '\\n')
-''')
+root = Path(os.environ['RUN_DIR'])
+with (root / 'qga-trace').open('a') as trace:
+    trace.write(json.dumps(sys.argv[1:]) + '\n')
+args = sys.argv[1:]
+if 'ready' in args:
+    sys.exit(int(os.environ.get('READY_STATUS', '0')))
+if 'exec' in args:
+    status = int(os.environ.get('RUNNER_STATUS', '0'))
+    if status: sys.exit(status)
+    logs = root / 'guest-logs'
+    (logs / 'runner-install-exited-0').touch()
+    if os.environ.get('NO_LOGS') != '1':
+        (logs / 'runner-logs-copied-0').touch()
+        (logs / 'install-test.summary.json').write_text(json.dumps({'success': True}))
+        (logs / 'install-test.log').touch()
+        (logs / 'install-test.manifest.json').touch()
+""")
+        # QMP must never be used by guest installation orchestration.
+        (self.run_dir / 'linux/qmp_send_keys.py').write_text('raise RuntimeError("unexpected keyboard injection")')
 
-    def test_qmp_settles_and_synchronizes_before_command_text(self):
-        self.qmp_trace_helper()
-        for wait in ['6', '9']:
-            with self.subTest(wait=wait):
-                trace = self.run_dir / 'input-trace'
-                trace.unlink(missing_ok=True)
-                result = self.shell(
-                    'sleep() { printf \'["sleep", "%s"]\\n\' "$1" >> "$RUN_DIR/input-trace"; }; '
-                    + GUEST_COMMAND_SETTING + '\nsend_guest_command "$RUN_DIALOG_COMMAND"',
-                    **({} if wait == '6' else {'GUEST_TERMINAL_OPEN_WAIT_SECONDS': wait}))
-                self.assertEqual(result.returncode, 0, result.stderr)
-                events = [json.loads(line) for line in trace.read_text().splitlines()]
-                operations = [
-                    ('sleep', event[1]) if event[0] == 'sleep' else
-                    ('combo', event[event.index('--combo') + 1]) if '--combo' in event else
-                    ('text', event[event.index('--text') + 1]) for event in events]
-                self.assertEqual(operations[:8], [
-                    ('sleep', '0'), ('combo', 'ctrl-alt-t'), ('sleep', wait),
-                    ('combo', 'ret'), ('sleep', '1'), ('combo', 'ctrl-c'),
-                    ('combo', 'ret'), ('sleep', '1')])
-                self.assertEqual(len(operations), 9)
-                self.assertEqual(operations[-1][0], 'text')
-                self.assertEqual(operations[-1][1],
-                                 'sudo mkdir -p /run/ro-host && '
-                                 'sudo mount -t 9p -o trans=virtio hostshare /run/ro-host && '
-                                 'sh /run/ro-host/test_qemu_guest_runner.sh '
-                                 '/run/ro-host/outputs/vm/fixture/auto_profile.json')
-                self.assertNotIn(';', operations[-1][1])
-                for event in events:
-                    if event[0] == 'qmp':
-                        self.assertEqual(event[event.index('--socket') + 1],
-                                         str(self.run_dir / 'qmp.sock'))
-                self.assertIn('--enter', events[-1])
+    def test_qga_topology_all_display_modes(self):
+        for mode in ['headless', 'gui', 'spice']:
+            result = self.shell('configure_display; printf "%s\\n" "${DISPLAY_ARGS[@]}"', mode)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.count('virtio-serial-pci'), 1)
+            self.assertIn('socket,id=qga,path=', result.stdout)
+            self.assertIn('qga.sock,server=on,wait=off', result.stdout)
+            self.assertIn('bus=virtio_serial0.0,nr=1,chardev=qga,name=org.qemu.guest_agent.0', result.stdout)
+            self.assertEqual('name=com.redhat.spice.0' in result.stdout, mode == 'spice')
+            self.assertNotIn('tcp', result.stdout)
+            self.assertNotIn('port=', result.stdout)
+        self.assertIn('chmod 700 "$RUN_DIR"', SOURCE)
 
-    def test_terminal_settle_delay_is_bounded(self):
-        for value in ['-1', '61', 'infinity', '1.5']:
-            result = self.shell('send_guest_command "must never be typed"',
-                                GUEST_TERMINAL_OPEN_WAIT_SECONDS=value)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('integer from 0 to 60', result.stderr)
+    def test_qga_success_orders_runner_artifacts_and_reboot(self):
+        self.qga_trace_helper()
+        result = self.shell('orchestrate_guest_install')
+        self.assertEqual(result.returncode, 0, result.stderr + (self.run_dir / 'qga.log').read_text())
+        events = [json.loads(line) for line in (self.run_dir / 'qga-trace').read_text().splitlines()]
+        self.assertEqual([event[4] for event in events], ['ready', 'exec', 'submit'])
+        command = events[1][-1]
+        self.assertIn('mkdir -p /run/ro-host && mount -t 9p', command)
+        self.assertIn('hostshare /run/ro-host && HOST_MOUNT=', command)
+        self.assertIn('RO_INSTALLER_AUTO_REBOOT=0 RO_INSTALLER_VM_USE_LIVE_DISPLAY=1 sh /run/ro-host/test_qemu_guest_runner.sh', command)
+        self.assertIn('/bin/sh', events[1])
+        self.assertNotIn('sudo', command)
+        self.assertIn('systemctl reboot', events[2][-1])
 
-    def test_guest_command_stops_on_mkdir_or_mount_failure(self):
-        self.tool('sudo', '''#!/bin/sh
-echo "$1" >> "$RUN_DIR/command-trace"
-case "$1" in
-  mkdir) exit "$MKDIR_STATUS" ;;
-  mount) exit "$MOUNT_STATUS" ;;
-esac
-exit 99
-''')
-        self.tool('sh', '#!/bin/bash\necho runner >> "$RUN_DIR/command-trace"\nexit 0\n')
+    def test_guest_preparation_chain_stops_on_failure(self):
+        self.qga_trace_helper()
+        result = self.shell('run_guest_install')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        command = json.loads((self.run_dir / 'qga-trace').read_text().splitlines()[0])[-1]
+        for name, variable in [('mkdir', 'MKDIR_STATUS'), ('mount', 'MOUNT_STATUS')]:
+            self.tool(name, f'#!/bin/sh\necho {name} >> "$RUN_DIR/prep-trace"\nexit "${variable}"\n')
+        self.tool('sh', '#!/bin/bash\necho runner >> "$RUN_DIR/prep-trace"\nexit 0\n')
         for mkdir, mount, expected in [('1', '0', ['mkdir']),
-                                        ('0', '1', ['mkdir', 'mount']),
-                                        ('0', '0', ['mkdir', 'mount', 'runner'])]:
-            with self.subTest(mkdir=mkdir, mount=mount):
-                trace = self.run_dir / 'command-trace'
-                trace.unlink(missing_ok=True)
-                result = self.shell(GUEST_COMMAND_SETTING + '\neval "$RUN_DIALOG_COMMAND"',
-                                    MKDIR_STATUS=mkdir, MOUNT_STATUS=mount)
-                self.assertEqual(result.returncode == 0, mkdir == mount == '0')
-                self.assertEqual(trace.read_text().splitlines(), expected)
+                                       ('0', '1', ['mkdir', 'mount']),
+                                       ('0', '0', ['mkdir', 'mount', 'runner'])]:
+            trace = self.run_dir / 'prep-trace'
+            trace.unlink(missing_ok=True)
+            result = subprocess.run(['/bin/sh', '-c', command], capture_output=True,
+                                    env=dict(os.environ, RUN_DIR=str(self.run_dir),
+                                             PATH=f'{self.tools}:{os.environ["PATH"]}',
+                                             MKDIR_STATUS=mkdir, MOUNT_STATUS=mount))
+            self.assertEqual(result.returncode == 0, mkdir == mount == '0')
+            self.assertEqual(trace.read_text().splitlines(), expected)
 
-    def test_qmp_injection_and_smoke_contract(self):
-        for name, expected in [
-            ('select_live_boot_entry', ['qmp_send_keys.py', '--combo home', '--combo ret']),
-            ('send_guest_command', ['qmp_send_keys.py', '--combo ctrl-alt-t', '--text "$command_text"']),
-            ('monitor_auto_test', ["grep -q 'RO_INSTALLER_VM_BOOT_OK'", 'Installer failure summary']),
-        ]:
-            for token in expected: self.assertIn(token, function(name))
-            self.assertNotIn('VIEWER_PID', function(name))
-        self.assertIn('sudo mount -t 9p -o trans=virtio hostshare', SOURCE)
-        self.assertIn('test_qemu_guest_runner.sh', SOURCE)
-        self.assertIn('require_host_cmd qemu-system-x86_64', SOURCE)
-        self.assertIn('require_host_cmd qemu-img', SOURCE)
+    def test_guest_runner_copies_before_exit_and_copy_failure_fails(self):
+        host = self.run_dir / 'share'
+        host.mkdir()
+        profile = host / 'profile.json'
+        profile.write_text('{}')
+        binary = host / 'installer'
+        binary.write_text("""#!/bin/sh
+[ "$RO_INSTALLER_AUTO_REBOOT" = 0 ] || exit 99
+[ "$WAYLAND_DISPLAY" = wayland-0 ] || exit 98
+[ "$GDK_BACKEND" = wayland ] || exit 97
+[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ] || exit 96
+printf '{"success":true}' > "$RO_INSTALLER_LOG_DIR/install-test.summary.json"
+echo log > "$RO_INSTALLER_LOG_DIR/install-test.log"
+echo manifest > "$RO_INSTALLER_LOG_DIR/install-test.manifest.json"
+exit "${INSTALL_STATUS:-0}"
+""")
+        binary.chmod(0o755)
+        # Exercise the root execution path without privileged host operations.
+        self.tool('id', '#!/bin/sh\necho 0\n')
+        self.tool('sudo', '#!/bin/sh\nexit 99\n')
+        self.tool('cp', '#!/bin/sh\n[ "${FAIL_COPY:-0}" = 0 ] || exit 1\nexec /bin/cp "$@"\n')
+        runtime = self.run_dir / 'runtime' / '1000'
+        runtime.mkdir(parents=True)
+        import socket
+        display = socket.socket(socket.AF_UNIX)
+        display.bind(str(runtime / 'wayland-0'))
+        self.addCleanup(display.close)
+        for status, copy_failure in [('0', '0'), ('7', '0'), ('0', '1')]:
+            logs = self.run_dir / f'logs-{status}-{copy_failure}'
+            local = self.run_dir / f'local-{status}-{copy_failure}'
+            result = subprocess.run(['/bin/sh', str(ROOT / 'test_qemu_guest_runner.sh'), str(profile)],
+                capture_output=True, env=dict(os.environ,
+                    PATH=f'{self.tools}:{os.environ["PATH"]}', HOST_MOUNT=str(host),
+                    RO_INSTALLER_VM_BINARY=str(binary), RO_INSTALLER_VM_LOG_DIR=str(logs),
+                    RO_INSTALLER_LOCAL_LOG_DIR=str(local), RO_INSTALLER_AUTO_REBOOT='0',
+                    INSTALL_STATUS=status, FAIL_COPY=copy_failure,
+                    RO_INSTALLER_VM_USE_LIVE_DISPLAY='1',
+                    RO_INSTALLER_VM_RUNTIME_ROOT=str(runtime.parent)))
+            self.assertEqual(result.returncode, int(status) if status != '0' else int(copy_failure))
+            self.assertTrue((logs / f'runner-install-exited-{status}').exists())
+            self.assertEqual((logs / f'runner-logs-copied-{status}').exists(), copy_failure == '0')
+            if copy_failure == '0':
+                self.assertTrue((logs / 'install-test.summary.json').exists())
+                self.assertIn(f'state=logs-copied-{status}', (logs / 'runner-state.txt').read_text())
+
+    def test_qga_guest_runner_display_timeout_fails_closed(self):
+        host = self.run_dir / 'share'
+        host.mkdir()
+        profile = host / 'profile.json'
+        profile.write_text('{}')
+        binary = host / 'installer'
+        binary.write_text('#!/bin/sh\nexit 99\n')
+        binary.chmod(0o755)
+        logs = self.run_dir / 'guest-logs'
+        result = subprocess.run(['/bin/sh', str(ROOT / 'test_qemu_guest_runner.sh'), str(profile)],
+            capture_output=True, text=True, env=dict(os.environ,
+                HOST_MOUNT=str(host), RO_INSTALLER_VM_BINARY=str(binary),
+                RO_INSTALLER_VM_LOG_DIR=str(logs), RO_INSTALLER_LOCAL_LOG_DIR=str(host / 'logs'),
+                RO_INSTALLER_VM_USE_LIVE_DISPLAY='1', RO_INSTALLER_VM_DISPLAY_TIMEOUT_SECONDS='0',
+                RO_INSTALLER_VM_RUNTIME_ROOT=str(host / 'no-session')))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Live Wayland display not ready', result.stderr)
+        self.assertTrue((logs / 'runner-display-not-ready').exists())
+        self.assertFalse((logs / 'runner-install-started').exists())
+
+    def test_qga_failures_never_reboot_or_use_keyboard(self):
+        self.qga_trace_helper()
+        for settings, expected in [({'READY_STATUS': '1'}, ['ready']),
+                                    ({'RUNNER_STATUS': '4'}, ['ready', 'exec']),
+                                    ({'NO_LOGS': '1'}, ['ready', 'exec'])]:
+            with self.subTest(settings=settings):
+                (self.run_dir / 'qga-trace').unlink(missing_ok=True)
+                for item in (self.run_dir / 'guest-logs').glob('*'):
+                    item.unlink()
+                result = self.shell('orchestrate_guest_install', **settings)
+                self.assertNotEqual(result.returncode, 0)
+                events = [json.loads(line)[4] for line in (self.run_dir / 'qga-trace').read_text().splitlines()]
+                self.assertEqual(events, expected)
+                if 'READY_STATUS' in settings:
+                    self.assertIn('did not become ready within 1 seconds', result.stderr)
+                    self.assertIn('qga.log', result.stderr)
+
+    def test_artifact_summary_and_manifest_fail_closed(self):
+        logs = self.run_dir / 'guest-logs'
+        logs.mkdir()
+        for name in ['runner-install-exited-0', 'runner-logs-copied-0', 'install-test.log']:
+            (logs / name).touch()
+        summary = logs / 'install-test.summary.json'
+        for content in ['garbage', '{"success": false}', '{"success": true}']:
+            summary.write_text(content)
+            result = self.shell('verify_guest_artifacts')
+            self.assertNotEqual(result.returncode, 0)
+        (logs / 'install-test.manifest.json').touch()
+        self.assertEqual(self.shell('verify_guest_artifacts').returncode, 0)
+
+    def test_qmp_machine_control_and_serial_contract(self):
+        self.assertIn('--combo home', function('select_live_boot_entry'))
+        self.assertIn('--combo ret', function('select_live_boot_entry'))
+        self.assertNotIn('--text', SOURCE)
+        self.assertNotIn('GUEST_TERMINAL_OPEN_WAIT_SECONDS', SOURCE)
+        self.assertNotIn('ctrl-alt-t', SOURCE)
+        self.assertIn("grep -q 'RO_INSTALLER_VM_BOOT_OK'", function('monitor_auto_test'))
+        self.assertNotIn('VIEWER_PID', function('monitor_auto_test'))
         self.assertLess(SOURCE.index('\npreflight_display\n'), SOURCE.index('\nbuild_installer\n'))
 
 

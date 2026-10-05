@@ -69,9 +69,50 @@ if [ ! -x "$BINARY_PATH" ]; then
   exit 1
 fi
 
+# QGA's system service has no graphical-session environment. The Linux
+# Flutter runner still initializes GTK in auto mode. Use the existing live
+# Wayland socket without changing compositor permissions or ISO contents.
+if [ "${RO_INSTALLER_VM_USE_LIVE_DISPLAY:-0}" = 1 ]; then
+  display_timeout="${RO_INSTALLER_VM_DISPLAY_TIMEOUT_SECONDS:-120}"
+  case "$display_timeout" in
+    ''|*[!0-9]*) echo "Invalid live display timeout: $display_timeout" >&2; exit 1 ;;
+  esac
+  runtime_root="${RO_INSTALLER_VM_RUNTIME_ROOT:-/run/user}"
+  waited=0
+  while :; do
+    display_socket=""
+    for candidate in "$runtime_root"/*/wayland-*; do
+      [ -S "$candidate" ] || continue
+      if [ -n "$display_socket" ]; then
+        write_runner_state "display-ambiguous"
+        echo "Multiple live Wayland sockets found under $runtime_root" >&2
+        exit 1
+      fi
+      display_socket="$candidate"
+    done
+    [ -z "$display_socket" ] || break
+    if [ "$waited" -ge "$display_timeout" ]; then
+      write_runner_state "display-not-ready"
+      echo "Live Wayland display not ready within ${display_timeout}s under $runtime_root" >&2
+      exit 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  XDG_RUNTIME_DIR="$(dirname "$display_socket")"
+  WAYLAND_DISPLAY="$(basename "$display_socket")"
+  GDK_BACKEND=wayland
+  export XDG_RUNTIME_DIR WAYLAND_DISPLAY GDK_BACKEND
+fi
+
 write_runner_state "install-started"
 serial_marker "RO_INSTALLER_GUEST_RUNNER_INSTALL_START profile=$PROFILE_PATH"
-if sudo env \
+# QGA runs as root; interactive manual use retains the existing sudo path.
+ROOT_PREFIX=""
+if [ "$(id -u)" -ne 0 ]; then
+  ROOT_PREFIX="sudo"
+fi
+if $ROOT_PREFIX env \
   RO_INSTALLER_AUTO_PROFILE="$PROFILE_PATH" \
   RO_INSTALLER_AUTO_REBOOT="${RO_INSTALLER_AUTO_REBOOT:-1}" \
   RO_INSTALLER_VM_TEST_MODE="${RO_INSTALLER_VM_TEST_MODE:-1}" \
@@ -86,7 +127,13 @@ write_runner_state "install-exited-${status}"
 serial_marker "RO_INSTALLER_GUEST_RUNNER_INSTALL_EXIT status=$status"
 
 mkdir -p "$HOST_LOG_DIR" 2>/dev/null || true
-find "$LOCAL_LOG_DIR" -maxdepth 1 -type f -exec cp "{}" "$HOST_LOG_DIR"/ \; 2>/dev/null || true
+# Do not mark a partial or failed copy as successful.
+if ! cp -a "$LOCAL_LOG_DIR"/. "$HOST_LOG_DIR"/; then
+  write_runner_state "log-copy-failed-${status}"
+  serial_marker "RO_INSTALLER_GUEST_RUNNER_LOG_COPY_FAILED status=$status"
+  [ "$status" -ne 0 ] || status=1
+  exit "$status"
+fi
 write_runner_state "logs-copied-${status}"
 serial_marker "RO_INSTALLER_GUEST_RUNNER_LOG_COPY_DONE status=$status"
 

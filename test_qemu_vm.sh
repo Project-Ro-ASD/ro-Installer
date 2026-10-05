@@ -6,7 +6,7 @@ set -euo pipefail
 # Varsayılan akış:
 # 1. Linux release binary derlenir
 # 2. Harici Compose test ISO bir kez açılır
-# 3. QMP üzerinden Live oturuma komut enjekte edilir
+# 3. QGA readiness ve guest-exec ile Live runner baslatilir
 # 4. Guest tarafında profil tabanlı otomatik kurulum başlatılır
 # 5. Kurulu sistem reboot eder
 # 6. İlk açılışta smoke service seri porta "RO_INSTALLER_VM_BOOT_OK" yazar
@@ -23,11 +23,8 @@ RUN_DIR="$RUN_ROOT/$STAMP"
 DISK_SIZE="${DISK_SIZE:-64G}"
 MEMORY_MB="${MEMORY_MB:-4096}"
 CPU_COUNT="${CPU_COUNT:-4}"
-LIVE_BOOT_WAIT_SECONDS="${LIVE_BOOT_WAIT_SECONDS:-120}"
-GUEST_TERMINAL_OPEN_WAIT_SECONDS="${GUEST_TERMINAL_OPEN_WAIT_SECONDS:-6}"
+QGA_READY_TIMEOUT_SECONDS="${QGA_READY_TIMEOUT_SECONDS:-300}"
 AUTO_TEST_TIMEOUT_SECONDS="${AUTO_TEST_TIMEOUT_SECONDS:-1800}"
-GUEST_RUNNER_START_TIMEOUT_SECONDS="${GUEST_RUNNER_START_TIMEOUT_SECONDS:-300}"
-QMP_KEY_DELAY_MS="${QMP_KEY_DELAY_MS:-90}"
 BOOT_MENU_WAIT_SECONDS="${BOOT_MENU_WAIT_SECONDS:-20}"
 VM_GUEST_DISK="${VM_GUEST_DISK:-/dev/vda}"
 QEMU_DISPLAY_MODE="${QEMU_DISPLAY_MODE:-headless}"
@@ -36,6 +33,8 @@ HOST_MOUNT_IN_GUEST="${HOST_MOUNT_IN_GUEST:-/run/ro-host}"
 DISK_IMAGE="$RUN_DIR/test_disk.qcow2"
 SERIAL_LOG="$RUN_DIR/serial.log"
 QMP_SOCKET="$RUN_DIR/qmp.sock"
+QGA_SOCKET="$RUN_DIR/qga.sock"
+QGA_LOG="$RUN_DIR/qga.log"
 SPICE_SOCKET="$RUN_DIR/spice.sock"
 SPICE_VIEWER_FILE="$RUN_DIR/spice.vv"
 VIEWER_LOG="$RUN_DIR/remote-viewer.log"
@@ -45,6 +44,7 @@ GENERATED_PROFILE_RELATIVE_PATH="outputs/vm/$STAMP/auto_profile.json"
 GENERATED_PROFILE_PATH="$PROJECT_DIR/$GENERATED_PROFILE_RELATIVE_PATH"
 
 mkdir -p "$RUN_DIR"
+chmod 700 "$RUN_DIR"
 mkdir -p "$HOST_VM_LOG_DIR"
 
 info() {
@@ -119,17 +119,20 @@ preflight_display() {
 }
 
 configure_display() {
-  DISPLAY_ARGS=()
+  DISPLAY_ARGS=(
+    -device virtio-serial-pci,id=virtio_serial0
+    -chardev "socket,id=qga,path=$QGA_SOCKET,server=on,wait=off"
+    -device virtserialport,bus=virtio_serial0.0,nr=1,chardev=qga,name=org.qemu.guest_agent.0
+  )
   case "$QEMU_DISPLAY_MODE" in
-    headless) DISPLAY_ARGS=(-display none) ;;
+    headless) DISPLAY_ARGS+=(-display none) ;;
     gui) ;;
     spice)
-      DISPLAY_ARGS=(
+      DISPLAY_ARGS+=(
         -display none
         -spice "unix=on,addr=$SPICE_SOCKET,disable-ticketing=on"
-        -device virtio-serial-pci
         -chardev spicevmc,id=vdagent,name=vdagent
-        -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
+        -device virtserialport,bus=virtio_serial0.0,nr=2,chardev=vdagent,name=com.redhat.spice.0
       )
       ;;
     *) fail "Gecersiz QEMU_DISPLAY_MODE: $QEMU_DISPLAY_MODE (headless|gui|spice)" ;;
@@ -401,9 +404,10 @@ run_manual_mode() {
   info "Profil tabanli guest runner hazir: $PROJECT_DIR/test_qemu_guest_runner.sh"
   warn "Bu modda komut enjeksiyonu yapilmaz; VM ekrani ile siz ilgilenirsiniz."
 
-  DISPLAY_ARGS=()
-  if [ "$QEMU_DISPLAY_MODE" = "spice" ]; then
-    configure_display
+  configure_display
+  # Preserve the native window in non-SPICE manual mode.
+  if [ "$QEMU_DISPLAY_MODE" = "headless" ]; then
+    DISPLAY_ARGS=("${DISPLAY_ARGS[@]:0:6}")
   fi
 
   "${HOST_PREFIX[@]}" qemu-system-x86_64 \
@@ -459,44 +463,69 @@ launch_auto_vm() {
   info "QEMU PID: $QEMU_PID"
 }
 
-send_guest_command() {
-  local command_text="$1"
-  [[ "$GUEST_TERMINAL_OPEN_WAIT_SECONDS" =~ ^([0-9]|[1-5][0-9]|60)$ ]] ||
-    fail "GUEST_TERMINAL_OPEN_WAIT_SECONDS must be an integer from 0 to 60."
+wait_for_qga_ready() {
+  info "Waiting for QEMU Guest Agent (up to ${QGA_READY_TIMEOUT_SECONDS}s)..."
+  if ! python3 "$PROJECT_DIR/linux/qga_client.py" --socket "$QGA_SOCKET" \
+      --timeout "$QGA_READY_TIMEOUT_SECONDS" ready >> "$QGA_LOG" 2>&1; then
+    warn "QEMU Guest Agent did not become ready within $QGA_READY_TIMEOUT_SECONDS seconds. Check $QGA_LOG, $SERIAL_LOG and $RUN_DIR; verify qemu-guest-agent.service and org.qemu.guest_agent.0 in the live guest."
+    return 1
+  fi
+}
 
-  info "Live ortamda komut enjeksiyonu icin $LIVE_BOOT_WAIT_SECONDS saniye bekleniyor..."
-  sleep "$LIVE_BOOT_WAIT_SECONDS"
+run_guest_install() {
+  local command_text
+  # Quote guest paths using POSIX shell quoting, including custom mount paths.
+  command_text="$(python3 - "$HOST_MOUNT_IN_GUEST" "$GENERATED_PROFILE_RELATIVE_PATH" <<'PYTHON'
+import shlex
+import sys
+mount, profile = sys.argv[1:]
+q = shlex.quote
+print(f'mkdir -p {q(mount)} && mount -t 9p -o trans=virtio hostshare {q(mount)} && '
+      f'HOST_MOUNT={q(mount)} RO_INSTALLER_AUTO_REBOOT=0 RO_INSTALLER_VM_USE_LIVE_DISPLAY=1 sh '
+      f'{q(mount + "/test_qemu_guest_runner.sh")} {q(mount + "/" + profile)}')
+PYTHON
+)"
+  info "Running guest Installer via QGA; output: $QGA_LOG"
+  python3 "$PROJECT_DIR/linux/qga_client.py" --socket "$QGA_SOCKET" \
+    --timeout "$AUTO_TEST_TIMEOUT_SECONDS" exec /bin/sh -c "$command_text" >> "$QGA_LOG" 2>&1
+}
 
-  info "Konsole aciliyor (Ctrl+Alt+T)..."
-  python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
-    --socket "$QMP_SOCKET" \
-    --delay-ms "$QMP_KEY_DELAY_MS" \
-    --combo ctrl-alt-t
+verify_guest_artifacts() {
+  [ -f "$HOST_VM_LOG_DIR/runner-install-exited-0" ] && \
+    [ -f "$HOST_VM_LOG_DIR/runner-logs-copied-0" ] || {
+      warn "Successful guest runner/log-copy markers missing: $HOST_VM_LOG_DIR"
+      return 1
+    }
+  python3 - "$HOST_VM_LOG_DIR" <<'PYTHON'
+import json
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+try:
+    summaries = sorted(root.glob('install-*.summary.json'))
+    if not summaries:
+        raise ValueError('Successful Installer summary missing')
+    for summary in summaries:
+        if json.loads(summary.read_text()).get('success') is not True:
+            raise ValueError(f'Installer summary is not successful: {summary}')
+        stem = str(summary).removesuffix('.summary.json')
+        if not Path(stem + '.log').is_file() or not Path(stem + '.manifest.json').is_file():
+            raise ValueError(f'Installer log/manifest missing: {summary}')
+except (ValueError, OSError) as exc:
+    sys.exit(f'Guest artifact verification failed: {exc}')
+PYTHON
+}
 
-  sleep "$GUEST_TERMINAL_OPEN_WAIT_SECONDS"
+reboot_guest() {
+  info "Guest logs verified; requesting reboot through QGA."
+  # systemctl schedules reboot after QGA acknowledges guest-exec. Never poll
+  # this PID: the agent is allowed to disappear after the acknowledgement.
+  python3 "$PROJECT_DIR/linux/qga_client.py" --socket "$QGA_SOCKET" \
+    --timeout 30 submit /bin/sh -c 'sleep 2 && systemctl reboot' >> "$QGA_LOG" 2>&1
+}
 
-  # Settle the prompt and cancel partial input before sending command text.
-  python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
-    --socket "$QMP_SOCKET" \
-    --combo ret
-  sleep 1
-  python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
-    --socket "$QMP_SOCKET" \
-    --combo ctrl-c
-  python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
-    --socket "$QMP_SOCKET" \
-    --combo ret
-  sleep 1
-
-  info "Guest terminaline runner komutu gonderiliyor..."
-  python3 "$PROJECT_DIR/linux/qmp_send_keys.py" \
-    --socket "$QMP_SOCKET" \
-    --text "$command_text" \
-    --delay-ms "$QMP_KEY_DELAY_MS" \
-    --enter
-
-  info "Komut gonderildi. Kurulum, reboot ve smoke test bekleniyor."
-  info "Zaman asimi: $AUTO_TEST_TIMEOUT_SECONDS saniye. Seri log: $SERIAL_LOG"
+orchestrate_guest_install() {
+  wait_for_qga_ready && run_guest_install && verify_guest_artifacts && reboot_guest
 }
 
 monitor_auto_test() {
@@ -504,7 +533,6 @@ monitor_auto_test() {
   local next_progress=60
   local failed_summary
   local elapsed
-  local runner_state_file="${HOST_VM_LOG_DIR}/runner-state.txt"
 
   while [ "$SECONDS" -lt "$deadline" ]; do
     if [ -f "$SERIAL_LOG" ] && grep -q 'RO_INSTALLER_VM_BOOT_OK' "$SERIAL_LOG"; then
@@ -516,14 +544,6 @@ monitor_auto_test() {
     if [ -n "$failed_summary" ] && grep -q '"success"[[:space:]]*:[[:space:]]*false' "$failed_summary"; then
       warn "Installer failure summary bulundu: $failed_summary"
       return 1
-    fi
-
-    elapsed=$((AUTO_TEST_TIMEOUT_SECONDS - (deadline - SECONDS)))
-    if [ "$elapsed" -ge "$GUEST_RUNNER_START_TIMEOUT_SECONDS" ]; then
-      if [[ ! -s "$runner_state_file" ]] && ! grep -q 'RO_INSTALLER_GUEST_RUNNER_START' "$SERIAL_LOG" 2>/dev/null; then
-        warn "Guest runner baslangic marker'i ${GUEST_RUNNER_START_TIMEOUT_SECONDS}s icinde gorulmedi; komut enjeksiyonu baslamamis olabilir."
-        return 1
-      fi
     fi
 
     if ! kill -0 "$QEMU_PID" 2>/dev/null; then
@@ -551,11 +571,12 @@ print_failure_context() {
   warn "Otomatik VM testi basarisiz oldu."
   warn "Calisma dizini: $RUN_DIR"
   warn "Seri log: $SERIAL_LOG"
+  warn "QGA log: $QGA_LOG"
   if [ -s "$runner_state_file" ]; then
     warn "Guest runner state: $runner_state_file"
     cat "$runner_state_file" >&2 || true
   elif ! grep -q 'RO_INSTALLER_GUEST_RUNNER_START' "$SERIAL_LOG" 2>/dev/null; then
-    warn "Guest runner baslangic marker'i seri logda yok; QMP klavye enjeksiyonu live oturumda komutu baslatamamis olabilir."
+    warn "Guest runner baslangic marker'i seri logda yok; QGA runner baslamamis olabilir; QGA logunu inceleyin."
   fi
   latest_summary="$(find "$HOST_VM_LOG_DIR" -maxdepth 1 -type f -name '*.summary.json' -print 2>/dev/null | sort | tail -n 1)"
   latest_install_log="$(find "$HOST_VM_LOG_DIR" -maxdepth 1 -type f -name '*.log' -print 2>/dev/null | sort | tail -n 1)"
@@ -607,7 +628,6 @@ info "OVMF VARS: $OVMF_VARS_TEMPLATE"
 info "Calisma dizini: $RUN_DIR"
 info "Guest log dizini: $HOST_VM_LOG_DIR"
 info "QEMU display modu: $QEMU_DISPLAY_MODE"
-info "QMP tus gecikmesi: ${QMP_KEY_DELAY_MS}ms"
 info "Guest host paylasim mount noktasi: $HOST_MOUNT_IN_GUEST"
 
 build_installer
@@ -624,11 +644,12 @@ if [ "$MODE" != "auto" ]; then
   fail "Gecersiz mod: $MODE (kullanim: ./test_qemu_vm.sh [auto|manual] [profil])"
 fi
 
-RUN_DIALOG_COMMAND="sudo mkdir -p $HOST_MOUNT_IN_GUEST && sudo mount -t 9p -o trans=virtio hostshare $HOST_MOUNT_IN_GUEST && sh $HOST_MOUNT_IN_GUEST/test_qemu_guest_runner.sh $HOST_MOUNT_IN_GUEST/$GENERATED_PROFILE_RELATIVE_PATH"
-
 launch_auto_vm
 select_live_boot_entry
-send_guest_command "$RUN_DIALOG_COMMAND"
+if ! orchestrate_guest_install; then
+  print_failure_context
+  exit 1
+fi
 
 if monitor_auto_test; then
   info "Otomatik VM testi basarili."

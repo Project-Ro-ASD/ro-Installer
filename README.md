@@ -150,18 +150,45 @@ The clipboard path is host desktop → remote-viewer → SPICE → virtio-serial
 vdagent channel → spice-vdagent in the live guest. QMP does not synchronize
 clipboard content, and no custom clipboard scripts or SSH are used.
 
-SPICE provides interactive viewing/input only. Automation remains external
-Compose ISO → UEFI boot → QMP boot menu interaction → QMP Ctrl+Alt+T → command
-injection → 9p mount → `test_qemu_guest_runner.sh` → Installer → reboot →
-`RO_INSTALLER_VM_BOOT_OK`. The serial smoke marker remains authoritative,
-independent of the viewer's exit status. After QMP Ctrl+Alt+T, the harness waits
-`GUEST_TERMINAL_OPEN_WAIT_SECONDS` (default 6, integer range 0–60), then sends
-Enter, waits one second, sends Ctrl+C and Enter, and waits one second before
-command text.
-The one-line mkdir → 9p mount → guest runner chain uses `&&`, so a failed
-preparation step stops the runner. Run the focused harness tests without
-booting QEMU with `python3 test/scripts/qemu_spice_test.py`; they also run in
-the normal Flutter test suite and stable gate.
+SPICE is for local human viewing and clipboard/input; QMP remains machine
+control and short boot-menu key combinations. QGA executes guest commands,
+9p transports files, and the serial `RO_INSTALLER_VM_BOOT_OK` marker is the final
+boot authority, independent of QGA availability and viewer exit status.
+
+Automation follows external Compose ISO → QEMU UEFI → QGA readiness → QGA
+`guest-exec` → 9p mount → `test_qemu_guest_runner.sh` → Installer with
+`RO_INSTALLER_AUTO_REBOOT=0` → logs copied to host → QGA reboot → installed
+target → serial `RO_INSTALLER_VM_BOOT_OK` → smoke-service poweroff. The runner's
+manual default for automatic reboot remains unchanged.
+
+All display modes expose `$RUN_DIR/qga.sock`, a Unix-only socket under the
+private (0700) run directory. One `virtio-serial-pci,id=virtio_serial0` controller
+carries QGA on port 1 (`org.qemu.guest_agent.0`) and, in SPICE mode, vdagent on
+port 2 (`com.redhat.spice.0`). The external live ISO must contain an enabled
+`qemu-guest-agent.service`; the named device lets it start without terminal input.
+
+The host retries socket connection, protocol synchronization and `guest-ping`
+for `QGA_READY_TIMEOUT_SECONDS` (default 300). Each connection uses
+[`guest-sync-delimited`](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html#command-guest-sync-delimited)
+with a fresh token and sentinel to discard stale stream data. Readiness timeout
+fails closed and points to `qga.log`, `serial.log`, and the run directory.
+There is no keyboard fallback. `/bin/sh -c` runs the quoted mkdir → mount →
+runner chain with `&&`, without interactive sudo. Because the Flutter Linux runner initializes GTK even
+in auto mode, the QGA harness waits up to 120 seconds for one existing live
+Wayland socket under `/run/user` and passes its `XDG_RUNTIME_DIR`,
+`WAYLAND_DISPLAY`, and `GDK_BACKEND=wayland`. Missing or ambiguous displays
+fail closed; compositor permissions are unchanged. Execution/status polling is
+bounded by `AUTO_TEST_TIMEOUT_SECONDS` (default 1800); unexpected agent loss
+or a nonzero runner exit fails without reboot, retaining available diagnostics.
+
+Before reboot the host requires `runner-install-exited-0`, `runner-logs-copied-0`,
+a successful Installer summary and matching log/manifest. Copy failures fail the
+E2E. QGA acknowledges the reboot shell's PID before the host returns to serial
+monitoring; a short guest delay lets that acknowledgement arrive before
+`systemctl reboot` disconnects the agent. Serial boot monitoring has its own
+`AUTO_TEST_TIMEOUT_SECONDS` bound. Focused tests require no VM:
+`python3 test/scripts/qemu_spice_test.py` and
+`python3 test/scripts/qga_client_test.py` (also covered by the stable gate).
 
 The install harness builds the current Flutter Linux release binary and exposes
 the current bundle and sanitized profile through a 9p host share. The live guest
