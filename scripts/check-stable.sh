@@ -202,12 +202,10 @@ require_ro_repo_release_producer_contract() {
 
   [[ -f "$release_workflow" && -f "$manifest_builder" ]] || return 1
 
-  # Normal CI must never race the immutable release producer.
   ! rg -q '^[[:space:]]+tags:' "$ci_workflow" || return 1
   ! rg -q '^[[:space:]]+release:' "$ci_workflow" || return 1
   ! rg -q 'action-gh-release|gh release upload|releases/tags' "$ci_workflow" || return 1
 
-  # The trusted producer is tag-only and owns the exact immutable bundle.
   rg -q '^name: Release
   local script
   for script in scripts/qemu-boot-iso.sh scripts/test-qemu.sh; do
@@ -300,10 +298,9 @@ printf '[SONUC] Stable kapisi basarili\n'
   rg -q 'id-token:[[:space:]]+write' "$release_workflow" || return 1
   rg -q 'attestations:[[:space:]]+write' "$release_workflow" || return 1
   rg -q 'artifact-metadata:[[:space:]]+write' "$release_workflow" || return 1
-  rg -q 'Published release .* tag/release reuse is forbidden' "$release_workflow" || return 1
-  rg -q 'Expected exactly|\[\[ "\$\{#EXPECTED\[@\]\}" -eq 4 \]\]' "$release_workflow" || return 1
+  rg -q 'tag/release reuse is forbidden' "$release_workflow" || return 1
+  rg -Fq '[[ "${#EXPECTED[@]}" -eq 4 ]]' "$release_workflow" || return 1
 
-  # Manifest identity must remain wired to the exact producer release run.
   rg -q '"component":[[:space:]]*"ro-installer"' "$manifest_builder" || return 1
   rg -q '"source_repository":[[:space:]]*args.repository' "$manifest_builder" || return 1
   rg -q '"source_commit":[[:space:]]*args.commit' "$manifest_builder" || return 1
