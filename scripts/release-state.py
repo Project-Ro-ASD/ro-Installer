@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve the exact GitHub Release state for one immutable tag."""
+"""Classify one immutable GitHub Release tag from gh release list JSON."""
 
 from __future__ import annotations
 
@@ -22,21 +22,13 @@ def classify(releases: object, tag: str) -> dict[str, object]:
         raise ValueError(f"multiple releases found for tag {tag}")
 
     if not matches:
-        return {"state": "absent", "release_id": None}
+        return {"state": "absent"}
 
-    item = matches[0]
-    release_id = item.get("databaseId")
-    is_draft = item.get("isDraft")
-
-    if not isinstance(release_id, int) or release_id <= 0:
-        raise ValueError(f"invalid release databaseId for tag {tag}: {release_id!r}")
+    is_draft = matches[0].get("isDraft")
     if not isinstance(is_draft, bool):
         raise ValueError(f"invalid isDraft for tag {tag}: {is_draft!r}")
 
-    return {
-        "state": "draft" if is_draft else "published",
-        "release_id": release_id,
-    }
+    return {"state": "draft" if is_draft else "published"}
 
 
 def main() -> int:
