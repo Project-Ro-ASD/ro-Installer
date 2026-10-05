@@ -29,6 +29,8 @@ BOOT_MENU_WAIT_SECONDS="${BOOT_MENU_WAIT_SECONDS:-20}"
 VM_GUEST_DISK="${VM_GUEST_DISK:-/dev/vda}"
 QEMU_DISPLAY_MODE="${QEMU_DISPLAY_MODE:-headless}"
 HOST_MOUNT_IN_GUEST="${HOST_MOUNT_IN_GUEST:-/run/ro-host}"
+# Guest service environments need not include normal system command locations.
+GUEST_COMMAND_PATH="${GUEST_COMMAND_PATH-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 
 DISK_IMAGE="$RUN_DIR/test_disk.qcow2"
 SERIAL_LOG="$RUN_DIR/serial.log"
@@ -58,6 +60,16 @@ warn() {
 fail() {
   printf '[HATA] %s\n' "$*" >&2
   exit 1
+}
+
+validate_guest_command_path() {
+  # Reject empty entries (which search cwd) and relative command directories.
+  case ":$GUEST_COMMAND_PATH" in
+    :|*::*|*:|*:[!/]*)
+      warn "GUEST_COMMAND_PATH must contain only nonempty absolute directories."
+      return 1
+      ;;
+  esac
 }
 
 HOST_PREFIX=()
@@ -474,14 +486,16 @@ wait_for_qga_ready() {
 
 run_guest_install() {
   local command_text
+  validate_guest_command_path || return 1
   # Quote guest paths using POSIX shell quoting, including custom mount paths.
-  command_text="$(python3 - "$HOST_MOUNT_IN_GUEST" "$GENERATED_PROFILE_RELATIVE_PATH" <<'PYTHON'
+  command_text="$(python3 - "$HOST_MOUNT_IN_GUEST" "$GENERATED_PROFILE_RELATIVE_PATH" "$GUEST_COMMAND_PATH" <<'PYTHON'
 import shlex
 import sys
-mount, profile = sys.argv[1:]
+mount, profile, guest_path = sys.argv[1:]
 q = shlex.quote
-print(f'mkdir -p {q(mount)} && mount -t 9p -o trans=virtio hostshare {q(mount)} && '
-      f'HOST_MOUNT={q(mount)} RO_INSTALLER_AUTO_REBOOT=0 RO_INSTALLER_VM_USE_LIVE_DISPLAY=1 sh '
+print(f'PATH={q(guest_path)}; export PATH; '
+      f'mkdir -p {q(mount)} && mount -t 9p -o trans=virtio hostshare {q(mount)} && '
+      f'GUEST_COMMAND_PATH={q(guest_path)} HOST_MOUNT={q(mount)} RO_INSTALLER_AUTO_REBOOT=0 RO_INSTALLER_VM_USE_LIVE_DISPLAY=1 sh '
       f'{q(mount + "/test_qemu_guest_runner.sh")} {q(mount + "/" + profile)}')
 PYTHON
 )"
@@ -517,11 +531,19 @@ PYTHON
 }
 
 reboot_guest() {
+  validate_guest_command_path || return 1
+  local command_text
+  command_text="$(python3 - "$GUEST_COMMAND_PATH" <<'PYTHON'
+import shlex
+import sys
+print(f'PATH={shlex.quote(sys.argv[1])}; export PATH; sleep 2 && systemctl reboot')
+PYTHON
+)"
   info "Guest logs verified; requesting reboot through QGA."
   # systemctl schedules reboot after QGA acknowledges guest-exec. Never poll
   # this PID: the agent is allowed to disappear after the acknowledgement.
   python3 "$PROJECT_DIR/linux/qga_client.py" --socket "$QGA_SOCKET" \
-    --timeout 30 submit /bin/sh -c 'sleep 2 && systemctl reboot' >> "$QGA_LOG" 2>&1
+    --timeout 30 submit /bin/sh -c "$command_text" >> "$QGA_LOG" 2>&1
 }
 
 orchestrate_guest_install() {
@@ -597,6 +619,7 @@ print_failure_context() {
   fi
 }
 
+validate_guest_command_path || exit 1
 ISO_FILE="$(resolve_iso)"
 
 require_host_cmd qemu-system-x86_64

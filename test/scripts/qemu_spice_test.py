@@ -17,12 +17,16 @@ def function(name):
 
 
 FUNCTIONS = '\n'.join(function(name) for name in [
-    'info', 'warn', 'fail', 'run_host', 'cleanup', 'preflight_display',
+    'info', 'warn', 'fail', 'validate_guest_command_path', 'run_host', 'cleanup', 'preflight_display',
     'configure_display', 'wait_for_spice_socket', 'launch_spice_viewer',
     'wait_for_qmp_socket', 'launch_auto_vm', 'monitor_auto_test',
     'wait_for_qga_ready', 'run_guest_install', 'verify_guest_artifacts',
     'reboot_guest', 'orchestrate_guest_install',
 ])
+
+
+GUEST_PATH_SETTING = re.search(r'^GUEST_COMMAND_PATH=.*$', SOURCE, re.MULTILINE).group()
+CANONICAL_GUEST_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 
 class SpiceHarnessTest(unittest.TestCase):
@@ -92,7 +96,7 @@ require_host_cmd() {
   command -v "$1" >/dev/null || fail "missing $1 (virt-viewer)"
 }
 '''
-        return subprocess.run(['bash', '-c', setup + '\n' + FUNCTIONS +
+        return subprocess.run(['bash', '-c', setup + '\n' + GUEST_PATH_SETTING + '\n' + FUNCTIONS +
                                '\ntrap cleanup EXIT\n' + commands],
                               env=env, capture_output=True, text=True, timeout=20)
 
@@ -277,7 +281,9 @@ if 'exec' in args:
         self.assertEqual([event[4] for event in events], ['ready', 'exec', 'submit'])
         command = events[1][-1]
         self.assertIn('mkdir -p /run/ro-host && mount -t 9p', command)
-        self.assertIn('hostshare /run/ro-host && HOST_MOUNT=', command)
+        self.assertIn('hostshare /run/ro-host && GUEST_COMMAND_PATH=', command)
+        self.assertIn(f'PATH={CANONICAL_GUEST_PATH}; export PATH; ', command)
+        self.assertIn(f'PATH={CANONICAL_GUEST_PATH}; export PATH; ', events[2][-1])
         self.assertIn('RO_INSTALLER_AUTO_REBOOT=0 RO_INSTALLER_VM_USE_LIVE_DISPLAY=1 sh /run/ro-host/test_qemu_guest_runner.sh', command)
         self.assertIn('/bin/sh', events[1])
         self.assertNotIn('sudo', command)
@@ -285,7 +291,7 @@ if 'exec' in args:
 
     def test_guest_preparation_chain_stops_on_failure(self):
         self.qga_trace_helper()
-        result = self.shell('run_guest_install')
+        result = self.shell('run_guest_install', GUEST_COMMAND_PATH=f'{self.tools}:{CANONICAL_GUEST_PATH}')
         self.assertEqual(result.returncode, 0, result.stderr)
         command = json.loads((self.run_dir / 'qga-trace').read_text().splitlines()[0])[-1]
         for name, variable in [('mkdir', 'MKDIR_STATUS'), ('mount', 'MOUNT_STATUS')]:
@@ -298,7 +304,7 @@ if 'exec' in args:
             trace.unlink(missing_ok=True)
             result = subprocess.run(['/bin/sh', '-c', command], capture_output=True,
                                     env=dict(os.environ, RUN_DIR=str(self.run_dir),
-                                             PATH=f'{self.tools}:{os.environ["PATH"]}',
+                                             PATH='',
                                              MKDIR_STATUS=mkdir, MOUNT_STATUS=mount))
             self.assertEqual(result.returncode == 0, mkdir == mount == '0')
             self.assertEqual(trace.read_text().splitlines(), expected)
@@ -335,7 +341,7 @@ exit "${INSTALL_STATUS:-0}"
             local = self.run_dir / f'local-{status}-{copy_failure}'
             result = subprocess.run(['/bin/sh', str(ROOT / 'test_qemu_guest_runner.sh'), str(profile)],
                 capture_output=True, env=dict(os.environ,
-                    PATH=f'{self.tools}:{os.environ["PATH"]}', HOST_MOUNT=str(host),
+                    PATH='/no-qga-commands', GUEST_COMMAND_PATH=f'{self.tools}:{CANONICAL_GUEST_PATH}', HOST_MOUNT=str(host),
                     RO_INSTALLER_VM_BINARY=str(binary), RO_INSTALLER_VM_LOG_DIR=str(logs),
                     RO_INSTALLER_LOCAL_LOG_DIR=str(local), RO_INSTALLER_AUTO_REBOOT='0',
                     INSTALL_STATUS=status, FAIL_COPY=copy_failure,
@@ -367,6 +373,101 @@ exit "${INSTALL_STATUS:-0}"
         self.assertIn('Live Wayland display not ready', result.stderr)
         self.assertTrue((logs / 'runner-display-not-ready').exists())
         self.assertFalse((logs / 'runner-install-started').exists())
+
+    def test_generated_install_resolves_system_commands_with_empty_or_bad_path(self):
+        self.qga_trace_helper()
+        result = self.shell('run_guest_install')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        command = json.loads((self.run_dir / 'qga-trace').read_text().splitlines()[0])[-1]
+        # Stop before mounting anything. Intercept the actual generated chain
+        # and check command discovery under the exported guest PATH.
+        probe = r"""
+mkdir() {
+  [ "$PATH" = "$EXPECTED_PATH" ] || exit 91
+  for tool in mkdir mount sh env cp systemctl; do
+    # A new shell avoids the test functions shadowing command discovery.
+    resolved=$(/bin/sh -c 'command -v "$1"' sh "$tool") || exit 92
+    case "$resolved" in /*) ;; *) exit 93 ;; esac
+  done
+  /usr/bin/env | /usr/bin/grep -Fx "PATH=$EXPECTED_PATH" || exit 94
+}
+mount() { return 73; }
+"""
+        for inherited in ['', '/no-qga-commands']:
+            result = subprocess.run(['/bin/sh', '-c', probe + command],
+                capture_output=True, text=True,
+                env=dict(os.environ, PATH=inherited, EXPECTED_PATH=CANONICAL_GUEST_PATH))
+            self.assertEqual(result.returncode, 73, result.stderr)
+            self.assertNotIn('command not found', result.stderr)
+
+    def test_runner_default_path_precedes_external_commands(self):
+        runner = (ROOT / 'test_qemu_guest_runner.sh').read_text()
+        self.assertLess(runner.index('export PATH'), runner.index('$(dirname'))
+        for inherited in ['', '/no-qga-commands']:
+            logs = self.run_dir / ('runner-empty' if not inherited else 'runner-restricted')
+            env = dict(os.environ, PATH=inherited, HOST_MOUNT=str(self.run_dir),
+                       RO_INSTALLER_VM_LOG_DIR=str(logs), RO_INSTALLER_LOCAL_LOG_DIR=str(logs / 'local'))
+            env.pop('GUEST_COMMAND_PATH', None)
+            result = subprocess.run(['/bin/sh', str(ROOT / 'test_qemu_guest_runner.sh'),
+                                     str(self.run_dir / 'missing-profile.json')],
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertTrue((logs / 'runner-profile-missing').exists())
+            self.assertNotIn('not found', result.stderr)
+        setup = runner[:runner.index('HOST_MOUNT=')]
+        result = subprocess.run(['/bin/sh', '-c', setup + '\nprintf "%s" "$PATH"'],
+                                env={'PATH': '/no-qga-commands'}, capture_output=True, text=True)
+        self.assertEqual(result.stdout, CANONICAL_GUEST_PATH)
+
+    def test_reboot_command_uses_explicit_path_with_restricted_environment(self):
+        self.qga_trace_helper()
+        self.tool('sleep', '#!/bin/sh\necho sleep:$1 >> "$RUN_DIR/reboot-trace"\n')
+        self.tool('systemctl', '#!/bin/sh\necho systemctl:$1 >> "$RUN_DIR/reboot-trace"\n')
+        result = self.shell('reboot_guest', GUEST_COMMAND_PATH=f'{self.tools}:{CANONICAL_GUEST_PATH}')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        command = json.loads((self.run_dir / 'qga-trace').read_text().splitlines()[0])[-1]
+        for inherited in ['', '/no-qga-commands']:
+            trace = self.run_dir / 'reboot-trace'
+            trace.unlink(missing_ok=True)
+            result = subprocess.run(['/bin/sh', '-c', command], capture_output=True,
+                                    env=dict(os.environ, PATH=inherited, RUN_DIR=str(self.run_dir)))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(trace.read_text().splitlines(), ['sleep:2', 'systemctl:reboot'])
+
+    def test_guest_path_override_rejects_empty_or_relative_entries(self):
+        self.qga_trace_helper()
+        for path in ['', 'bin', '/usr/bin:', ':/usr/bin', '/usr/bin::/bin', '/bin:relative']:
+            for operation in ['run_guest_install', 'reboot_guest']:
+                result = self.shell(operation, GUEST_COMMAND_PATH=path)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('nonempty absolute directories', result.stderr)
+            result = subprocess.run(['/bin/sh', str(ROOT / 'test_qemu_guest_runner.sh')],
+                                    capture_output=True, text=True,
+                                    env=dict(os.environ, GUEST_COMMAND_PATH=path))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('nonempty absolute directories', result.stderr)
+        self.assertFalse((self.run_dir / 'qga-trace').exists())
+
+    def test_guest_path_and_custom_guest_paths_are_shell_quoted(self):
+        self.qga_trace_helper()
+        result = self.shell('HOST_MOUNT_IN_GUEST="/run/host share\'s"; '
+                            'GENERATED_PROFILE_RELATIVE_PATH="profiles/a b\'s.json"; run_guest_install',
+                            GUEST_COMMAND_PATH="/guest bin's:/usr/bin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        command = json.loads((self.run_dir / 'qga-trace').read_text().splitlines()[0])[-1]
+        probe = r"""
+mkdir() { [ "$1" = -p ] && [ "$2" = "/run/host share's" ]; }
+mount() { [ "$6" = "/run/host share's" ]; }
+sh() {
+  [ "$PATH" = "/guest bin's:/usr/bin" ] &&
+  [ "$GUEST_COMMAND_PATH" = "$PATH" ] &&
+  [ "$1" = "/run/host share's/test_qemu_guest_runner.sh" ] &&
+  [ "$2" = "/run/host share's/profiles/a b's.json" ]
+}
+"""
+        result = subprocess.run(['/bin/sh', '-c', probe + command], capture_output=True,
+                                env=dict(os.environ, PATH=''))
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_qga_failures_never_reboot_or_use_keyboard(self):
         self.qga_trace_helper()

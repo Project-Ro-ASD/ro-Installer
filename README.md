@@ -173,8 +173,15 @@ for `QGA_READY_TIMEOUT_SECONDS` (default 300). Each connection uses
 with a fresh token and sentinel to discard stale stream data. Readiness timeout
 fails closed and points to `qga.log`, `serial.log`, and the run directory.
 There is no keyboard fallback. `/bin/sh -c` runs the quoted mkdir → mount →
-runner chain with `&&`, without interactive sudo. Because the Flutter Linux runner initializes GTK even
-in auto mode, the QGA harness waits up to 120 seconds for one existing live
+runner chain with `&&`, without interactive sudo.
+Install and reboot shells explicitly export `GUEST_COMMAND_PATH` (default
+`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`) before external
+commands. The guest runner resets and exports PATH before its first external
+command using the same default or explicit harness override, ignoring inherited
+service/shell PATH. Empty overrides, empty entries, and relative directories
+are rejected; custom mount/profile/PATH values are shell-quoted.
+
+Because the Flutter Linux runner initializes GTK even in auto mode, the QGA harness waits up to 120 seconds for one existing live
 Wayland socket under `/run/user` and passes its `XDG_RUNTIME_DIR`,
 `WAYLAND_DISPLAY`, and `GDK_BACKEND=wayland`. Missing or ambiguous displays
 fail closed; compositor permissions are unchanged. Execution/status polling is

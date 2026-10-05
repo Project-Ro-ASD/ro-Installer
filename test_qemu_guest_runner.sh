@@ -1,6 +1,18 @@
 #!/bin/sh
 set -eu
 
+# Ignore inherited PATH, including nonempty restricted QGA service values.
+# An explicit harness override uses the same policy as the host command shell.
+GUEST_COMMAND_PATH="${GUEST_COMMAND_PATH-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+case ":$GUEST_COMMAND_PATH" in
+  :|*::*|*:|*:[!/]*)
+    echo "GUEST_COMMAND_PATH must contain only nonempty absolute directories." >&2
+    exit 1
+    ;;
+esac
+PATH="$GUEST_COMMAND_PATH"
+export PATH
+
 HOST_MOUNT="${HOST_MOUNT:-/run/ro-host}"
 PROFILE_PATH="${1:-${RO_INSTALLER_VM_PROFILE:-$HOST_MOUNT/test/fixtures/profile_full_btrfs.json}}"
 BINARY_PATH="${RO_INSTALLER_VM_BINARY:-$HOST_MOUNT/build/linux/x64/release/bundle/ro_installer}"
