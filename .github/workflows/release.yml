@@ -221,25 +221,47 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null || true)"
-          if [[ -n "${EXISTING}" ]]; then
-            EXISTING_ID="$(jq -r '.id' <<<"${EXISTING}")"
-            if [[ "$(jq -r '.draft' <<<"${EXISTING}")" == "true" ]]; then
-              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${EXISTING_ID}"
-            else
+
+          gh release list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --limit 100 \
+            --json tagName,isDraft > release-list.json
+
+          RELEASE_STATE="$(
+            python3 scripts/release-state.py --tag "${TAG}" --input release-list.json |
+              jq -r '.state'
+          )"
+
+          case "${RELEASE_STATE}" in
+            absent)
+              ;;
+            draft)
+              gh release delete "${TAG}" --repo "${GITHUB_REPOSITORY}" --yes
+              ;;
+            published)
               echo "Published release ${TAG} already exists; tag/release reuse is forbidden." >&2
               exit 1
-            fi
-          fi
+              ;;
+            *)
+              echo "Unexpected release state for ${TAG}: ${RELEASE_STATE}" >&2
+              exit 1
+              ;;
+          esac
 
-          RELEASE_JSON="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
-            -f tag_name="${TAG}" \
-            -f target_commitish="${GITHUB_SHA}" \
-            -f name="${TAG}" \
-            -F draft=true \
-            -F generate_release_notes=true)"
-          RELEASE_ID="$(jq -r '.id' <<<"${RELEASE_JSON}")"
-          test -n "${RELEASE_ID}"
+          gh release create "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft \
+            --verify-tag \
+            --title "${TAG}" \
+            --generate-notes
+
+          RELEASE_ID="$(
+            gh release view "${TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json databaseId,isDraft,tagName \
+              --jq 'select(.tagName == env.GITHUB_REF_NAME and .isDraft == true) | .databaseId'
+          )"
+          [[ "${RELEASE_ID}" =~ ^[1-9][0-9]*$ ]]
           echo "release_id=${RELEASE_ID}" >> "${GITHUB_OUTPUT}"
 
       - name: Generate strict SHA256SUMS
