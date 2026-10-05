@@ -21,7 +21,7 @@ def sha256(path: pathlib.Path) -> str:
 def rpm_header(path: pathlib.Path) -> dict[str, object]:
     query = (
         "%{NAME}\t%{EPOCHNUM}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\t"
-        "%{SOURCERPM}\t%|SOURCEPACKAGE?{true}:{false}|"
+        "%{SOURCERPM}\t%{SOURCEPACKAGE}"
     )
     output = subprocess.check_output(
         ["rpm", "-qp", "--qf", query, str(path)], text=True
@@ -30,8 +30,9 @@ def rpm_header(path: pathlib.Path) -> dict[str, object]:
     if len(values) != 7:
         raise SystemExit(f"unexpected RPM header for {path.name}: {output!r}")
 
-    name, epoch, version, release, architecture, source_rpm, is_source = values
-    if is_source == "true":
+    name, epoch, version, release, architecture, source_rpm, sourcepackage = values
+    is_source = sourcepackage.strip() == "1"
+    if is_source:
         architecture = "src"
         source_rpm_value = None
     else:

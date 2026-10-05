@@ -66,6 +66,36 @@ jobs:
       - name: Build RPM
         run: scripts/01-build-rpm.sh --source-mode git --require-clean-git
 
+      - name: Verify release SRPM and manifest contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          RPM_PATH="$(cat rpm-outputs/latest-rpm-path.txt)"
+          SOURCE_RPM="$(find outputs/rpmbuild/SRPMS -maxdepth 1 -type f -name 'ro-installer-*.src.rpm' -print -quit)"
+          test -f "$RPM_PATH"
+          test -n "$SOURCE_RPM"
+          test -f "$SOURCE_RPM"
+
+          SOURCE_PACKAGE_FLAG="$(rpm -qp --qf '%{SOURCEPACKAGE}' "$SOURCE_RPM")"
+          [[ "$SOURCE_PACKAGE_FLAG" == "1" ]] || {
+            echo "Expected SOURCEPACKAGE=1 for SRPM, got: $SOURCE_PACKAGE_FLAG" >&2
+            exit 1
+          }
+          [[ "$(rpm -qp --qf '%{SOURCERPM}' "$RPM_PATH")" == "$(basename "$SOURCE_RPM")" ]]
+
+          rm -rf release-contract-test
+          mkdir -p release-contract-test
+          cp "$RPM_PATH" "$SOURCE_RPM" release-contract-test/
+          python3 scripts/build-ro-repo-manifest.py             --artifacts-dir release-contract-test             --output release-contract-test/component-artifact-manifest-v1.json             --repository "$GITHUB_REPOSITORY"             --commit "$GITHUB_SHA"             --tag "ci-$GITHUB_RUN_ID"             --release-id "1"             --workflow-run "$GITHUB_RUN_ID"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("release-contract-test/component-artifact-manifest-v1.json").read_text())
+          arches = sorted(item["architecture"] for item in data["artifacts"])
+          assert arches == ["src", "x86_64"], arches
+          assert len(data["artifacts"]) == 2, data["artifacts"]
+          PY
+
       - name: Verify Fedora 44 RPM and installability
         run: |
           set -euo pipefail

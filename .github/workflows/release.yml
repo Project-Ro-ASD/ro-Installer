@@ -125,9 +125,9 @@ jobs:
           [[ "$(rpm -qp --qf '%{NAME}' "${SOURCE_RPM}")" == "ro-installer" ]]
           [[ "$(rpm -qp --qf '%{VERSION}' "${SOURCE_RPM}")" == "${VERSION}" ]]
           [[ "$(rpm -qp --qf '%{RELEASE}' "${SOURCE_RPM}")" == "${RPM_RELEASE}.fc44" ]]
-          SOURCE_KIND="$(rpm -qp --qf '%|SOURCEPACKAGE?{src}:%{ARCH}|' "${SOURCE_RPM}")"
-          [[ "${SOURCE_KIND}" == "src" ]] || {
-            echo "Expected source RPM classification 'src', got: ${SOURCE_KIND}" >&2
+          SOURCE_PACKAGE_FLAG="$(rpm -qp --qf '%{SOURCEPACKAGE}' "${SOURCE_RPM}")"
+          [[ "${SOURCE_PACKAGE_FLAG}" == "1" ]] || {
+            echo "Expected SOURCEPACKAGE=1 for SRPM, got: ${SOURCE_PACKAGE_FLAG}" >&2
             exit 1
           }
           [[ "$(rpm -qp --qf '%{SOURCERPM}' "${BINARY_RPM}")" == "$(basename "${SOURCE_RPM}")" ]]
@@ -189,7 +189,16 @@ jobs:
           mapfile -t RPMS < <(find release-assets -maxdepth 1 -type f -name '*.rpm' -printf '%f\n' | sort)
           [[ "${#RPMS[@]}" -eq 2 ]]
 
-          ARCHES="$(for item in "${RPMS[@]}"; do rpm -qp --qf '%|SOURCEPACKAGE?{src}:%{ARCH}|\n' "release-assets/${item}"; done | sort | paste -sd, -)"
+          ARCHES="$(
+            for item in "${RPMS[@]}"; do
+              SOURCE_PACKAGE_FLAG="$(rpm -qp --qf '%{SOURCEPACKAGE}' "release-assets/${item}")"
+              if [[ "${SOURCE_PACKAGE_FLAG}" == "1" ]]; then
+                printf 'src\n'
+              else
+                rpm -qp --qf '%{ARCH}\n' "release-assets/${item}"
+              fi
+            done | sort | paste -sd, -
+          )"
           [[ "${ARCHES}" == "src,x86_64" ]]
 
           SOURCE_RPM="$(printf '%s\n' "${RPMS[@]}" | grep '\.src\.rpm$')"
