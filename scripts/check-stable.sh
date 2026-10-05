@@ -76,6 +76,9 @@ run_check "QMP/QGA helper python syntax" \
 run_check "QGA transport tests (fake Unix server)" \
   python3 test/scripts/qga_client_test.py
 
+run_check "GitHub release-state tests" \
+  python3 test/scripts/release_state_test.py
+
 if command -v flutter >/dev/null 2>&1; then
   run_check "flutter analyze" flutter analyze
   run_check "flutter test" flutter test
@@ -215,6 +218,9 @@ require_ro_repo_release_producer_contract() {
   rg -q "attestations:[[:space:]]+write" "$release_workflow" || return 1
   rg -q "artifact-metadata:[[:space:]]+write" "$release_workflow" || return 1
   rg -q "tag/release reuse is forbidden" "$release_workflow" || return 1
+  rg -q "gh release list" "$release_workflow" || return 1
+  rg -q "scripts/release-state.py" "$release_workflow" || return 1
+  ! rg -q 'releases/tags/.*2>/dev/null.*\|\| true' "$release_workflow" || return 1
   rg -Fq '[[ "${#EXPECTED[@]}" -eq 4 ]]' "$release_workflow" || return 1
 
   rg -q '"component":[[:space:]]*"ro-installer"' "$manifest_builder" || return 1
