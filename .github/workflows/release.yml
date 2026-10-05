@@ -290,6 +290,6 @@ jobs:
               --paginate --jq '.[].name' | sort
           )
           [[ "${#EXPECTED[@]}" -eq 4 ]]
-          diff -u <(printf '%s\n' "${EXPECTED[@]}") <(printf '%s\n' "${ACTUAL[@]")
+          diff -u <(printf '%s\n' "${EXPECTED[@]}") <(printf '%s\n' "${ACTUAL[@]}")
 
           gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F draft=false >/dev/null
