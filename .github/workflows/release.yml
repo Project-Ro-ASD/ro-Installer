@@ -1,0 +1,295 @@
+name: Release
+
+"on":
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Resolve release metadata
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      rpm_release: ${{ steps.meta.outputs.rpm_release }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate exact tag and version identity
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          PUBSPEC_VERSION="$(awk '/^version:/ {print $2; exit}' pubspec.yaml)"
+          PROJECT_VERSION="${PUBSPEC_VERSION%%+*}"
+          RPM_RELEASE="${PUBSPEC_VERSION##*+}"
+          SPEC_DEFAULT_VERSION="$(sed -n -E 's/^Version:[[:space:]]+%\{\?app_version\}%\{!\?app_version:([^}]+)\}$/\1/p' ro-installer.spec | head -n1)"
+
+          [[ -n "${VERSION}" ]]
+          [[ "${TAG}" == "v${VERSION}" ]]
+          [[ "${VERSION}" == "${PROJECT_VERSION}" ]]
+          [[ "${VERSION}" == "${SPEC_DEFAULT_VERSION}" ]]
+          [[ "${RPM_RELEASE}" =~ ^[0-9]+$ ]]
+          [[ "$(git rev-parse HEAD)" == "${GITHUB_SHA}" ]]
+          [[ "$(git rev-parse "refs/tags/${TAG}^{commit}")" == "${GITHUB_SHA}" ]]
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "rpm_release=${RPM_RELEASE}" >> "${GITHUB_OUTPUT}"
+
+  rpm:
+    name: Build exact Fedora 44 RPM set
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    container:
+      image: fedora:44
+
+    steps:
+      - name: Install Fedora 44 build dependencies
+        run: |
+          dnf -y --setopt=install_weak_deps=False install \
+            git \
+            rpm-build \
+            rsync \
+            tar \
+            gzip \
+            findutils \
+            coreutils \
+            gawk \
+            sed \
+            grep \
+            xz \
+            unzip \
+            which \
+            curl \
+            ca-certificates \
+            clang \
+            cmake \
+            ninja-build \
+            gtk3-devel \
+            pkgconf-pkg-config \
+            python3 \
+            ripgrep
+
+      - name: Install Flutter SDK
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git /opt/flutter
+          echo "/opt/flutter/bin" >> "$GITHUB_PATH"
+          /opt/flutter/bin/flutter --version
+          /opt/flutter/bin/flutter config --enable-linux-desktop
+
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Build committed source as RPM and SRPM
+        run: scripts/01-build-rpm.sh --source-mode git --require-clean-git
+
+      - name: Collect and verify exact release RPM set
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          RPM_RELEASE: ${{ needs.metadata.outputs.rpm_release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-rpms
+
+          BINARY_RPM="$(cat rpm-outputs/latest-rpm-path.txt)"
+          test -f "${BINARY_RPM}"
+          SOURCE_RPM="$(find outputs/rpmbuild/SRPMS -maxdepth 1 -type f -name "ro-installer-${VERSION}-${RPM_RELEASE}*.src.rpm" -print -quit)"
+          test -n "${SOURCE_RPM}"
+          test -f "${SOURCE_RPM}"
+
+          [[ "$(rpm -qp --qf '%{NAME}' "${BINARY_RPM}")" == "ro-installer" ]]
+          [[ "$(rpm -qp --qf '%{VERSION}' "${BINARY_RPM}")" == "${VERSION}" ]]
+          [[ "$(rpm -qp --qf '%{RELEASE}' "${BINARY_RPM}")" == "${RPM_RELEASE}.fc44" ]]
+          [[ "$(rpm -qp --qf '%{ARCH}' "${BINARY_RPM}")" == "x86_64" ]]
+
+          [[ "$(rpm -qp --qf '%{NAME}' "${SOURCE_RPM}")" == "ro-installer" ]]
+          [[ "$(rpm -qp --qf '%{VERSION}' "${SOURCE_RPM}")" == "${VERSION}" ]]
+          [[ "$(rpm -qp --qf '%{RELEASE}' "${SOURCE_RPM}")" == "${RPM_RELEASE}.fc44" ]]
+          [[ "$(rpm -qp --qf '%{ARCH}' "${SOURCE_RPM}")" == "src" ]]
+          [[ "$(rpm -qp --qf '%{SOURCERPM}' "${BINARY_RPM}")" == "$(basename "${SOURCE_RPM}")" ]]
+
+          cp "${BINARY_RPM}" "${SOURCE_RPM}" release-rpms/
+
+      - name: Install binary RPM
+        shell: bash
+        run: |
+          set -euo pipefail
+          BINARY_RPM="$(find release-rpms -maxdepth 1 -type f -name '*.x86_64.rpm' -print -quit)"
+          test -n "${BINARY_RPM}"
+          dnf -y --setopt=install_weak_deps=False install "${BINARY_RPM}"
+          rpm -q ro-installer
+          command -v ro-installer
+
+      - name: Upload exact RPM build output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ro-installer-release-${{ needs.metadata.outputs.version }}
+          path: release-rpms/*.rpm
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish attested Ro-Repo V2 release
+    needs: [metadata, rpm]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Download exact RPM set
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ro-installer-release-${{ needs.metadata.outputs.version }}
+          path: release-assets
+
+      - name: Install release metadata tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm jq
+          gh --version
+
+      - name: Verify release bundle before publication
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          RPM_RELEASE: ${{ needs.metadata.outputs.rpm_release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t RPMS < <(find release-assets -maxdepth 1 -type f -name '*.rpm' -printf '%f\n' | sort)
+          [[ "${#RPMS[@]}" -eq 2 ]]
+
+          ARCHES="$(for item in "${RPMS[@]}"; do rpm -qp --qf '%|SOURCEPACKAGE?{src}:%{ARCH}|\n' "release-assets/${item}"; done | sort | paste -sd, -)"
+          [[ "${ARCHES}" == "src,x86_64" ]]
+
+          SOURCE_RPM="$(printf '%s\n' "${RPMS[@]}" | grep '\.src\.rpm$')"
+          BINARY_RPM="$(printf '%s\n' "${RPMS[@]}" | grep '\.x86_64\.rpm$')"
+          test -n "${SOURCE_RPM}"
+          test -n "${BINARY_RPM}"
+
+          for item in "${RPMS[@]}"; do
+            [[ "$(rpm -qp --qf '%{NAME}' "release-assets/${item}")" == "ro-installer" ]]
+            [[ "$(rpm -qp --qf '%{VERSION}' "release-assets/${item}")" == "${VERSION}" ]]
+            [[ "$(rpm -qp --qf '%{RELEASE}' "release-assets/${item}")" == "${RPM_RELEASE}.fc44" ]]
+          done
+          [[ "$(rpm -qp --qf '%{SOURCERPM}' "release-assets/${BINARY_RPM}")" == "${SOURCE_RPM}" ]]
+
+      - name: Create clean draft GitHub Release
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null || true)"
+          if [[ -n "${EXISTING}" ]]; then
+            EXISTING_ID="$(jq -r '.id' <<<"${EXISTING}")"
+            if [[ "$(jq -r '.draft' <<<"${EXISTING}")" == "true" ]]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${EXISTING_ID}"
+            else
+              echo "Published release ${TAG} already exists; tag/release reuse is forbidden." >&2
+              exit 1
+            fi
+          fi
+
+          RELEASE_JSON="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="${TAG}" \
+            -f target_commitish="${GITHUB_SHA}" \
+            -f name="${TAG}" \
+            -F draft=true \
+            -F generate_release_notes=true)"
+          RELEASE_ID="$(jq -r '.id' <<<"${RELEASE_JSON}")"
+          test -n "${RELEASE_ID}"
+          echo "release_id=${RELEASE_ID}" >> "${GITHUB_OUTPUT}"
+
+      - name: Generate strict SHA256SUMS
+        working-directory: release-assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t RPMS < <(find . -maxdepth 1 -type f -name '*.rpm' -printf '%f\n' | sort)
+          [[ "${#RPMS[@]}" -eq 2 ]]
+          sha256sum "${RPMS[@]}" > SHA256SUMS
+          [[ "$(wc -l < SHA256SUMS)" -eq 2 ]]
+
+      - name: Generate component artifact manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/build-ro-repo-manifest.py \
+            --artifacts-dir release-assets \
+            --output release-assets/component-artifact-manifest-v1.json \
+            --repository "${GITHUB_REPOSITORY}" \
+            --commit "${GITHUB_SHA}" \
+            --tag "${GITHUB_REF_NAME}" \
+            --release-id "${{ steps.draft.outputs.release_id }}" \
+            --workflow-run "${GITHUB_RUN_ID}"
+
+      - name: Attest RPMs, checksum file and manifest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: |
+            release-assets/*.rpm
+            release-assets/SHA256SUMS
+            release-assets/component-artifact-manifest-v1.json
+
+      - name: Upload immutable release asset set
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${GITHUB_REF_NAME}" \
+            release-assets/*.rpm \
+            release-assets/SHA256SUMS \
+            release-assets/component-artifact-manifest-v1.json \
+            --repo "${GITHUB_REPOSITORY}"
+
+      - name: Verify draft assets and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t EXPECTED < <(
+            {
+              find release-assets -maxdepth 1 -type f -name '*.rpm' -printf '%f\n'
+              printf '%s\n' SHA256SUMS component-artifact-manifest-v1.json
+            } | sort
+          )
+          mapfile -t ACTUAL < <(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+              --paginate --jq '.[].name' | sort
+          )
+          [[ "${#EXPECTED[@]}" -eq 4 ]]
+          diff -u <(printf '%s\n' "${EXPECTED[@]}") <(printf '%s\n' "${ACTUAL[@]}")
+
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F draft=false >/dev/null

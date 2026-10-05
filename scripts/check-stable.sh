@@ -195,6 +195,37 @@ require_fedora44_packaging_baseline() {
 
 run_check "Fedora 44 RPM packaging baseline" require_fedora44_packaging_baseline
 
+require_ro_repo_release_producer_contract() {
+  local ci_workflow=".github/workflows/rpm-fedora44.yml"
+  local release_workflow=".github/workflows/release.yml"
+  local manifest_builder="scripts/build-ro-repo-manifest.py"
+
+  [[ -f "$release_workflow" && -f "$manifest_builder" ]] || return 1
+
+  ! rg -q "^[[:space:]]+tags:" "$ci_workflow" || return 1
+  ! rg -q "^[[:space:]]+release:" "$ci_workflow" || return 1
+  ! rg -q "action-gh-release|gh release upload|releases/tags" "$ci_workflow" || return 1
+
+  rg -q "^name: Release$" "$release_workflow" || return 1
+  rg -q "^[[:space:]]+tags:" "$release_workflow" || return 1
+  rg -q "scripts/01-build-rpm.sh --source-mode git --require-clean-git" "$release_workflow" || return 1
+  rg -q "component-artifact-manifest-v1.json" "$release_workflow" || return 1
+  rg -q "actions/attest@" "$release_workflow" || return 1
+  rg -q "id-token:[[:space:]]+write" "$release_workflow" || return 1
+  rg -q "attestations:[[:space:]]+write" "$release_workflow" || return 1
+  rg -q "artifact-metadata:[[:space:]]+write" "$release_workflow" || return 1
+  rg -q "tag/release reuse is forbidden" "$release_workflow" || return 1
+  rg -Fq '[[ "${#EXPECTED[@]}" -eq 4 ]]' "$release_workflow" || return 1
+
+  rg -q '"component":[[:space:]]*"ro-installer"' "$manifest_builder" || return 1
+  rg -q '"source_repository":[[:space:]]*args.repository' "$manifest_builder" || return 1
+  rg -q '"source_commit":[[:space:]]*args.commit' "$manifest_builder" || return 1
+  rg -q '"release_id":[[:space:]]*int\(args.release_id\)' "$manifest_builder" || return 1
+  rg -q '"workflow_run":[[:space:]]*int\(args.workflow_run\)' "$manifest_builder" || return 1
+}
+
+run_check "Ro-Repo immutable release producer contract" require_ro_repo_release_producer_contract
+
 require_qemu_test_contract() {
   local script
   for script in scripts/qemu-boot-iso.sh scripts/test-qemu.sh; do
