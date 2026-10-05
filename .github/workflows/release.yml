@@ -125,7 +125,11 @@ jobs:
           [[ "$(rpm -qp --qf '%{NAME}' "${SOURCE_RPM}")" == "ro-installer" ]]
           [[ "$(rpm -qp --qf '%{VERSION}' "${SOURCE_RPM}")" == "${VERSION}" ]]
           [[ "$(rpm -qp --qf '%{RELEASE}' "${SOURCE_RPM}")" == "${RPM_RELEASE}.fc44" ]]
-          [[ "$(rpm -qp --qf '%{ARCH}' "${SOURCE_RPM}")" == "src" ]]
+          SOURCE_KIND="$(rpm -qp --qf '%|SOURCEPACKAGE?{src}:%{ARCH}|' "${SOURCE_RPM}")"
+          [[ "${SOURCE_KIND}" == "src" ]] || {
+            echo "Expected source RPM classification 'src', got: ${SOURCE_KIND}" >&2
+            exit 1
+          }
           [[ "$(rpm -qp --qf '%{SOURCERPM}' "${BINARY_RPM}")" == "$(basename "${SOURCE_RPM}")" ]]
 
           cp "${BINARY_RPM}" "${SOURCE_RPM}" release-rpms/
