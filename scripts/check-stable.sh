@@ -202,103 +202,19 @@ require_ro_repo_release_producer_contract() {
 
   [[ -f "$release_workflow" && -f "$manifest_builder" ]] || return 1
 
-  ! rg -q '^[[:space:]]+tags:' "$ci_workflow" || return 1
-  ! rg -q '^[[:space:]]+release:' "$ci_workflow" || return 1
-  ! rg -q 'action-gh-release|gh release upload|releases/tags' "$ci_workflow" || return 1
+  ! rg -q "^[[:space:]]+tags:" "$ci_workflow" || return 1
+  ! rg -q "^[[:space:]]+release:" "$ci_workflow" || return 1
+  ! rg -q "action-gh-release|gh release upload|releases/tags" "$ci_workflow" || return 1
 
-  rg -q '^name: Release
-  local script
-  for script in scripts/qemu-boot-iso.sh scripts/test-qemu.sh; do
-    rg -q 'RO_ASD_TEST_ISO' "${script}" || return 1
-  done
-  for script in scripts/qemu-boot-iso.sh scripts/test-qemu.sh test_qemu_vm.sh; do
-    rg -q 'external Compose-produced test ISO is required' "${script}" || return 1
-  done
-  ! rg -n 'iso-release|iso-realese|latest-iso|Ro-ASD-beta|find .*\*\.iso' scripts/qemu-boot-iso.sh scripts/test-qemu.sh test_qemu_vm.sh || return 1
-  rg -q 'RO_INSTALLER_GUEST_RUNNER_START' test_qemu_guest_runner.sh || return 1
-  rg -q 'RO_INSTALLER_VM_BOOT_OK' test_qemu_vm.sh || return 1
-  rg -q 'hostshare' test_qemu_vm.sh || return 1
-  rg -q 'build/linux/x64/release/bundle/ro_installer' test_qemu_guest_runner.sh || return 1
-
-  rg -q 'qemu-boot-iso.sh' scripts/test-qemu.sh || return 1
-  rg -q 'test_qemu_vm.sh' scripts/test-qemu.sh || return 1
-  rg -q 'suite.*smoke' scripts/test-qemu.sh || return 1
-  rg -q 'RO_INSTALLER_TEST_ISO' test_qemu_vm.sh || return 1
-  rg -q -- '--enforce-lockfile' test_qemu_vm.sh || return 1
-  rg -q -- 'build linux --release --no-pub' test_qemu_vm.sh || return 1
-  rg -q '.dart_tool/flutter_build' test_qemu_vm.sh || return 1
-  rg -q 'pubspec.lock dosyasini degistirdi' test_qemu_vm.sh || return 1
-  rg -Fq 'DISK_SIZE="${DISK_SIZE:-64G}"' test_qemu_vm.sh || return 1
-  rg -q 'DISK_SIZE="64G"' scripts/test-qemu.sh || return 1
-  rg -q 'HOST_VM_LOG_DIR="\$RUN_DIR/guest-logs"' test_qemu_vm.sh || return 1
-  rg -q 'Installer failure summary bulundu' test_qemu_vm.sh || return 1
-  rg -q 'RO_INSTALLER_GUEST_RUNNER_INSTALL_EXIT' test_qemu_guest_runner.sh || return 1
-  rg -q 'QGA_READY_TIMEOUT_SECONDS' test_qemu_vm.sh || return 1
-  rg -Fq 'QEMU_DISPLAY_MODE="${QEMU_DISPLAY_MODE:-headless}"' test_qemu_vm.sh || return 1
-  rg -Fq 'QEMU_DISPLAY_MODE="${QEMU_MODE}"' scripts/test-qemu.sh || return 1
-  rg -q 'Guest runner baslangic marker' test_qemu_vm.sh || return 1
-  rg -q 'org.qemu.guest_agent.0' test_qemu_vm.sh || return 1
-  rg -q 'RO_INSTALLER_AUTO_REBOOT=0' test_qemu_vm.sh || return 1
-  rg -q 'runner-logs-copied-0' test_qemu_vm.sh || return 1
-  rg -q 'orchestrate_guest_install' test_qemu_vm.sh || return 1
-  ! rg -q -- '--text|ctrl-alt-t|GUEST_TERMINAL_OPEN_WAIT_SECONDS' test_qemu_vm.sh || return 1
-  ! rg -q 'version=9p2000' test_qemu_vm.sh || return 1
-  ! rg -q 'RO_INSTALLER_VM_LOG_DIR=\$GUEST_VM_LOG_DIR' test_qemu_vm.sh || return 1
-  rg -Fq 'HOST_MOUNT_IN_GUEST="${HOST_MOUNT_IN_GUEST:-/run/ro-host}"' test_qemu_vm.sh || return 1
-  rg -Fq 'HOST_MOUNT="${HOST_MOUNT:-/run/ro-host}"' test_qemu_guest_runner.sh || return 1
-  ! rg -q '/mnt/host' test_qemu_vm.sh test_qemu_guest_runner.sh || return 1
-  rg -q 'HOST_LOG_DIR="\$PROFILE_DIR/guest-logs"' test_qemu_guest_runner.sh || return 1
-  rg -q 'write_runner_state "started"' test_qemu_guest_runner.sh || return 1
-  rg -q 'runner-state.txt' test_qemu_vm.sh || return 1
-  rg -q 'sudo -n tee /dev/ttyS0' test_qemu_guest_runner.sh || return 1
-}
-
-run_check "QEMU install test ve log sozlesmesi" require_qemu_test_contract
-
-require_external_iso_boundary() {
-  local file
-  for file in scripts/build-iso.sh scripts/02-build-iso.sh scripts/03-audit-iso.sh scripts/04-benchmark-copy-paths.sh kernel.txt; do
-    [[ ! -e "${file}" ]] || return 1
-  done
-  ! rg -n --glob '!check-stable.sh' \
-    'build-iso\.sh|audit-iso\.sh|benchmark-copy-paths\.sh|iso-(release|realese)/latest-iso|CHAIN_ISO|(^|[[:space:]])(xorriso|mksquashfs|mkisofs|genisoimage)([[:space:]]|$)' \
-    scripts linux/*.sh test_qemu_vm.sh test_qemu_guest_runner.sh || return 1
-  ! rg -q -- '--no-chain|--source-iso|--beta|--no-host-auto-install' scripts/01-build-rpm.sh || return 1
-  ! rg -q -- '--suite audit|--skip-audit|--allow-unsigned-ro-repo' scripts/test-qemu.sh || return 1
-}
-
-run_check "Installer ISO uretmez; test ISO harici giristir" require_external_iso_boundary
-
-forbid_pattern \
-  "live sudo politikasi NOPASSWD ALL degil" \
-  'NOPASSWD:[[:space:]]*ALL' \
-  scripts linux lib
-
-forbid_pattern \
-  "urun build'inde prototip C++ backend yok" \
-  'ro_backend|add_subdirectory\("backend"\)|SystemCommand::execute|popen\(' \
-  linux lib scripts ro-installer.spec
-
-forbid_pattern \
-  "urun assetleri ignored prototip klasorune bagli degil" \
-  'stitch_velvet_nebula_installer_redesign/product-logo\.png' \
-  lib pubspec.yaml
-
-if [ "${failures}" -ne 0 ]; then
-  printf '[SONUC] Stable kapisi basarisiz: %s hata\n' "${failures}" >&2
-  exit 1
-fi
-
-printf '[SONUC] Stable kapisi basarili\n'
- "$release_workflow" || return 1
-  rg -q '^[[:space:]]+tags:' "$release_workflow" || return 1
-  rg -q 'scripts/01-build-rpm.sh --source-mode git --require-clean-git' "$release_workflow" || return 1
-  rg -q 'component-artifact-manifest-v1.json' "$release_workflow" || return 1
-  rg -q 'actions/attest@' "$release_workflow" || return 1
-  rg -q 'id-token:[[:space:]]+write' "$release_workflow" || return 1
-  rg -q 'attestations:[[:space:]]+write' "$release_workflow" || return 1
-  rg -q 'artifact-metadata:[[:space:]]+write' "$release_workflow" || return 1
-  rg -q 'tag/release reuse is forbidden' "$release_workflow" || return 1
+  rg -q "^name: Release$" "$release_workflow" || return 1
+  rg -q "^[[:space:]]+tags:" "$release_workflow" || return 1
+  rg -q "scripts/01-build-rpm.sh --source-mode git --require-clean-git" "$release_workflow" || return 1
+  rg -q "component-artifact-manifest-v1.json" "$release_workflow" || return 1
+  rg -q "actions/attest@" "$release_workflow" || return 1
+  rg -q "id-token:[[:space:]]+write" "$release_workflow" || return 1
+  rg -q "attestations:[[:space:]]+write" "$release_workflow" || return 1
+  rg -q "artifact-metadata:[[:space:]]+write" "$release_workflow" || return 1
+  rg -q "tag/release reuse is forbidden" "$release_workflow" || return 1
   rg -Fq '[[ "${#EXPECTED[@]}" -eq 4 ]]' "$release_workflow" || return 1
 
   rg -q '"component":[[:space:]]*"ro-installer"' "$manifest_builder" || return 1
