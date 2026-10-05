@@ -19,51 +19,44 @@ class ReleaseStateTests(unittest.TestCase):
     def test_absent_tag(self):
         self.assertEqual(
             release_state.classify(
-                [{"databaseId": 10, "tagName": "v1.0.0", "isDraft": False}],
+                [{"tagName": "v1.0.0", "isDraft": False}],
                 "v2.0.0",
             ),
-            {"state": "absent", "release_id": None},
+            {"state": "absent"},
         )
 
     def test_existing_draft(self):
         self.assertEqual(
             release_state.classify(
-                [{"databaseId": 42, "tagName": "v2.0.0", "isDraft": True}],
+                [{"tagName": "v2.0.0", "isDraft": True}],
                 "v2.0.0",
             ),
-            {"state": "draft", "release_id": 42},
+            {"state": "draft"},
         )
 
     def test_existing_published_release(self):
         self.assertEqual(
             release_state.classify(
-                [{"databaseId": 43, "tagName": "v2.0.0", "isDraft": False}],
+                [{"tagName": "v2.0.0", "isDraft": False}],
                 "v2.0.0",
             ),
-            {"state": "published", "release_id": 43},
+            {"state": "published"},
         )
 
     def test_duplicate_tag_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "multiple releases"):
             release_state.classify(
                 [
-                    {"databaseId": 1, "tagName": "v2.0.0", "isDraft": True},
-                    {"databaseId": 2, "tagName": "v2.0.0", "isDraft": False},
+                    {"tagName": "v2.0.0", "isDraft": True},
+                    {"tagName": "v2.0.0", "isDraft": False},
                 ],
-                "v2.0.0",
-            )
-
-    def test_invalid_release_id_fails_closed(self):
-        with self.assertRaisesRegex(ValueError, "databaseId"):
-            release_state.classify(
-                [{"databaseId": None, "tagName": "v2.0.0", "isDraft": True}],
                 "v2.0.0",
             )
 
     def test_invalid_draft_flag_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "isDraft"):
             release_state.classify(
-                [{"databaseId": 1, "tagName": "v2.0.0", "isDraft": "false"}],
+                [{"tagName": "v2.0.0", "isDraft": "false"}],
                 "v2.0.0",
             )
 
