@@ -376,29 +376,38 @@ exit "${INSTALL_STATUS:-0}"
 
     def test_generated_install_resolves_system_commands_with_empty_or_bad_path(self):
         self.qga_trace_helper()
-        result = self.shell('run_guest_install')
+        # Use only fixture tools: even a minimal build container need not have
+        # guest runtime packages such as mount or systemctl installed.
+        guest_path = str(self.tools)
+        result = self.shell('run_guest_install', GUEST_COMMAND_PATH=guest_path)
         self.assertEqual(result.returncode, 0, result.stderr)
         command = json.loads((self.run_dir / 'qga-trace').read_text().splitlines()[0])[-1]
-        # Stop before mounting anything. Intercept the actual generated chain
-        # and check command discovery under the exported guest PATH.
-        probe = r"""
-mkdir() {
-  [ "$PATH" = "$EXPECTED_PATH" ] || exit 91
-  for tool in mkdir mount sh env cp systemctl; do
-    # A new shell avoids the test functions shadowing command discovery.
-    resolved=$(/bin/sh -c 'command -v "$1"' sh "$tool") || exit 92
-    case "$resolved" in /*) ;; *) exit 93 ;; esac
-  done
-  /usr/bin/env | /usr/bin/grep -Fx "PATH=$EXPECTED_PATH" || exit 94
-}
-mount() { return 73; }
-"""
+        for tool in ['mkdir', 'mount', 'sh', 'env', 'cp', 'systemctl']:
+            self.tool(tool, '#!/bin/sh\nexit 0\n')
+        self.tool('mkdir', r"""#!/bin/sh
+[ "$PATH" = "$EXPECTED_PATH" ] || exit 91
+for tool in mkdir mount sh env cp systemctl; do
+  resolved=$(/bin/sh -c 'command -v "$1"' sh "$tool") || exit 92
+  [ "$resolved" = "$EXPECTED_PATH/$tool" ] || exit 93
+done
+# A child executable confirms that PATH was exported, not just assigned.
+[ "$(env)" = "$EXPECTED_PATH" ] || exit 94
+printf 'mkdir\n' >> "$RUN_DIR/prep-trace"
+""")
+        self.tool('env', '#!/bin/sh\nprintf "%s" "$PATH"\n')
+        self.tool('mount', '#!/bin/sh\nprintf "mount\\n" >> "$RUN_DIR/prep-trace"\nexit 73\n')
+        self.tool('sh', '#!/bin/sh\nprintf "runner\\n" >> "$RUN_DIR/prep-trace"\nexit 95\n')
         for inherited in ['', '/no-qga-commands']:
-            result = subprocess.run(['/bin/sh', '-c', probe + command],
-                capture_output=True, text=True,
-                env=dict(os.environ, PATH=inherited, EXPECTED_PATH=CANONICAL_GUEST_PATH))
-            self.assertEqual(result.returncode, 73, result.stderr)
-            self.assertNotIn('command not found', result.stderr)
+            with self.subTest(inherited_path=inherited):
+                trace = self.run_dir / 'prep-trace'
+                trace.unlink(missing_ok=True)
+                result = subprocess.run(['/bin/sh', '-c', command],
+                    capture_output=True, text=True,
+                    env=dict(os.environ, PATH=inherited, EXPECTED_PATH=guest_path,
+                             RUN_DIR=str(self.run_dir)))
+                self.assertEqual(result.returncode, 73, result.stderr)
+                self.assertEqual(trace.read_text().splitlines(), ['mkdir', 'mount'])
+                self.assertNotIn('command not found', result.stderr)
 
     def test_runner_default_path_precedes_external_commands(self):
         runner = (ROOT / 'test_qemu_guest_runner.sh').read_text()
