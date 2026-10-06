@@ -9,6 +9,9 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  FLUTTER_COMMIT: 5fc346839b5d0eef006ed8404392afb4dfae428d
+
 jobs:
   metadata:
     name: Resolve release metadata
@@ -54,6 +57,13 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+    outputs:
+      binary_name: ${{ steps.bundle.outputs.binary_name }}
+      binary_sha256: ${{ steps.bundle.outputs.binary_sha256 }}
+      source_name: ${{ steps.bundle.outputs.source_name }}
+      source_sha256: ${{ steps.bundle.outputs.source_sha256 }}
+      artifact_id: ${{ steps.upload_rpms.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload_rpms.outputs.artifact-digest }}
     container:
       image: fedora:44
 
@@ -84,9 +94,13 @@ jobs:
             python3 \
             ripgrep
 
-      - name: Install Flutter SDK
+      - name: Install pinned Flutter SDK
         run: |
-          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git /opt/flutter
+          git init /opt/flutter
+          git -C /opt/flutter remote add origin https://github.com/flutter/flutter.git
+          git -C /opt/flutter fetch --depth 1 origin "${FLUTTER_COMMIT}"
+          git -C /opt/flutter checkout --detach FETCH_HEAD
+          [[ "$(git -C /opt/flutter rev-parse HEAD)" == "${FLUTTER_COMMIT}" ]]
           echo "/opt/flutter/bin" >> "$GITHUB_PATH"
           /opt/flutter/bin/flutter --version
           /opt/flutter/bin/flutter config --enable-linux-desktop
@@ -103,9 +117,14 @@ jobs:
         run: scripts/01-build-rpm.sh --source-mode git --require-clean-git
 
       - name: Collect and verify exact release RPM set
+        id: bundle
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
           RPM_RELEASE: ${{ needs.metadata.outputs.rpm_release }}
+          EXPECTED_BINARY_NAME: ${{ needs.rpm.outputs.binary_name }}
+          EXPECTED_BINARY_SHA256: ${{ needs.rpm.outputs.binary_sha256 }}
+          EXPECTED_SOURCE_NAME: ${{ needs.rpm.outputs.source_name }}
+          EXPECTED_SOURCE_SHA256: ${{ needs.rpm.outputs.source_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -134,6 +153,15 @@ jobs:
 
           cp "${BINARY_RPM}" "${SOURCE_RPM}" release-rpms/
 
+          BINARY_NAME="$(basename "${BINARY_RPM}")"
+          SOURCE_NAME="$(basename "${SOURCE_RPM}")"
+          BINARY_SHA256="$(sha256sum "release-rpms/${BINARY_NAME}" | awk '{print $1}')"
+          SOURCE_SHA256="$(sha256sum "release-rpms/${SOURCE_NAME}" | awk '{print $1}')"
+          echo "binary_name=${BINARY_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "binary_sha256=${BINARY_SHA256}" >> "${GITHUB_OUTPUT}"
+          echo "source_name=${SOURCE_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "source_sha256=${SOURCE_SHA256}" >> "${GITHUB_OUTPUT}"
+
       - name: Install binary RPM
         shell: bash
         run: |
@@ -145,12 +173,13 @@ jobs:
           command -v ro-installer
 
       - name: Upload exact RPM build output
+        id: upload_rpms
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ro-installer-release-${{ needs.metadata.outputs.version }}
           path: release-rpms/*.rpm
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
   release:
     name: Publish attested Ro-Repo V2 release
@@ -167,11 +196,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - name: Download exact RPM set
+      - name: Download exact RPM set by immutable artifact ID
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: ro-installer-release-${{ needs.metadata.outputs.version }}
+          artifact-ids: ${{ needs.rpm.outputs.artifact_id }}
           path: release-assets
+          digest-mismatch: error
 
       - name: Install release metadata tools
         run: |
@@ -205,6 +235,10 @@ jobs:
           BINARY_RPM="$(printf '%s\n' "${RPMS[@]}" | grep '\.x86_64\.rpm$')"
           test -n "${SOURCE_RPM}"
           test -n "${BINARY_RPM}"
+          [[ "${BINARY_RPM}" == "${EXPECTED_BINARY_NAME}" ]]
+          [[ "${SOURCE_RPM}" == "${EXPECTED_SOURCE_NAME}" ]]
+          [[ "$(sha256sum "release-assets/${BINARY_RPM}" | awk '{print $1}')" == "${EXPECTED_BINARY_SHA256}" ]]
+          [[ "$(sha256sum "release-assets/${SOURCE_RPM}" | awk '{print $1}')" == "${EXPECTED_SOURCE_SHA256}" ]]
 
           for item in "${RPMS[@]}"; do
             [[ "$(rpm -qp --qf '%{NAME}' "release-assets/${item}")" == "ro-installer" ]]
@@ -222,10 +256,10 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
 
-          gh release list \
-            --repo "${GITHUB_REPOSITORY}" \
-            --limit 100 \
-            --json tagName,isDraft > release-list.json
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > release-pages.json
+          jq '[.[][] | {tagName: .tag_name, isDraft: .draft}]' \
+            release-pages.json > release-list.json
 
           RELEASE_STATE="$(
             python3 scripts/release-state.py --tag "${TAG}" --input release-list.json |
@@ -236,7 +270,9 @@ jobs:
             absent)
               ;;
             draft)
-              gh release delete "${TAG}" --repo "${GITHUB_REPOSITORY}" --yes
+              echo "Draft release ${TAG} already exists; automatic destructive recovery is forbidden." >&2
+              echo "Inspect and clean the stale draft explicitly before retrying." >&2
+              exit 1
               ;;
             published)
               echo "Published release ${TAG} already exists; tag/release reuse is forbidden." >&2
@@ -247,6 +283,9 @@ jobs:
               exit 1
               ;;
           esac
+
+          REMOTE_TAG_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq '.sha')"
+          [[ "${REMOTE_TAG_SHA}" == "${GITHUB_SHA}" ]]
 
           gh release create "${TAG}" \
             --repo "${GITHUB_REPOSITORY}" \
@@ -320,11 +359,44 @@ jobs:
               printf '%s\n' SHA256SUMS component-artifact-manifest-v1.json
             } | sort
           )
-          mapfile -t ACTUAL < <(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
-              --paginate --jq '.[].name' | sort
-          )
+          RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")"
+          [[ "$(jq -r '.id' <<<"${RELEASE_JSON}")" == "${RELEASE_ID}" ]]
+          [[ "$(jq -r '.tag_name' <<<"${RELEASE_JSON}")" == "${GITHUB_REF_NAME}" ]]
+          [[ "$(jq -r '.draft' <<<"${RELEASE_JSON}")" == "true" ]]
+
+          REMOTE_TAG_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}" --jq '.sha')"
+          [[ "${REMOTE_TAG_SHA}" == "${GITHUB_SHA}" ]]
+
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+            --paginate > remote-assets.json
+          mapfile -t ACTUAL < <(jq -r '.[].name' remote-assets.json | sort)
           [[ "${#EXPECTED[@]}" -eq 4 ]]
           diff -u <(printf '%s\n' "${EXPECTED[@]}") <(printf '%s\n' "${ACTUAL[@]}")
 
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -F draft=false >/dev/null
+          for name in "${EXPECTED[@]}"; do
+            LOCAL_DIGEST="sha256:$(sha256sum "release-assets/${name}" | awk '{print $1}')"
+            REMOTE_STATE="$(jq -r --arg name "${name}" '.[] | select(.name == $name) | .state' remote-assets.json)"
+            REMOTE_DIGEST="$(jq -r --arg name "${name}" '.[] | select(.name == $name) | .digest' remote-assets.json)"
+            [[ "${REMOTE_STATE}" == "uploaded" ]]
+            [[ "${REMOTE_DIGEST}" == "${LOCAL_DIGEST}" ]]
+          done
+
+          set +e
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false > publish-response.json 2> publish-error.log
+          PUBLISH_RC=$?
+          set -e
+
+          FINAL_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")"
+          [[ "$(jq -r '.id' <<<"${FINAL_JSON}")" == "${RELEASE_ID}" ]]
+          [[ "$(jq -r '.tag_name' <<<"${FINAL_JSON}")" == "${GITHUB_REF_NAME}" ]]
+          [[ "$(jq -r '.draft' <<<"${FINAL_JSON}")" == "false" ]]
+          [[ "$(jq -r '.immutable' <<<"${FINAL_JSON}")" == "true" ]]
+          FINAL_TAG_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}" --jq '.sha')"
+          [[ "${FINAL_TAG_SHA}" == "${GITHUB_SHA}" ]]
+
+          if [[ "${PUBLISH_RC}" -ne 0 ]]; then
+            echo "Publish request returned non-zero, but follow-up verification proves the exact immutable release was published." >&2
+            cat publish-error.log >&2 || true
+          fi
