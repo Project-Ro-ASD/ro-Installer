@@ -1,5 +1,8 @@
 name: RPM Fedora 44
 
+env:
+  FLUTTER_COMMIT: 5fc346839b5d0eef006ed8404392afb4dfae428d
+
 on:
   workflow_dispatch:
   pull_request:
@@ -48,9 +51,13 @@ jobs:
             python3 \
             ripgrep
 
-      - name: Install Flutter SDK
+      - name: Install pinned Flutter SDK
         run: |
           git clone --depth 1 --branch stable https://github.com/flutter/flutter.git /opt/flutter
+          [[ "$(git -C /opt/flutter rev-parse HEAD)" == "${FLUTTER_COMMIT}" ]] || {
+            echo "Flutter stable moved away from tested commit ${FLUTTER_COMMIT}; update the pin through reviewed CI." >&2
+            exit 1
+          }
           echo "/opt/flutter/bin" >> "$GITHUB_PATH"
           /opt/flutter/bin/flutter --version
           /opt/flutter/bin/flutter config --enable-linux-desktop
