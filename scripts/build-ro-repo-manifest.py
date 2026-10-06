@@ -81,20 +81,30 @@ def main() -> None:
         if not str(item["release"]).endswith(".fc44"):
             raise SystemExit(f"RPM is not a Fedora 44 build: {item['filename']}")
 
-    source_names = {
-        str(item["filename"])
+    source_items = {
+        str(item["filename"]): item
         for item in artifacts
         if item["architecture"] == "src"
     }
+    source_names = set(source_items)
     if len(source_names) != 1:
         raise SystemExit(f"expected one published SRPM, found {sorted(source_names)}")
 
     for item in artifacts:
-        if item["architecture"] != "src" and item["source_rpm"] not in source_names:
+        if item["architecture"] == "src":
+            continue
+        if item["source_rpm"] not in source_names:
             raise SystemExit(
                 f"binary RPM {item['filename']} does not point at "
                 f"the published SRPM {item['source_rpm']}"
             )
+        source = source_items[str(item["source_rpm"])]
+        for field in ("name", "epoch", "version", "release"):
+            if item[field] != source[field]:
+                raise SystemExit(
+                    f"binary/source RPM identity mismatch for {item['filename']}: "
+                    f"{field}={item[field]!r} source={source[field]!r}"
+                )
 
     manifest = {
         "schema_version": 1,
@@ -113,8 +123,8 @@ def main() -> None:
         "attestation": {
             "provider": "github-artifact-attestations",
             "verification": (
-                "gh attestation verify with exact repository, commit "
-                "and signer workflow"
+                "gh attestation verify with exact repository, commit, tag ref, "
+                "signer workflow and certificate run invocation"
             ),
         },
         "sbom": None,
