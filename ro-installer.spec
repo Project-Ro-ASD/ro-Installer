@@ -1,5 +1,5 @@
 Name:           ro-installer
-Version:        %{?app_version}%{!?app_version:2.4.3}
+Version:        %{?app_version}%{!?app_version:2.4.4}
 Release:        %{?app_release}%{!?app_release:1}%{?dist}
 Summary:        Ro-ASD Installer
 License:        MIT
@@ -82,6 +82,9 @@ install -Dm755 linux/ro-installer-launcher.sh \
 %{_libexecdir}/ro-installer-launcher.sh
 
 %changelog
+* Tue Oct 06 2026 Ro-ASD Team <contact@roasd.org> - 2.4.4-1
+- Fix release-job wiring for build-side RPM identity and digest outputs.
+
 * Mon Oct 05 2026 Ro-ASD Team <contact@roasd.org> - 2.4.3-1
 - Harden immutable GitHub Release state handling before publication.
 
