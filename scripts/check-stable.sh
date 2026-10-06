@@ -236,6 +236,10 @@ require_ro_repo_release_producer_contract() {
   rg -q 'binary/source RPM identity mismatch' "$manifest_builder" || return 1
   rg -q 'FLUTTER_COMMIT: 5fc346839b5d0eef006ed8404392afb4dfae428d' "$release_workflow" || return 1
   rg -q 'FLUTTER_COMMIT: 5fc346839b5d0eef006ed8404392afb4dfae428d' "$ci_workflow" || return 1
+  [[ "$(rg -c 'EXPECTED_BINARY_NAME: \$\{\{ needs\.rpm\.outputs\.binary_name \}\}' "$release_workflow")" -eq 1 ]] || return 1
+  [[ "$(rg -c 'EXPECTED_BINARY_SHA256: \$\{\{ needs\.rpm\.outputs\.binary_sha256 \}\}' "$release_workflow")" -eq 1 ]] || return 1
+  [[ "$(rg -c 'EXPECTED_SOURCE_NAME: \$\{\{ needs\.rpm\.outputs\.source_name \}\}' "$release_workflow")" -eq 1 ]] || return 1
+  [[ "$(rg -c 'EXPECTED_SOURCE_SHA256: \$\{\{ needs\.rpm\.outputs\.source_sha256 \}\}' "$release_workflow")" -eq 1 ]] || return 1
 }
 
 run_check "Ro-Repo immutable release producer contract" require_ro_repo_release_producer_contract
