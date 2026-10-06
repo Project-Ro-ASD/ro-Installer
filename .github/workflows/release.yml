@@ -96,11 +96,11 @@ jobs:
 
       - name: Install pinned Flutter SDK
         run: |
-          git init /opt/flutter
-          git -C /opt/flutter remote add origin https://github.com/flutter/flutter.git
-          git -C /opt/flutter fetch --depth 1 origin "${FLUTTER_COMMIT}"
-          git -C /opt/flutter checkout --detach FETCH_HEAD
-          [[ "$(git -C /opt/flutter rev-parse HEAD)" == "${FLUTTER_COMMIT}" ]]
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git /opt/flutter
+          [[ "$(git -C /opt/flutter rev-parse HEAD)" == "${FLUTTER_COMMIT}" ]] || {
+            echo "Flutter stable moved away from tested commit ${FLUTTER_COMMIT}; update the pin through reviewed CI." >&2
+            exit 1
+          }
           echo "/opt/flutter/bin" >> "$GITHUB_PATH"
           /opt/flutter/bin/flutter --version
           /opt/flutter/bin/flutter config --enable-linux-desktop
