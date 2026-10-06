@@ -218,8 +218,13 @@ require_ro_repo_release_producer_contract() {
   rg -q "attestations:[[:space:]]+write" "$release_workflow" || return 1
   rg -q "artifact-metadata:[[:space:]]+write" "$release_workflow" || return 1
   rg -q "tag/release reuse is forbidden" "$release_workflow" || return 1
-  rg -q "gh release list" "$release_workflow" || return 1
   rg -q "scripts/release-state.py" "$release_workflow" || return 1
+  rg -q "gh api --paginate --slurp" "$release_workflow" || return 1
+  ! rg -q "gh release delete" "$release_workflow" || return 1
+  rg -q "automatic destructive recovery is forbidden" "$release_workflow" || return 1
+  rg -q "REMOTE_TAG_SHA" "$release_workflow" || return 1
+  rg -q "REMOTE_DIGEST" "$release_workflow" || return 1
+  rg -q "\.immutable" "$release_workflow" || return 1
   ! rg -q 'releases/tags/.*2>/dev/null.*\|\| true' "$release_workflow" || return 1
   rg -Fq '[[ "${#EXPECTED[@]}" -eq 4 ]]' "$release_workflow" || return 1
 
@@ -228,6 +233,9 @@ require_ro_repo_release_producer_contract() {
   rg -q '"source_commit":[[:space:]]*args.commit' "$manifest_builder" || return 1
   rg -q '"release_id":[[:space:]]*int\(args.release_id\)' "$manifest_builder" || return 1
   rg -q '"workflow_run":[[:space:]]*int\(args.workflow_run\)' "$manifest_builder" || return 1
+  rg -q 'binary/source RPM identity mismatch' "$manifest_builder" || return 1
+  rg -q 'FLUTTER_COMMIT: 5fc346839b5d0eef006ed8404392afb4dfae428d' "$release_workflow" || return 1
+  rg -q 'FLUTTER_COMMIT: 5fc346839b5d0eef006ed8404392afb4dfae428d' "$ci_workflow" || return 1
 }
 
 run_check "Ro-Repo immutable release producer contract" require_ro_repo_release_producer_contract
