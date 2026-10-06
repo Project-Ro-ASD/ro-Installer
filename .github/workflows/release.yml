@@ -121,10 +121,6 @@ jobs:
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
           RPM_RELEASE: ${{ needs.metadata.outputs.rpm_release }}
-          EXPECTED_BINARY_NAME: ${{ needs.rpm.outputs.binary_name }}
-          EXPECTED_BINARY_SHA256: ${{ needs.rpm.outputs.binary_sha256 }}
-          EXPECTED_SOURCE_NAME: ${{ needs.rpm.outputs.source_name }}
-          EXPECTED_SOURCE_SHA256: ${{ needs.rpm.outputs.source_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -213,6 +209,10 @@ jobs:
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
           RPM_RELEASE: ${{ needs.metadata.outputs.rpm_release }}
+          EXPECTED_BINARY_NAME: ${{ needs.rpm.outputs.binary_name }}
+          EXPECTED_BINARY_SHA256: ${{ needs.rpm.outputs.binary_sha256 }}
+          EXPECTED_SOURCE_NAME: ${{ needs.rpm.outputs.source_name }}
+          EXPECTED_SOURCE_SHA256: ${{ needs.rpm.outputs.source_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
