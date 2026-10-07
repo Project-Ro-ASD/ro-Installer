@@ -79,6 +79,9 @@ run_check "QGA transport tests (fake Unix server)" \
 run_check "GitHub release-state tests" \
   python3 test/scripts/release_state_test.py
 
+run_check "privileged helper protocol, device safety, locking and packaging" \
+  python3 -B test/scripts/installer_helper_test.py
+
 if command -v flutter >/dev/null 2>&1; then
   run_check "flutter analyze" flutter analyze
   run_check "flutter test" flutter test

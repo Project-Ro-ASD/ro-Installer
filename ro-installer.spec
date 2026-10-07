@@ -20,6 +20,7 @@ BuildRequires:  ripgrep
 Requires:       gtk3
 Requires:       libX11
 Requires:       polkit
+Requires:       python3
 Requires:       util-linux
 Requires:       btrfs-progs
 Requires:       dosfstools
@@ -71,6 +72,12 @@ install -Dm644 linux/org.roasd.installer.policy \
 install -Dm755 linux/ro-installer-launcher.sh \
     %{buildroot}%{_libexecdir}/ro-installer-launcher.sh
 
+install -Dm755 linux/ro-installer-helper \
+    %{buildroot}%{_libexecdir}/ro-installer-helper
+
+install -Dm644 linux/org.roasd.installer.helper.policy \
+    %{buildroot}%{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy
+
 %files
 %license LICENSE
 %doc README.md
@@ -80,6 +87,8 @@ install -Dm755 linux/ro-installer-launcher.sh \
 %{_datadir}/applications/ro-installer.desktop
 %{_datadir}/polkit-1/actions/org.roasd.installer.policy
 %{_libexecdir}/ro-installer-launcher.sh
+%attr(0755,root,root) %{_libexecdir}/ro-installer-helper
+%attr(0644,root,root) %{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy
 
 %changelog
 * Tue Oct 06 2026 Ro-ASD Team <contact@roasd.org> - 2.4.4-1
