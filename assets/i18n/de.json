@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "Zielsystem abgeschlossen.",
   "stage_result_bootloader_done": "Bootloader-Installation abgeschlossen.",
   "stage_result_post_validation_done": "Validierung nach der Installation abgeschlossen.",
-  "stage_result_cleanup_done": "Bereinigung abgeschlossen."
+  "stage_result_cleanup_done": "Bereinigung abgeschlossen.",
+  "helper_error": "Installationsberechtigung oder privilegierter Vorgang fehlgeschlagen. Kein automatischer Neustart.",
+  "disk_discovery_startFailed": "Laufwerkserkennung konnte nicht starten. Installationspaket prüfen und aktualisieren.",
+  "disk_discovery_commandFailed": "Laufwerkserkennung fehlgeschlagen. Bitte aktualisieren.",
+  "disk_discovery_timeout": "Zeitüberschreitung bei der Laufwerkserkennung. Bitte aktualisieren.",
+  "disk_discovery_incompatibleJson": "Die Laufwerkserkennung lieferte eine nicht unterstützte Antwort.",
+  "disk_discovery_topology": "Die Laufwerkstopologie konnte nicht sicher gelesen werden.",
+  "disk_discovery_partial": "Einige Laufwerke wurden ausgeschlossen, da sie nicht sicher gelesen werden konnten."
 }

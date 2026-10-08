@@ -8,7 +8,7 @@ Comment=Ro-ASD işletim sistemini bilgisayarınıza kurun
 Comment[en]=Install Ro-ASD Operating System to your computer
 Comment[tr]=Ro-ASD işletim sistemini bilgisayarınıza kurun
 # Launcher paketleme asamasinda /usr/libexec altina kurulur.
-# Uygulama root degilse launcher pkexec ile kendini tekrar baslatir.
+# GUI mevcut grafik kullanici oturumunda baslatilir.
 Exec=/usr/libexec/ro-installer-launcher.sh
 Icon=drive-harddisk
 Terminal=false
@@ -16,4 +16,4 @@ Categories=System;
 Keywords=install;installer;setup;os;roasd;
 StartupNotify=true
 StartupWMClass=ro_installer
-# X-KDE-AuthorizeAction yerine polkit policy kullanılır
+# Destructive installation uses only the helper-specific polkit action.

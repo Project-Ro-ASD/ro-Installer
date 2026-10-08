@@ -66,31 +66,64 @@ Destructive disk operations remain guarded by storage planning and validation.
 The current stable path rejects LUKS, LVM, RAID, multipath, and nested storage
 topologies before destructive disk writes.
 
-## Privileged Helper Foundation (PR-A1)
+## User-session GUI and Privileged Installation (PR-A2)
 
-The same `ro-installer` RPM now owns `/usr/libexec/ro-installer-helper`
-(`root:root`, 0755) and `org.roasd.installer.helper.policy` (0644). The helper
-uses isolated system Python (`/usr/bin/python3 -I`) and its standard library.
-It has no GUI dependency and does not duplicate the Dart installation engine.
-The intended PR-A2 boundary is user-session GUI → `pkexec` → this fixed helper
-→ a validated installer operation. PR-A1 does not wire this into the GUI:
-the current launcher, interactive privilege path, sudo behavior and old polkit
-action remain active.
+The desktop launcher starts `/usr/bin/ro-installer` as the current graphical
+user without changing UID, Wayland/X11, XDG_RUNTIME_DIR or theme environment.
+Interactive main never reexecutes the GUI as root. `CommandRunner` executes
+commands directly; `RO_INSTALLER_COMMAND_SUDO` has no effect. Normal `lsblk`,
+`uname`, EFI checks and `nmcli` queries need no helper authorization. Explicit
+root automatic-profile/QEMU execution remains separate and uses the existing
+engine directly; its root check ignores UID environment variables.
 
-The new action `org.roasd.installer.helper` binds only the exact helper path.
-Inactive/non-local authorization defaults to denial; active authorization
-requires `auth_admin` without retained authorization. No live-only allow rule
-or sudoers payload is added. Any future active/local `liveuser` rule belongs
-to Ro-image-compose. Root authority is checked with the effective process UID;
-caller environment variables never confer authority.
+The interactive privilege boundary is now:
 
-### Protocol v1
+```text
+user GUI → /usr/bin/pkexec --disable-internal-agent
+         /usr/libexec/ro-installer-helper --protocol=1
+         → /usr/libexec/ro-installer-backend --privileged-backend-v1
+         → existing Dart InstallService and its nine stages
+```
 
-Invoke the fixed executable with no arguments or `--protocol=1`. Write exactly
-one UTF-8 JSON object to stdin and close stdin within five seconds. Input is
-limited to 16 KiB. Every listed field is required; all other fields, duplicate
-keys, unknown versions/operations, malformed JSON and non-finite numbers are
-rejected. These are the complete request shapes:
+The same RPM owns the isolated Python helper and the compiled, non-GUI Dart
+backend, both root:root 0755. The backend is built with `dart compile exe`;
+partitioning/install logic remains in the existing Dart stages. Only the
+helper-specific `org.roasd.installer.helper` polkit action remains, bound to
+exactly `/usr/libexec/ro-installer-helper`, with defaults no/no/auth_admin.
+There is no retained authorization, root-GUI policy, sudoers or live-only allow
+rule. A future active/local liveuser rule belongs to Ro-image-compose.
+
+RPM stripping preserves only `/usr/libexec/ro-installer-backend`, because Dart
+appends its AOT snapshot after the ELF image and strip would truncate it. Other
+bundle ELF files retain normal Fedora processing. A real RPM fixture verifies
+the snapshot bytes, and Fedora 44 CI executes the installed backend with an
+invalid protocol request that exits before any disk operation.
+
+### Disk discovery and confirmation
+
+`DiskDiscoveryResult` distinguishes successful empty discovery, command start
+failure, nonzero exit, timeout, incompatible JSON and topology/parsing failure.
+Enumeration has a ten-second timeout. Blank virtio disks with null/empty MODEL,
+boolean RM, `[null]` mountpoints, and absent/empty children are supported.
+Malformed independent entries are excluded with a visible warning while valid
+disks remain. Null children is not assumed to prove a blank disk. Ambiguous
+identities fail the entire discovery. The UI never displays stderr or exception
+text as a disk-discovery message and clears stale selection/confirmation on
+refresh.
+
+Only after selecting a disk does the GUI request an authorized `probe-disk`.
+The destructive confirmation displays the authoritative path/size and retains
+`{path,majorMinor,size,diskSequence}`. Installation sends that exact identity;
+GUI metadata cannot override it. Authorization cancellation (126), denial (127),
+missing pkexec, protocol failure and helper errors are distinct client errors.
+There is no sudo or root-GUI fallback.
+
+### Helper protocol v1
+
+stdin is exactly one UTF-8 JSON object, at most 16 KiB, closed within five
+seconds. Only no arguments or `--protocol=1` are supported. Every shown field is
+required; additional/duplicate fields, unknown versions/operations, non-finite
+numbers and malformed JSON are rejected. Each example is a separate invocation:
 
 ```json
 {"protocolVersion":1,"operation":"audit-live"}
@@ -104,69 +137,116 @@ rejected. These are the complete request shapes:
 {"protocolVersion":1,"operation":"install-full-disk","disk":"/dev/vda","partitionMethod":"full","fileSystem":"btrfs","confirmDestructive":true,"expectedDevice":{"majorMinor":"252:0","size":68719476736,"diskSequence":11}}
 ```
 
-The example identity must be replaced with the actual probe result. Size is
-an integer byte count; `diskSequence` is the kernel disk-generation identity.
-Only canonical `/dev` names are accepted. Caller-controlled commands, argv,
-environment, source/destination paths and chroots have no protocol fields.
+Replace the example identity with the actual probe. Size is bytes and diskSequence
+is the kernel device generation. Only canonical /dev names are accepted. There
+are no command/argv/environment/source/destination/chroot/profile/test-mode fields.
+Root authority comes from effective UID, never environment variables.
 
-Stdout contains exactly one JSON result with `protocolVersion`, `operation`
-(null if parsing failed) and `ok`. A successful probe adds
-`device: {path, majorMinor, size, diskSequence}`. Audit adds effective UID,
-architecture, UEFI presence, operation names and `installationImplemented:false`;
-it reports runtime facts and does not certify live-image provenance. Errors
-add `error: {code, message}` with constant diagnostics and no caller text or
-secrets. Stderr is unused by the helper.
+Stdout is NDJSON. Audit/probe emit one `type:result` envelope with
+`{protocolVersion, type, operation, ok}` plus respectively `audit` or `device`.
+Audit reports runtime facts and `installationImplemented:true`; it does not
+certify live-image provenance. Install emits bounded progress followed by exactly
+one result. A successful final result requires explicit backend success and a
+zero backend exit; EOF/crash/malformed output can never imply success:
+
+```json
+{"protocolVersion":1,"type":"progress","stage":2,"progress":0.2,"messageKey":"install_stage_partitioning"}
+{"protocolVersion":1,"type":"result","operation":"install-full-disk","ok":true,"installed":true}
+```
+
+Errors have `ok:false,error:{code,message}` with constant messages. Stage is
+0–9; messageKey must match the fixed stage-key table in `helper_protocol.dart`.
+Progress is finite and within 0–1. Heartbeats repeat current progress every five
+seconds during long commands; no raw command output is forwarded. Messages are
+at most 8 KiB; each stream is limited to 4 MiB / 16,384 messages. Backend/authorization
+stderr is discarded with a 64 KiB cap. Client probe requests have a two-minute
+conversation timeout; disk enumeration's timeout is separate.
 
 | Exit | Meaning / structured codes |
 | --- | --- |
-| 0 | Successful read-only audit or probe |
-| 2 | `INVALID_REQUEST`, `REQUEST_TOO_LARGE`, `REQUEST_TIMEOUT` |
-| 3 | `ROOT_REQUIRED` |
-| 4 | `DEVICE_NOT_FOUND`, `NOT_BLOCK_DEVICE`, `UNSAFE_DEVICE`, `AMBIGUOUS_TOPOLOGY`, `DEVICE_CHANGED`, `UNSUPPORTED_PLATFORM` |
-| 5 | `BUSY`, `UNSAFE_LOCK` |
-| 6 | `NOT_IMPLEMENTED` |
-| 7 | `SYSTEM_ERROR` |
+| 0 | Successful audit, probe or complete installation |
+| 2 | INVALID_REQUEST, REQUEST_TOO_LARGE, REQUEST_TIMEOUT |
+| 3 | ROOT_REQUIRED |
+| 4 | DEVICE_NOT_FOUND, NOT_BLOCK_DEVICE, UNSAFE_DEVICE, AMBIGUOUS_TOPOLOGY, DEVICE_CHANGED, UNSUPPORTED_PLATFORM |
+| 5 | BUSY, UNSAFE_LOCK |
+| 7 | SYSTEM_ERROR |
+| 8 | INSTALL_FAILED |
+| 9 | BACKEND_ERROR |
 
-### Safety and remaining integration
+### Backend handshake, scope and cancellation
 
-Root independently checks block-device `stat`, major:minor, sysfs ancestry,
-size and disk sequence against fixed, read-only `lsblk` output. All mounted
-filesystem backing devices, their parents and active swap are protected.
-Loop backing files and overlay directories are traced to their backing
-storage. Partitions, aliases, removable/read-only disks, nested target storage
-and ambiguous ancestry are refused. Mounted Btrfs is currently refused because
-mountinfo/lsblk cannot prove all members of a multi-device filesystem; unknown
-filesystems, unresolved loops and stacked mounts also fail closed.
+The helper clears inherited environment, sets cwd `/` and umask 077, and chooses
+all executable paths/argv. Its only child APIs are fixed read-only lsblk and
+the fixed backend. The backend receives only
+`{protocolVersion:1,operation:"install-full-disk",disk,expectedDevice}`. It
+requires root and constructs a fixed full/Btrfs engine state, with no GUI
+state/environment/profile overrides. Its initial request must arrive within
+five seconds; total stdin is capped at 32 KiB.
 
-`install-full-disk` additionally requires x86_64 UEFI, full erase, Btrfs and
-explicit confirmation. It acquires an exclusive persistent-inode lock at
-`/run/ro-installer/install.lock` in a root-owned 0700 directory; the lock file
-is root-owned 0600 and cannot be a symlink. Under that lock it checks the
-confirmed identity and repeats authoritative validation immediately before
-returning `NOT_IMPLEMENTED`. It performs no disk mutation and has no success
-installation path. Future mutation must follow that repeated gate under the
-same lock. The helper clears inherited environment and uses fixed executable
-paths, argument lists, output limits and timeouts for child processes.
+The helper holds `/run/ro-installer/install.lock` for the complete backend
+lifetime, in a root-owned 0700 directory with a root-owned 0600 persistent,
+non-symlink inode. The backend inherits the locked descriptor so its kernel
+lease remains held even if the helper is killed. It validates stat/sysfs/lsblk
+identity and topology, compares
+the confirmed major:minor/size/diskSequence and repeats validation before spawn.
+After all partitioning read-only planning/tool checks, immediately before the
+first wipefs, the existing Dart stage invokes its mutation callback. The backend
+emits `{protocolVersion:1,type:"ready"}` and waits up to fifteen seconds. The
+helper independently validates the device again and sends
+`{protocolVersion:1,type:"continue",device:{path,majorMinor,size,diskSequence}}`.
+The backend requires an exact matching identity before continuing. Its final
+message is `{protocolVersion:1,type:"result",ok,code}` with OK, INSTALL_FAILED or
+BACKEND_ERROR. The helper checks framing, schema, explicit success and process
+exit before emitting the GUI's final result.
 
-Before PR-A2, connect the existing engine across this boundary without a
-second partitioning implementation; define progress/cancellation and target
-cleanup; establish live-image authorization separately; and validate the
-topology guards on a real Compose-produced ISO. Mounted Btrfs membership and
-other currently refused topologies need independent validation before support
-can be widened. GUI launch changes and destructive E2E acceptance are outside
-PR-A1. No release or tag is needed for this foundation.
+PR-A1 guards remain: partitions, aliases, removable/read-only disks, live/root
+backing devices, mounted-device ancestors, active swap, nested target storage
+and ambiguous topology are refused. Loop and overlay backing storage are traced.
+Mounted Btrfs membership, unknown filesystems and stacked mounts still fail closed.
+Only x86_64 UEFI, full erase, Btrfs, GPT, a 512 MiB ESP and the existing Btrfs
+subvolume layout are authorized. No disk swap is created. Helper disk preparation
+does not globally swapoff/unmount; ZRAM remains system policy. Alongside, manual,
+ext4/XFS, LUKS/LVM/RAID/multipath and arbitrary swap are not authorized.
 
-The stable gate runs `python3 -B test/scripts/installer_helper_test.py`, covering
-protocol injection, storage fixtures, identity changes, concurrent lock holders,
-and real payload RPMs with valid and invalid modes. Fedora RPM CI additionally
-runs `python3 -B scripts/check-helper-package.py RPM_PATH` on the built product
-RPM to inspect paths, modes, ownership, policy binding and absence of sudoers
-or polkit allow-rule files. Payload fixtures are not product releases.
+PR-A2 does not support cancellation after entering installation. Navigation and
+target changes are disabled, and closing the GUI does not cancel the independent
+backend session. The helper ignores terminal interruption and continues without
+GUI output while retaining the lock. Protocol failure after authorization drains
+the backend without forwarding data and returns failure after exit. A two-hour
+helper watchdog kills a stalled backend process group and reports failure; this
+is recovery from a stuck operation, not safe rollback. Any partial failure or
+watchdog expiry requires inspecting target/mount state before retrying. There is
+no automatic retry or promise of recovery from power loss/helper SIGKILL, even
+though the backend retains the lock after helper death.
+
+### Installed-target cleanup and validation
+
+Target finalization strictly enumerates the RPM DB before removal and verifies
+absence after removal; an unreadable RPM DB never means successful absence.
+Narrow cleanup and post-install checks cover the installer RPM, both /usr/bin
+symlinks, lib/lib64 bundle directories, desktop file, launcher, helper, backend,
+old/new installer polkit policies, future 49-ro-installer-live.rules and legacy
+ro-installer-live sudoers file. Both existing paths and dangling symlinks fail
+validation. Unrelated system polkit files are preserved. The runtime /run lock
+is excluded from the prepared-root copy.
+
+The stable gate runs helper protocol/storage/locking/backend/launcher/RPM tests
+and the full Flutter suite. Package CI additionally checks the compiled backend,
+helper ownership/modes and exact helper policy in the actual Fedora 44 product
+RPM, rejects old root-GUI policy/sudoers/allow rules, and verifies installability.
+No release/version/tag changes are needed for this integration.
+
+Before release, run a real Compose ISO with an active graphical polkit agent,
+validate its live/root topology and authorization, then perform full install and
+reboot to RO_INSTALLER_VM_BOOT_OK. This PR does not create an ISO or claim that
+hardware/destructive E2E has passed. Further recovery/diagnostic hardening and any
+fixes found during that run should precede the single future immutable release.
 
 ## Technology and Repository Layout
 
 - Flutter and Dart for the Linux desktop application.
 - `lib/`: Flutter UI, installer state, services, storage planning, and stages.
+- `bin/`: fixed non-GUI privileged Dart backend entrypoint.
 - `assets/`: product images, branding, and localization data.
 - `linux/`: Linux desktop integration, launcher, policy, and helper scripts.
 - `scripts/`: RPM packaging, stable-gate automation, and external-ISO QEMU test

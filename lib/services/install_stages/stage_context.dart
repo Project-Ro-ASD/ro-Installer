@@ -18,6 +18,7 @@ class StageContext {
     required this.runCmd,
     this.localizer = const InstallLocalizer(),
     this.isMock = false,
+    this.beforeFirstMutation,
   });
 
   /// Kurulum yapılandırma verisi (disk, storage layout, Installer UI language hint)
@@ -47,6 +48,7 @@ class StageContext {
 
   /// Simülasyon modu aktif mi
   final bool isMock;
+  final Future<void> Function()? beforeFirstMutation;
 
   String t(
     String key,

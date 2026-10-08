@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""Privileged protocol v1 foundation. No installation mutations in PR-A1."""
+"""Authoritative privileged protocol v1 gate for the fixed Dart install engine."""
 
 import dataclasses
 import fcntl
@@ -9,6 +9,7 @@ from pathlib import Path
 import platform
 import re
 import select
+import signal
 import stat
 import subprocess
 import sys
@@ -26,6 +27,16 @@ LSBLK_ARGV = (
     "/usr/bin/lsblk", "--json", "--bytes", "--paths", "--tree", "--output",
     "NAME,TYPE,MAJ:MIN,SIZE,PKNAME,RO,RM",
 )
+BACKEND_ARGV = ("/usr/libexec/ro-installer-backend", "--privileged-backend-v1")
+BACKEND_TIMEOUT = 2 * 60 * 60
+MAX_MESSAGE_BYTES = 8192
+MAX_BACKEND_BYTES = 4 * 1024 * 1024
+STAGE_KEYS = (
+    "install_progress_initial", "install_stage_disk_preparation",
+    "install_stage_partitioning", "install_stage_formatting", "install_stage_mounting",
+    "install_stage_file_copy", "install_stage_target_finalization", "install_stage_bootloader",
+    "install_stage_post_validation", "install_stage_cleanup",
+)
 OPERATIONS = frozenset({"audit-live", "probe-disk", "install-full-disk"})
 PSEUDO_FILESYSTEMS = frozenset({
     "proc", "sysfs", "tmpfs", "devtmpfs", "devpts", "cgroup", "cgroup2",
@@ -38,7 +49,7 @@ EXIT_CODES = {
     "ROOT_REQUIRED": 3, "DEVICE_NOT_FOUND": 4, "NOT_BLOCK_DEVICE": 4,
     "UNSAFE_DEVICE": 4, "AMBIGUOUS_TOPOLOGY": 4, "DEVICE_CHANGED": 4,
     "UNSUPPORTED_PLATFORM": 4, "BUSY": 5, "UNSAFE_LOCK": 5,
-    "NOT_IMPLEMENTED": 6, "SYSTEM_ERROR": 7,
+    "SYSTEM_ERROR": 7, "INSTALL_FAILED": 8, "BACKEND_ERROR": 9,
 }
 
 
@@ -253,7 +264,7 @@ class System:
     def audit(self):
         return {"effectiveUid": os.geteuid(), "architecture": platform.machine(),
                 "uefi": Path("/sys/firmware/efi").is_dir(),
-                "operations": sorted(OPERATIONS), "installationImplemented": False}
+                "operations": sorted(OPERATIONS), "installationImplemented": True}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -483,7 +494,143 @@ class InstallerLock:
         self.fd = None
 
 
-def handle(request, system):
+def backend_message(raw):
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object,
+                           parse_constant=lambda _: fail("BACKEND_ERROR", "Invalid backend number."))
+        if not isinstance(value, dict) or type(value.get("protocolVersion")) is not int or value["protocolVersion"] != 1:
+            raise ValueError()
+        kind = value.get("type")
+        if kind == "progress":
+            if (set(value) != {"protocolVersion", "type", "stage", "progress", "messageKey"}
+                    or type(value["stage"]) is not int or not 0 <= value["stage"] <= 9
+                    or type(value["progress"]) not in (int, float) or not 0 <= value["progress"] <= 1
+                    or value["messageKey"] != STAGE_KEYS[value["stage"]]):
+                raise ValueError()
+        elif kind == "ready":
+            if set(value) != {"protocolVersion", "type"}: raise ValueError()
+        elif kind == "result":
+            if (set(value) != {"protocolVersion", "type", "ok", "code"}
+                    or type(value["ok"]) is not bool
+                    or value["code"] not in {"OK", "INSTALL_FAILED", "BACKEND_ERROR"}
+                    or value["ok"] != (value["code"] == "OK")):
+                raise ValueError()
+        else:
+            raise ValueError()
+        return value
+    except (ValueError, UnicodeError, RecursionError, KeyError, TypeError, HelperError):
+        fail("BACKEND_ERROR", "Invalid backend protocol message.")
+
+
+def stop_backend_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def run_backend(request, confirmed, system, emit, *, lock_fd=None):
+    # The backend is compiled from the existing Dart engine, in this same RPM.
+    # No caller executable, argv, environment or engine configuration is used.
+    # Inherit the locked descriptor: the kernel lease survives helper SIGKILL
+    # until the independent backend (and its synchronous children) exits.
+    try:
+        process = subprocess.Popen(BACKEND_ARGV, stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   env=CHILD_ENV, close_fds=True, start_new_session=True,
+                                   pass_fds=() if lock_fd is None else (lock_fd,))
+    except OSError:
+        fail("BACKEND_ERROR", "Privileged backend could not start.")
+    authorized = False
+    final = None
+    failure = None
+    streams = [process.stdout, process.stderr]
+    pending = bytearray()
+    total = stderr_bytes = messages = 0
+    deadline = time.monotonic() + BACKEND_TIMEOUT
+    try:
+        payload = {"protocolVersion": 1, "operation": "install-full-disk",
+                   "disk": confirmed.path, "expectedDevice": request.expected_device}
+        process.stdin.write(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+        process.stdin.flush()
+        while streams:
+            remaining = deadline - time.monotonic()
+            ready = select.select(streams, [], [], max(0, min(remaining, 1)))[0]
+            if remaining <= 0:
+                failure = HelperError("BACKEND_ERROR", "Privileged backend exceeded the installation deadline.")
+                break
+            for stream in ready:
+                chunk = os.read(stream.fileno(), 4096)
+                if not chunk:
+                    streams.remove(stream)
+                    continue
+                if stream is process.stderr:
+                    stderr_bytes += len(chunk)
+                    if stderr_bytes > 65536 and failure is None:
+                        failure = HelperError("BACKEND_ERROR", "Backend diagnostics exceeded the safety limit.")
+                    continue
+                total += len(chunk)
+                if total > MAX_BACKEND_BYTES and failure is None:
+                    failure = HelperError("BACKEND_ERROR", "Backend stream exceeded the safety limit.")
+                if failure is not None:
+                    continue
+                pending.extend(chunk)
+                try:
+                    while b"\n" in pending:
+                        raw, _, rest = pending.partition(b"\n")
+                        pending = bytearray(rest)
+                        messages += 1
+                        if len(raw) > MAX_MESSAGE_BYTES or messages > 16384 or final is not None:
+                            fail("BACKEND_ERROR", "Invalid backend stream framing.")
+                        message = backend_message(raw)
+                        if message["type"] == "ready":
+                            if authorized:
+                                fail("BACKEND_ERROR", "Repeated backend mutation gate.")
+                            # This handshake is inside PartitioningStage after its
+                            # read-only checks, immediately before the first wipefs.
+                            if validate_device(system, request.disk) != confirmed:
+                                fail("DEVICE_CHANGED", "Device changed immediately before mutation.")
+                            gate = {"protocolVersion": 1, "type": "continue", "device": confirmed.public()}
+                            process.stdin.write(json.dumps(gate).encode() + b"\n")
+                            process.stdin.flush()
+                            process.stdin.close()
+                            authorized = True
+                        elif message["type"] == "result":
+                            final = message
+                        else:
+                            emit(message)
+                    if len(pending) > MAX_MESSAGE_BYTES:
+                        fail("BACKEND_ERROR", "Backend message exceeded the safety limit.")
+                except HelperError as error:
+                    failure = error
+            # Before authorization, aborting cannot interrupt a disk mutation.
+            # Afterwards a malformed/closed GUI stream is never cancellation:
+            # drain without forwarding and retain the lock until engine exit.
+            if failure is not None and not authorized:
+                break
+        if failure is not None and not authorized or time.monotonic() >= deadline:
+            stop_backend_group(process)
+        status = process.wait(timeout=max(1, deadline - time.monotonic()))
+        if failure is not None:
+            raise failure
+        if pending or final is None or (final["ok"] and (not authorized or status != 0)):
+            fail("BACKEND_ERROR", "Backend ended without a valid successful result.")
+        if not final["ok"]:
+            fail(final["code"], "Privileged installation failed; inspect the installed-target state before retrying.")
+        return {"installed": True}
+    except (OSError, subprocess.TimeoutExpired):
+        fail("BACKEND_ERROR", "Privileged backend transport failed.")
+    finally:
+        # A crashed engine must not leave a formatting/copy grandchild running
+        # after the installation lock is released. Success has no live children.
+        stop_backend_group(process)
+        process.wait()
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if not stream.closed:
+                stream.close()
+
+
+def handle(request, system, emit=lambda _: None):
     if os.geteuid() != 0:
         fail("ROOT_REQUIRED", "The helper requires effective UID zero.")
     if request.operation == "audit-live":
@@ -494,17 +641,17 @@ def handle(request, system):
         fail("INVALID_REQUEST", "Unsupported operation.")
     if not system.platform_supported():
         fail("UNSUPPORTED_PLATFORM", "Installation requires x86_64 UEFI.")
-    with InstallerLock():
+    with InstallerLock() as lock:
         before = validate_device(system, request.disk)
         expected = {key: value for key, value in before.public().items() if key != "path"}
         if expected != request.expected_device:
             fail("DEVICE_CHANGED", "Target no longer matches the confirmed device identity.")
-        # Future engine integration must begin immediately after this repeated gate
-        # while holding this lock. Never infer mutation safety from a prior probe.
+        # Validate again before spawning the fixed engine. The ready/continue
+        # handshake performs one more gate immediately before its first mutation.
         after = validate_device(system, request.disk)
         if before != after:
             fail("DEVICE_CHANGED", "Target identity changed before installation.")
-        fail("NOT_IMPLEMENTED", "PR-A1 validates installation requests but performs no installation.")
+        return run_backend(request, after, system, emit, lock_fd=lock.fd)
 
 
 def main():
@@ -519,7 +666,17 @@ def main():
             fail("INVALID_REQUEST", "Only protocol v1 on stdin is supported.")
         request = parse_request(read_request(sys.stdin.fileno()))
         operation = request.operation
-        result = handle(request, System())
+        def emit(message):
+            try:
+                sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+                sys.stdout.flush()
+            except BrokenPipeError:
+                # Losing the GUI is not a request to interrupt formatting.
+                pass
+        if request.operation == "install-full-disk":
+            for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                signal.signal(sig, signal.SIG_IGN)
+        result = handle(request, System(), emit)
         output = {"protocolVersion": 1, "operation": operation, "ok": True, **result}
         status = 0
     except HelperError as error:
@@ -532,7 +689,12 @@ def main():
         output = {"protocolVersion": 1, "operation": operation, "ok": False,
                   "error": {"code": "SYSTEM_ERROR", "message": "Helper operation failed safely."}}
         status = 7
-    sys.stdout.write(json.dumps(output, separators=(",", ":")) + "\n")
+    output["type"] = "result"
+    try:
+        sys.stdout.write(json.dumps(output, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+    except BrokenPipeError:
+        pass
     return status
 
 

@@ -7,6 +7,10 @@ URL:            https://github.com/Project-Ro-ASD/ro-Installer
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      x86_64
 
+# Lazy expansion resolves buildsubdir after autosetup. Keep the appended Dart
+# AOT snapshot intact without disabling ELF processing for the Flutter bundle.
+%define __strip %{_builddir}/%{buildsubdir}/scripts/strip-preserve-dart.sh
+
 # The Flutter SDK is supplied by the build wrapper or CI rather than being
 # taken from the Fedora buildroot repositories.
 BuildRequires:  clang
@@ -51,6 +55,7 @@ export CFLAGS="${CFLAGS:-} -Wno-error=unused-command-line-argument -Wno-unused-c
 export CXXFLAGS="${CXXFLAGS:-} -Wno-error=unused-command-line-argument -Wno-unused-command-line-argument"
 flutter pub get
 flutter build linux --release
+dart compile exe bin/privileged_backend.dart -o ro-installer-backend
 
 %check
 bash scripts/check-stable.sh
@@ -66,11 +71,11 @@ ln -s ../%{_lib}/ro-installer/ro_installer %{buildroot}%{_bindir}/ro_installer
 install -Dm644 linux/ro-installer.desktop \
     %{buildroot}%{_datadir}/applications/ro-installer.desktop
 
-install -Dm644 linux/org.roasd.installer.policy \
-    %{buildroot}%{_datadir}/polkit-1/actions/org.roasd.installer.policy
-
 install -Dm755 linux/ro-installer-launcher.sh \
     %{buildroot}%{_libexecdir}/ro-installer-launcher.sh
+
+install -Dm755 ro-installer-backend \
+    %{buildroot}%{_libexecdir}/ro-installer-backend
 
 install -Dm755 linux/ro-installer-helper \
     %{buildroot}%{_libexecdir}/ro-installer-helper
@@ -85,8 +90,8 @@ install -Dm644 linux/org.roasd.installer.helper.policy \
 %{_bindir}/ro-installer
 %{_bindir}/ro_installer
 %{_datadir}/applications/ro-installer.desktop
-%{_datadir}/polkit-1/actions/org.roasd.installer.policy
 %{_libexecdir}/ro-installer-launcher.sh
+%attr(0755,root,root) %{_libexecdir}/ro-installer-backend
 %attr(0755,root,root) %{_libexecdir}/ro-installer-helper
 %attr(0644,root,root) %{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy
 

@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "Finalización del destino completada.",
   "stage_result_bootloader_done": "Instalación del cargador terminada.",
   "stage_result_post_validation_done": "Validación posterior terminada.",
-  "stage_result_cleanup_done": "Limpieza completada."
+  "stage_result_cleanup_done": "Limpieza completada.",
+  "helper_error": "Falló la autorización o la operación privilegiada. No se inició un reintento automático.",
+  "disk_discovery_startFailed": "No se pudo iniciar la detección de discos. Compruebe el paquete y actualice.",
+  "disk_discovery_commandFailed": "Falló la detección de discos. Actualice.",
+  "disk_discovery_timeout": "Se agotó el tiempo de detección de discos. Actualice.",
+  "disk_discovery_incompatibleJson": "La detección de discos devolvió una respuesta no compatible.",
+  "disk_discovery_topology": "No se pudo leer la topología de discos de forma segura.",
+  "disk_discovery_partial": "Se excluyeron algunos discos porque no pudieron leerse de forma segura."
 }

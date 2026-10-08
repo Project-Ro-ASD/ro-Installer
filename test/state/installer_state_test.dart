@@ -55,7 +55,11 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      runner.addResponseForCommand('lsblk', stdout: '{"blockdevices":[]}');
+      runner.addResponseForCommand(
+        'lsblk',
+        stdout:
+            '{"blockdevices":[{"name":"test","type":"disk","size":128849018880,"model":"Test disk","rm":false,"mountpoints":[null]}]}',
+      );
       state.selectedDisk = '/dev/test';
       state.selectedDiskDetails = {
         'name': '/dev/test',

@@ -18,6 +18,8 @@ class CapturingInstallService extends InstallService {
     void Function(String) onTechnicalLog, {
     bool isMock = false,
     InstallTranslator? translate,
+    Future<void> Function()? beforeFirstMutation,
+    void Function(int)? onStage,
   }) async {
     states.add(Map.of(state));
     return false; // Stop before target operations; exercise the real auto entry point.

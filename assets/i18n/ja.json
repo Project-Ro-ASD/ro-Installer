@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "ターゲットシステムの仕上げが完了しました。",
   "stage_result_bootloader_done": "ブートローダーのインストールが完了しました。",
   "stage_result_post_validation_done": "インストール後の検証が完了しました。",
-  "stage_result_cleanup_done": "クリーンアップが完了しました。"
+  "stage_result_cleanup_done": "クリーンアップが完了しました。",
+  "helper_error": "インストールの認証または特権操作に失敗しました。自動再試行は行いません。",
+  "disk_discovery_startFailed": "ディスク検出を開始できませんでした。パッケージを確認して更新してください。",
+  "disk_discovery_commandFailed": "ディスク検出に失敗しました。更新してください。",
+  "disk_discovery_timeout": "ディスク検出がタイムアウトしました。更新してください。",
+  "disk_discovery_incompatibleJson": "ディスク検出で未対応の応答が返されました。",
+  "disk_discovery_topology": "ディスク構成を安全に読み取れませんでした。",
+  "disk_discovery_partial": "安全に読み取れないディスクは一覧から除外されました。"
 }

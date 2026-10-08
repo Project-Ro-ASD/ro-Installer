@@ -158,7 +158,7 @@ class ProtocolTests(ErrorAssertions, unittest.TestCase):
         self.assertEqual(result.stderr, "")
         if os.geteuid() == 0:
             self.assertEqual(result.returncode, 0)
-            self.assertFalse(data["audit"]["installationImplemented"])
+            self.assertTrue(data["audit"]["installationImplemented"])
         else:
             self.assertEqual(result.returncode, 3)
             self.assertEqual(data["error"]["code"], "ROOT_REQUIRED")
@@ -314,7 +314,10 @@ class LockAndGateTests(ErrorAssertions, unittest.TestCase):
             real_lock = helper.InstallerLock
             with mock.patch.object(helper.os, "geteuid", return_value=0), \
                     mock.patch.object(helper, "InstallerLock", side_effect=lambda: real_lock(td + "/installer", os.getuid())):
-                self.error("NOT_IMPLEMENTED", helper.handle, parsed, system)
+                with mock.patch.object(helper, "run_backend", return_value={"installed": True}) as backend:
+                    self.assertEqual(helper.handle(parsed, system), {"installed": True})
+                    backend.assert_called_once()
+                    self.assertEqual(backend.call_args.args[1], original)
                 for changed in (helper.dataclasses.replace(original, size=original.size + 512),
                                 helper.dataclasses.replace(original, disk_sequence=99)):
                     with mock.patch.object(helper, "validate_device", side_effect=[original, changed]) as validator:
@@ -332,7 +335,212 @@ class LockAndGateTests(ErrorAssertions, unittest.TestCase):
             self.error("UNSUPPORTED_PLATFORM", helper.handle, helper.parse_request(json.dumps(install_request()).encode()), system)
 
 
+class BackendBridgeTests(ErrorAssertions, unittest.TestCase):
+    prefix = "import json,sys\nrequest=json.loads(sys.stdin.readline())\n"
+    ready = 'print(json.dumps({"protocolVersion":1,"type":"ready"}),flush=True)\ngate=json.loads(sys.stdin.readline())\n'
+    success = 'print(json.dumps({"protocolVersion":1,"type":"result","ok":True,"code":"OK"}),flush=True)\n'
+
+    def run_stub(self, body, system=None, emit=lambda _: None):
+        system = system or FakeSystem()
+        request = helper.parse_request(json.dumps(install_request()).encode())
+        confirmed = helper.validate_device(FakeSystem(), request.disk)
+        with tempfile.TemporaryDirectory() as td:
+            script = Path(td, "backend.py")
+            script.write_text(self.prefix + body)
+            with mock.patch.object(helper, "BACKEND_ARGV", (sys.executable, "-I", str(script))):
+                return helper.run_backend(request, confirmed, system, emit)
+
+    def test_normalized_request_gate_and_explicit_success(self):
+        body = self.ready + '''assert set(request)=={"protocolVersion","operation","disk","expectedDevice"}
+assert request["disk"]==gate["device"]["path"]=="/dev/vda"
+assert request["expectedDevice"]["diskSequence"]==gate["device"]["diskSequence"]==11
+print(json.dumps({"protocolVersion":1,"type":"progress","stage":2,"progress":0.2,"messageKey":"install_stage_partitioning"}),flush=True)
+''' + self.success
+        events = []
+        self.assertEqual(self.run_stub(body, emit=events.append), {"installed": True})
+        self.assertEqual(events[0]["stage"], 2)
+
+    def test_crash_eof_malformed_unknown_oversized_and_false_success_rejected(self):
+        cases = ["sys.exit(1)", self.success,
+                 "print('not-json',flush=True)",
+                 'print(json.dumps({"protocolVersion":1,"type":"exec"}),flush=True)',
+                 "print('x'*9000,flush=True)",
+                 self.ready + self.success + "sys.exit(1)",
+                 self.ready + self.success + self.success,
+                 self.ready + self.success + "print('trailing',end='',flush=True)"]
+        for body in cases:
+            with self.subTest(body=body):
+                self.error("BACKEND_ERROR", self.run_stub, body)
+
+    def test_stage_failure_is_not_success(self):
+        self.error("INSTALL_FAILED", self.run_stub, self.ready +
+                   'print(json.dumps({"protocolVersion":1,"type":"result","ok":False,"code":"INSTALL_FAILED"}),flush=True)')
+
+    def test_device_change_at_ready_never_authorizes_backend(self):
+        system = FakeSystem()
+        system.infos["252:0"]["diskSequence"] = 99
+        self.error("DEVICE_CHANGED", self.run_stub, self.ready + self.success, system)
+
+    def test_backend_watchdog_fails_closed(self):
+        with mock.patch.object(helper, "BACKEND_TIMEOUT", 0.05):
+            self.error("BACKEND_ERROR", self.run_stub, "import time; time.sleep(30)")
+
+    def test_backend_crash_stops_remaining_stage_children(self):
+        with tempfile.TemporaryDirectory() as td:
+            pidfile = Path(td, "child.pid")
+            body = self.ready + "import subprocess,os\n" + \
+                "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n" + \
+                "open(" + repr(str(pidfile)) + ", 'w').write(str(child.pid))\nsys.exit(1)\n"
+            self.error("BACKEND_ERROR", self.run_stub, body)
+            pid = int(pidfile.read_text())
+            # A reparented zombie is stopped and cannot continue disk writes.
+            proc = Path("/proc", str(pid), "stat")
+            for _ in range(100):
+                if not proc.exists() or proc.read_text().split()[2] == "Z": break
+                import time
+                time.sleep(0.01)
+            self.assertTrue(not proc.exists() or proc.read_text().split()[2] == "Z")
+
+    def test_missing_backend_fails_closed(self):
+        with mock.patch.object(helper, "BACKEND_ARGV", ("/nonexistent/ro-backend",)):
+            request = helper.parse_request(json.dumps(install_request()).encode())
+            self.error("BACKEND_ERROR", helper.run_backend, request,
+                       helper.validate_device(FakeSystem(), request.disk), FakeSystem(), lambda _: None)
+
+    def test_install_lock_held_through_backend_result(self):
+        with tempfile.TemporaryDirectory() as td:
+            directory = td + "/installer"
+            real_lock = helper.InstallerLock
+            script = Path(td, "backend.py")
+            inherited = 'import os\nassert any(os.path.realpath("/proc/self/fd/"+n)=='+repr(directory + '/install.lock')+' for n in os.listdir("/proc/self/fd"))\n'
+            script.write_text(self.prefix + inherited + self.ready +
+                'print(json.dumps({"protocolVersion":1,"type":"progress","stage":2,"progress":0.1,"messageKey":"install_stage_partitioning"}),flush=True)\n' + self.success)
+            events = []
+            def emit(event):
+                self.error("BUSY", real_lock(directory, os.getuid()).__enter__)
+                events.append(event)
+            with mock.patch.object(helper.os, "geteuid", return_value=0), \
+                    mock.patch.object(helper, "InstallerLock", side_effect=lambda: real_lock(directory, os.getuid())), \
+                    mock.patch.object(helper, "BACKEND_ARGV", (sys.executable, "-I", str(script))):
+                self.assertEqual(helper.handle(helper.parse_request(json.dumps(install_request()).encode()), FakeSystem(), emit), {"installed": True})
+            self.assertEqual(len(events), 1)
+            with real_lock(directory, os.getuid()): pass
+
+
+    @unittest.skipUnless(shutil.which("dart"), "Dart SDK unavailable for native-runtime lease test")
+    def test_native_dart_backend_retains_lock_after_parent_releases_it(self):
+        with tempfile.TemporaryDirectory() as td:
+            binary = Path(td, "dart-lease")
+            compiled = subprocess.run(["dart", "compile", "exe", str(ROOT / "test/fixtures/backend_lock_lease.dart"),
+                                       "-o", str(binary)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            directory = td + "/installer"
+            lock = helper.InstallerLock(directory, os.geteuid())
+            with lock:
+                process = subprocess.Popen([str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE, pass_fds=(lock.fd,))
+                self.assertEqual(process.stdout.readline(), b"ready\n")
+            try:
+                # The helper's own descriptor is gone, but the native backend's
+                # inherited descriptor still prevents a second installation.
+                self.error("BUSY", helper.InstallerLock(directory, os.geteuid()).__enter__)
+            finally:
+                process.stdin.close()
+                self.assertEqual(process.wait(timeout=5), 0)
+                process.stdout.close()
+                process.stderr.close()
+            with helper.InstallerLock(directory, os.geteuid()): pass
+
+
+class LauncherSessionTests(unittest.TestCase):
+    def test_desktop_launches_user_gui_with_literal_args_and_session(self):
+        source = (ROOT / "linux/ro-installer-launcher.sh").read_text()
+        self.assertNotIn("pkexec", source)
+        self.assertNotIn("sudo", source)
+        self.assertIn("Exec=/usr/libexec/ro-installer-launcher.sh", (ROOT / "linux/ro-installer.desktop").read_text())
+        with tempfile.TemporaryDirectory() as td:
+            binary = Path(td, "gui")
+            binary.write_text('#!/usr/bin/python3 -I\nimport os,sys,json\nprint(json.dumps({"uid":os.getuid(),"args":sys.argv[1:],"wayland":os.getenv("WAYLAND_DISPLAY"),"runtime":os.getenv("XDG_RUNTIME_DIR"),"theme":os.getenv("QT_QPA_PLATFORMTHEME")}))\n')
+            binary.chmod(0o755)
+            launcher = Path(td, "launcher")
+            launcher.write_text(source.replace("BINARY=/usr/bin/ro-installer", "BINARY=" + str(binary)))
+            args = ["--literal", "a b", "$(touch /tmp/never-run)", ";id"]
+            result = subprocess.run(["bash", str(launcher), *args], text=True, capture_output=True,
+                env=dict(os.environ, WAYLAND_DISPLAY="wayland-test", XDG_RUNTIME_DIR=td, QT_QPA_PLATFORMTHEME="kde"))
+            self.assertEqual(result.returncode, 0)
+            actual = json.loads(result.stdout)
+            self.assertEqual(actual, {"uid":os.getuid(),"args":args,"wayland":"wayland-test","runtime":td,"theme":"kde"})
+            binary.unlink()
+            missing = subprocess.run(["bash", str(launcher)], text=True, capture_output=True)
+            self.assertEqual(missing.returncode, 1)
+            self.assertLess(len(missing.stderr), 256)
+
+    def test_no_root_gui_or_generic_sudo_routing(self):
+        main = (ROOT / "lib/main.dart").read_text()
+        runner = (ROOT / "lib/services/command_runner.dart").read_text()
+        installing = (ROOT / "lib/screens/installing_screen.dart").read_text()
+        self.assertNotIn("RO_INSTALLER_COMMAND_SUDO", main + runner)
+        self.assertNotIn("pkexec", main)
+        self.assertNotIn("InstallService.instance.runInstall", installing)
+        self.assertIn("HelperClient.instance.install", installing)
+
+
 class PackagingTests(unittest.TestCase):
+    @unittest.skipUnless(all(shutil.which(tool) for tool in ("dart", "rpmbuild", "rpm2cpio", "cpio")), "Dart/RPM tools unavailable")
+    def test_native_backend_snapshot_survives_real_rpm_postprocessing(self):
+        with tempfile.TemporaryDirectory() as td:
+            top = Path(td)
+            for directory in ("BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS", "tmp"):
+                (top / directory).mkdir()
+            backend = top / "SOURCES/backend"
+            compiled = subprocess.run(["dart", "compile", "exe", "bin/privileged_backend.dart", "-o", str(backend)],
+                                      cwd=ROOT, text=True, capture_output=True, timeout=120)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            shutil.copy2(ROOT / "scripts/strip-preserve-dart.sh", top / "SOURCES/strip-preserve-dart.sh")
+            # Use the product's exact lazy strip macro and the real RPM hooks.
+            strip_macro = next(line for line in (ROOT / "ro-installer.spec").read_text().splitlines()
+                               if line.startswith("%define __strip "))
+            spec = top / "SPECS/fixture.spec"
+            spec.write_text(f'''Name: backend-snapshot-fixture
+Version: 1
+Release: 1
+Summary: Dart backend RPM snapshot fixture
+License: MIT
+%global debug_package %{{nil}}
+{strip_macro}
+%description
+Non-product native backend package fixture.
+%prep
+%setup -c -T -n backend-snapshot-fixture-1
+mkdir scripts
+cp %{{_sourcedir}}/strip-preserve-dart.sh scripts/
+%install
+install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
+%files
+%attr(0755,root,root) {package.BACKEND}
+''')
+            built = subprocess.run(["rpmbuild", "-bb", "--define", f"_topdir {top}",
+                                    "--define", f"_tmppath {top / 'tmp'}", str(spec)],
+                                   text=True, capture_output=True, timeout=60)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            rpm = next((top / "RPMS").rglob("*.rpm"))
+            payload = package.extract_member(rpm, package.BACKEND)
+            self.assertEqual(payload, backend.read_bytes(), "RPM changed the appended Dart snapshot")
+            installed = top / "installed-backend"
+            installed.write_bytes(payload)
+            installed.chmod(0o755)
+            result = subprocess.run([str(installed), "--privileged-backend-v1"],
+                                    input='{"protocolVersion":999}\n', text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 9)
+            self.assertEqual(result.stderr, "")
+            self.assertEqual(json.loads(result.stdout), {
+                "protocolVersion": 1, "type": "result", "ok": False, "code": "BACKEND_ERROR"})
+            # Protection is restricted to the one buildroot path. Other files
+            # still reach the system strip tool (which rejects this bad option).
+            other = subprocess.run([str(ROOT / "scripts/strip-preserve-dart.sh"), "--invalid-strip-option", str(installed)],
+                                   env=dict(os.environ, RPM_BUILD_ROOT=str(top)), capture_output=True)
+            self.assertNotEqual(other.returncode, 0)
+
     def test_policy_and_explicit_spec_ownership(self):
         package.check_policy((ROOT / "linux/org.roasd.installer.helper.policy").read_bytes())
         spec = (ROOT / "ro-installer.spec").read_text()
@@ -341,7 +549,9 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("Requires:       python3", spec)
         self.assertNotIn("sudoers", spec)
         self.assertNotIn("NOPASSWD", spec)
-        self.assertIn("%{_datadir}/polkit-1/actions/org.roasd.installer.policy", spec)
+        self.assertNotIn("%{_datadir}/polkit-1/actions/org.roasd.installer.policy", spec)
+        self.assertFalse((ROOT / "linux/org.roasd.installer.policy").exists())
+        self.assertIn("%attr(0755,root,root) %{_libexecdir}/ro-installer-backend", spec)
 
     def test_policy_rejects_broad_path_and_retained_authorization(self):
         raw = (ROOT / "linux/org.roasd.installer.helper.policy").read_bytes()
@@ -362,12 +572,13 @@ class PackagingTests(unittest.TestCase):
                     self.assertNotIn(node.func.attr, {"system", "popen", "execv", "execve", "spawnv"})
                     if isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess":
                         process_calls.append(node)
-        self.assertEqual(len(process_calls), 1)
-        call = process_calls[0]
-        self.assertEqual(call.func.attr, "Popen")
-        self.assertEqual(call.args[0].id, "LSBLK_ARGV")
-        self.assertFalse(any(keyword.arg == "shell" for keyword in call.keywords))
+        self.assertEqual(len(process_calls), 2)
+        self.assertEqual({call.args[0].id for call in process_calls}, {"LSBLK_ARGV", "BACKEND_ARGV"})
+        for call in process_calls:
+            self.assertEqual(call.func.attr, "Popen")
+            self.assertFalse(any(keyword.arg == "shell" for keyword in call.keywords))
         self.assertEqual(helper.LSBLK_ARGV[0], "/usr/bin/lsblk")
+        self.assertEqual(helper.BACKEND_ARGV, ("/usr/libexec/ro-installer-backend", "--privileged-backend-v1"))
         self.assertEqual(stat.S_IMODE((ROOT / "linux/ro-installer-helper").stat().st_mode), 0o755)
 
     @unittest.skipUnless(all(shutil.which(tool) for tool in ("rpmbuild", "rpm2cpio", "cpio")), "RPM tools unavailable")
@@ -377,6 +588,7 @@ class PackagingTests(unittest.TestCase):
             top = Path(td)
             for directory in ("BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS", "tmp"):
                 (top / directory).mkdir()
+            (top / "SOURCES/backend").write_bytes(b"\x7fELFpayload-fixture")
             shutil.copy2(ROOT / "linux/ro-installer-helper", top / "SOURCES/helper")
             shutil.copy2(ROOT / "linux/org.roasd.installer.helper.policy", top / "SOURCES/policy")
             for release, mode in (("1", "0755"), ("2", "0777")):
@@ -391,9 +603,11 @@ BuildArch: noarch
 Non-product package fixture.
 %install
 install -Dm755 %{{_sourcedir}}/helper %{{buildroot}}{package.HELPER}
+install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
 install -Dm644 %{{_sourcedir}}/policy %{{buildroot}}{package.POLICY}
 %files
 %attr({mode},root,root) {package.HELPER}
+%attr(0755,root,root) {package.BACKEND}
 %attr(0644,root,root) {package.POLICY}
 ''')
                 built = subprocess.run(["rpmbuild", "-bb", "--define", f"_topdir {top}",

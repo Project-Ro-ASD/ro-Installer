@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'command_runner.dart';
+import 'disk_discovery.dart' as discovery;
+export 'disk_discovery.dart'
+    show DiskDiscoveryError, DiskDiscoveryException, DiskDiscoveryResult;
 import 'storage_topology_guard.dart';
 
 class DiskService {
@@ -18,72 +21,16 @@ class DiskService {
   static const int _minSourcePartitionBytes = 40 * 1024 * 1024 * 1024;
   static const int _sourcePartitionExtraMarginBytes = 10 * 1024 * 1024 * 1024;
 
+  Future<discovery.DiskDiscoveryResult> discoverDisks() =>
+      discovery.discoverDisks(_commandRunner);
+
+  // Compatibility for existing callers: failures are explicit, never [].
   Future<List<Map<String, dynamic>>> getDisks() async {
-    List<Map<String, dynamic>> diskList = [];
-
-    try {
-      final result = await _commandRunner.run('lsblk', [
-        '-J',
-        '-b',
-        '-o',
-        'NAME,MODEL,SIZE,TYPE,RM,MOUNTPOINTS',
-      ]);
-      if (result.exitCode == 0) {
-        final Map<String, dynamic> parsed = jsonDecode(result.stdout);
-        if (parsed.containsKey('blockdevices')) {
-          final devices = parsed['blockdevices'] as List<dynamic>;
-
-          for (var d in devices) {
-            if (d['type'] != 'disk') continue;
-            final name = d['name'].toString();
-            if (name.startsWith('zram') ||
-                name.startsWith('loop') ||
-                name.startsWith('sr')) {
-              continue;
-            }
-
-            bool isLive = false;
-            if (d['rm'] == true) {
-              isLive = true;
-            }
-
-            bool hasCriticalMount = false;
-            bool isHostOS = false;
-            if (d.containsKey('children')) {
-              for (var child in (d['children'] as List<dynamic>)) {
-                if (child.containsKey('mountpoints') &&
-                    child['mountpoints'] != null) {
-                  for (var mp in (child['mountpoints'] as List<dynamic>)) {
-                    if (mp.toString().contains('/run/initramfs') ||
-                        mp.toString().contains('/live')) {
-                      hasCriticalMount = true;
-                      isLive = true;
-                    }
-                    if (mp == '/' || mp == '/boot') {
-                      isHostOS = true;
-                    }
-                  }
-                }
-              }
-            }
-
-            diskList.add({
-              'name': '/dev/$name',
-              'model': d['model'] ?? 'Unknown Drive',
-              'size': d['size'] ?? 0,
-              'type': d['type'] ?? 'disk',
-              'isLive': isLive || hasCriticalMount,
-              'isHostOS': isHostOS,
-              'isSafe': false,
-            });
-          }
-        }
-      }
-    } catch (e) {
-      // Komut başarısız olursa boş liste döner
+    final result = await discoverDisks();
+    if (!result.succeeded) {
+      throw discovery.DiskDiscoveryException(result.error!);
     }
-
-    return diskList;
+    return result.disks;
   }
 
   /// Seçilen disk hakkında detaylı bilgi toplar:

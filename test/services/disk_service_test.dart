@@ -76,7 +76,7 @@ void main() {
       expect(disks[0]['model'], 'Samsung 980 PRO 1TB');
     });
 
-    test('lsblk başarısız olursa boş liste döner', () async {
+    test('lsblk failure is explicit rather than an empty disk list', () async {
       final fake = FakeCommandRunner();
       fake.addResponse(
         'lsblk',
@@ -86,9 +86,12 @@ void main() {
       );
 
       final service = DiskService(commandRunner: fake);
-      final disks = await service.getDisks();
-
-      expect(disks, isEmpty);
+      final result = await service.discoverDisks();
+      expect(result.error, DiskDiscoveryError.commandFailed);
+      await expectLater(
+        service.getDisks(),
+        throwsA(isA<DiskDiscoveryException>()),
+      );
     });
 
     test('loop ve zram diskler filtrelenir', () async {

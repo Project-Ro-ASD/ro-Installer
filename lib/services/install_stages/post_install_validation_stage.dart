@@ -278,18 +278,24 @@ class PostInstallValidationStage {
       postInstallMachineIdentityValidationScript,
     ], 'Hedef machine-id veya D-Bus kimliği geçersiz.');
     if (failure != null) return failure;
-    failure = await _requireCommand(ctx, 'chroot', [
-      '/mnt',
-      'sh',
-      '-c',
-      postInstallInstallerRemovalValidationScript,
-    ], 'Installer RPM kaldırılması veya hedef RPM veritabanı doğrulanamadı.');
+    failure = await _requireCommand(
+      ctx,
+      'chroot',
+      ['/mnt', 'sh', '-c', postInstallInstallerRemovalValidationScript],
+      'Installer RPM kaldırılması veya hedef RPM veritabanı doğrulanamadı.',
+    );
     if (failure != null) return failure;
 
     for (final path in [
       '/usr/bin/ro-installer',
       '/usr/bin/ro_installer',
       '/usr/libexec/ro-installer-launcher.sh',
+      '/usr/libexec/ro-installer-helper',
+      '/usr/libexec/ro-installer-backend',
+      '/usr/lib64/ro-installer',
+      '/usr/lib/ro-installer',
+      '/usr/share/applications/ro-installer.desktop',
+      '/usr/share/polkit-1/actions/org.roasd.installer.helper.policy',
       '/usr/share/polkit-1/actions/org.roasd.installer.policy',
       '/etc/polkit-1/rules.d/49-ro-installer-live.rules',
       '/etc/sudoers.d/ro-installer-live',
