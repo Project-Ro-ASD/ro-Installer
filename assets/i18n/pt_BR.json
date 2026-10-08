@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "Finalização do destino concluída.",
   "stage_result_bootloader_done": "Instalação do bootloader concluída.",
   "stage_result_post_validation_done": "Validação pós-instalação concluída.",
-  "stage_result_cleanup_done": "Limpeza concluída."
+  "stage_result_cleanup_done": "Limpeza concluída.",
+  "helper_error": "A autorização ou operação privilegiada falhou. Nenhuma nova tentativa automática foi iniciada.",
+  "disk_discovery_startFailed": "Não foi possível iniciar a detecção de discos. Verifique o pacote e atualize.",
+  "disk_discovery_commandFailed": "A detecção de discos falhou. Atualize.",
+  "disk_discovery_timeout": "O tempo de detecção de discos esgotou. Atualize.",
+  "disk_discovery_incompatibleJson": "A detecção de discos retornou uma resposta não compatível.",
+  "disk_discovery_topology": "Não foi possível ler a topologia dos discos com segurança.",
+  "disk_discovery_partial": "Alguns discos foram excluídos porque não puderam ser lidos com segurança."
 }

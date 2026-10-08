@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/disk_service.dart';
+import '../services/helper_client.dart';
+import '../services/helper_protocol.dart';
 import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/nebula_ui.dart';
 
 class DiskSelectionScreen extends StatefulWidget {
-  const DiskSelectionScreen({super.key});
+  const DiskSelectionScreen({super.key, this.diskService, this.helperClient});
+  final DiskService? diskService;
+  final HelperClient? helperClient;
 
   @override
   State<DiskSelectionScreen> createState() => _DiskSelectionScreenState();
@@ -16,6 +20,8 @@ class DiskSelectionScreen extends StatefulWidget {
 class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
   List<Map<String, dynamic>> _disks = <Map<String, dynamic>>[];
   bool _isLoading = true;
+  bool _isConfirming = false;
+  DiskDiscoveryResult? _discovery;
 
   Future<bool?> _showDecisionDialog({
     required Color accent,
@@ -101,7 +107,9 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
 
   Future<void> _loadDisks() async {
     setState(() => _isLoading = true);
-    final diskList = await DiskService.instance.getDisks();
+    final discovery = await (widget.diskService ?? DiskService.instance)
+        .discoverDisks();
+    final diskList = discovery.disks;
 
     if (!mounted) {
       return;
@@ -109,7 +117,9 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
 
     final state = Provider.of<InstallerState>(context, listen: false);
 
+    state.clearDiskSelection();
     setState(() {
+      _discovery = discovery;
       _disks = diskList.map((disk) => Map<String, dynamic>.from(disk)).toList();
 
       if (_disks.isNotEmpty && state.selectedDisk.isEmpty) {
@@ -136,6 +146,8 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
       return;
     }
 
+    if (_isConfirming || _isLoading || _discovery?.succeeded != true) return;
+    final selectedPath = state.selectedDisk;
     final isLive = state.selectedDiskDetails!['isLive'] == true;
     final isSafe = state.selectedDiskDetails!['isSafe'] == true;
     final partitionMethod = state.partitionMethod;
@@ -157,6 +169,26 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
       return;
     }
 
+    setState(() => _isConfirming = true);
+    DeviceIdentity identity;
+    try {
+      identity = await (widget.helperClient ?? HelperClient.instance).probe(
+        selectedPath,
+      );
+    } on HelperException catch (error) {
+      if (!mounted) return;
+      setState(() => _isConfirming = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${state.t('helper_error')} (${error.code})')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    if (state.selectedDisk != selectedPath) {
+      setState(() => _isConfirming = false);
+      return;
+    }
+
     final confirmed = await _showDecisionDialog(
       accent: isSafe ? const Color(0xFF6BE7B1) : Colors.redAccent,
       icon: isSafe ? Icons.science_rounded : Icons.delete_forever_rounded,
@@ -164,15 +196,23 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
           ? state.t('disk_safe_confirm_title')
           : state.t('disk_danger_confirm_title'),
       message: isSafe
-          ? state.t('disk_safe_confirm_body', {'disk': state.selectedDisk})
-          : state.t('disk_danger_confirm_body', {'disk': state.selectedDisk}),
+          ? state.t('disk_safe_confirm_body', {
+              'disk':
+                  '$selectedPath (${(identity.size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB)',
+            })
+          : state.t('disk_danger_confirm_body', {
+              'disk':
+                  '$selectedPath (${(identity.size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB)',
+            }),
       confirmLabel: isSafe
           ? state.t('disk_safe_confirm_action')
           : state.t('disk_danger_confirm_action'),
       cancelLabel: state.t('cancel'),
     );
 
-    if (confirmed == true && mounted) {
+    if (mounted) setState(() => _isConfirming = false);
+    if (confirmed == true && mounted && state.selectedDisk == identity.path) {
+      state.confirmedDevice = identity;
       state.nextStep();
     }
   }
@@ -193,8 +233,11 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
           isLoading: _isLoading,
           disks: _disks,
           selectedDisk: state.selectedDisk,
-          onRefresh: _isLoading ? null : _loadDisks,
-          onSelect: state.selectDisk,
+          discovery: _discovery,
+          onRefresh: _isLoading || _isConfirming ? null : _loadDisks,
+          onSelect: (disk) {
+            if (!_isConfirming) state.selectDisk(disk);
+          },
         );
         final strategyPanel = _InstallationPlanPanel(
           state: state,
@@ -281,7 +324,12 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                 NebulaPrimaryButton(
                   label: state.t('next'),
                   icon: Icons.arrow_forward_rounded,
-                  onPressed: () => _confirmAndContinue(state),
+                  onPressed:
+                      _isLoading ||
+                          _isConfirming ||
+                          _discovery?.succeeded != true
+                      ? null
+                      : () => _confirmAndContinue(state),
                 ),
               ],
             ),
@@ -330,6 +378,7 @@ class _DiskInventoryPanel extends StatelessWidget {
     required this.dense,
     required this.isLoading,
     required this.disks,
+    required this.discovery,
     required this.selectedDisk,
     required this.onRefresh,
     required this.onSelect,
@@ -339,6 +388,7 @@ class _DiskInventoryPanel extends StatelessWidget {
   final bool dense;
   final bool isLoading;
   final List<Map<String, dynamic>> disks;
+  final DiskDiscoveryResult? discovery;
   final String selectedDisk;
   final Future<void> Function()? onRefresh;
   final ValueChanged<Map<String, dynamic>> onSelect;
@@ -351,6 +401,13 @@ class _DiskInventoryPanel extends StatelessWidget {
     Widget body;
     if (isLoading) {
       body = const Center(child: CircularProgressIndicator());
+    } else if (discovery?.error != null) {
+      body = Center(
+        child: Text(
+          state.t('disk_discovery_${discovery!.error!.name}'),
+          key: const ValueKey('disk-discovery-error'),
+        ),
+      );
     } else if (disks.isEmpty) {
       body = _DiskEmptyState(onRefresh: onRefresh);
     } else {
@@ -407,6 +464,11 @@ class _DiskInventoryPanel extends StatelessWidget {
             ],
           ),
           SizedBox(height: dense ? 14 : 22),
+          if ((discovery?.rejectedEntries ?? 0) > 0)
+            Text(
+              state.t('disk_discovery_partial'),
+              key: const ValueKey('disk-discovery-warning'),
+            ),
           viewport,
         ],
       ),

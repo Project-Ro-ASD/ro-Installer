@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "Настройка целевой системы завершена.",
   "stage_result_bootloader_done": "Установка загрузчика завершена.",
   "stage_result_post_validation_done": "Проверка после установки завершена.",
-  "stage_result_cleanup_done": "Очистка завершена."
+  "stage_result_cleanup_done": "Очистка завершена.",
+  "helper_error": "Ошибка авторизации или привилегированной операции. Автоматический повтор не запущен.",
+  "disk_discovery_startFailed": "Не удалось запустить поиск дисков. Проверьте пакет и обновите список.",
+  "disk_discovery_commandFailed": "Ошибка поиска дисков. Обновите список.",
+  "disk_discovery_timeout": "Истекло время поиска дисков. Обновите список.",
+  "disk_discovery_incompatibleJson": "Получен неподдерживаемый ответ при поиске дисков.",
+  "disk_discovery_topology": "Не удалось безопасно прочитать топологию дисков.",
+  "disk_discovery_partial": "Некоторые диски исключены: безопасное чтение невозможно."
 }

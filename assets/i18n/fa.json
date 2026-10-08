@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "نهایی‌سازی سیستم مقصد انجام شد.",
   "stage_result_bootloader_done": "نصب بوت لودر انجام شد.",
   "stage_result_post_validation_done": "اعتبارسنجی پس از نصب کامل شد.",
-  "stage_result_cleanup_done": "پاکسازی تکمیل شد."
+  "stage_result_cleanup_done": "پاکسازی تکمیل شد.",
+  "helper_error": "مجوز یا عملیات دارای دسترسی ویژه ناموفق بود. تلاش مجدد خودکار آغاز نشد.",
+  "disk_discovery_startFailed": "شناسایی دیسک آغاز نشد. بسته را بررسی و فهرست را تازه‌سازی کنید.",
+  "disk_discovery_commandFailed": "شناسایی دیسک ناموفق بود. فهرست را تازه‌سازی کنید.",
+  "disk_discovery_timeout": "مهلت شناسایی دیسک پایان یافت. فهرست را تازه‌سازی کنید.",
+  "disk_discovery_incompatibleJson": "شناسایی دیسک پاسخ پشتیبانی‌نشده‌ای برگرداند.",
+  "disk_discovery_topology": "ساختار دیسک‌ها به‌صورت امن خوانده نشد.",
+  "disk_discovery_partial": "برخی دیسک‌ها به دلیل ناممکن بودن خواندن امن حذف شدند."
 }

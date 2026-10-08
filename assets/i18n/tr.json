@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "Hedef sonlandırma tamamlandı.",
   "stage_result_bootloader_done": "Bootloader kurulumu tamamlandı.",
   "stage_result_post_validation_done": "Kurulum sonrası doğrulama tamamlandı.",
-  "stage_result_cleanup_done": "Temizlik tamamlandı."
+  "stage_result_cleanup_done": "Temizlik tamamlandı.",
+  "helper_error": "Kurulum yetkilendirmesi veya yetkili işlem başarısız oldu. Otomatik tekrar başlatılmadı.",
+  "disk_discovery_startFailed": "Disk keşfi başlatılamadı. Yükleyici paketini kontrol edip Yenile düğmesini deneyin.",
+  "disk_discovery_commandFailed": "Disk keşfi başarısız oldu. Yenile düğmesini deneyin.",
+  "disk_discovery_timeout": "Disk keşfi zaman aşımına uğradı. Yenile düğmesini deneyin.",
+  "disk_discovery_incompatibleJson": "Disk keşfi desteklenmeyen bir yanıt döndürdü.",
+  "disk_discovery_topology": "Disk topolojisi güvenli biçimde okunamadı.",
+  "disk_discovery_partial": "Bazı diskler güvenli biçimde okunamadığı için listeden çıkarıldı."
 }

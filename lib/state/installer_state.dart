@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/disk_service.dart';
+import '../services/helper_protocol.dart';
 import '../l10n/installer_translation_catalog.dart';
 
 class InstallerState extends ChangeNotifier {
@@ -41,6 +42,21 @@ class InstallerState extends ChangeNotifier {
 
   // ---- 7. Disk ----
   String selectedDisk = '';
+  DeviceIdentity? confirmedDevice;
+  bool installationActive = false;
+  void beginInstallation() {
+    installationActive = true;
+    notifyListeners();
+  }
+
+  void clearDiskSelection() {
+    if (installationActive) return;
+    confirmedDevice = null;
+    selectedDisk = '';
+    selectedDiskDetails = null;
+    notifyListeners();
+  }
+
   Map<String, dynamic>? selectedDiskDetails;
   double totalDiskSizeGB = 120.0;
   String fileSystem = 'btrfs'; // Deneysel için btrfs
@@ -78,6 +94,7 @@ class InstallerState extends ChangeNotifier {
   }
 
   void previousStep() {
+    if (installationActive) return;
     if (_currentStep > 0) {
       _currentStep--;
       notifyListeners();
@@ -85,6 +102,7 @@ class InstallerState extends ChangeNotifier {
   }
 
   void goToStep(int stepIndex) {
+    if (installationActive) return;
     if (stepIndex >= 0 &&
         stepIndex < steps.length &&
         stepIndex <= _currentStep) {
@@ -112,6 +130,8 @@ class InstallerState extends ChangeNotifier {
   }
 
   void updateDiskParams(String disk, String fs, String partition) {
+    if (installationActive) return;
+    confirmedDevice = null;
     selectedDisk = disk;
     fileSystem = 'btrfs';
     partitionMethod = partition;
@@ -149,6 +169,8 @@ class InstallerState extends ChangeNotifier {
   }
 
   void selectDisk(Map<String, dynamic> diskObj) {
+    if (installationActive) return;
+    confirmedDevice = null;
     final newDisk = diskObj['name'] as String;
     // Eğer önceden seçilen disk ile yenisi farklıysa eski disk bölümlerini iptal et (Sıfırla)
     if (selectedDisk != newDisk) {

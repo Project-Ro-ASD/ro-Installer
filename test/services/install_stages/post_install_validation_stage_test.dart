@@ -15,6 +15,12 @@ const cleanupPaths = [
   '/usr/bin/ro-installer',
   '/usr/bin/ro_installer',
   '/usr/libexec/ro-installer-launcher.sh',
+  '/usr/libexec/ro-installer-helper',
+  '/usr/libexec/ro-installer-backend',
+  '/usr/lib64/ro-installer',
+  '/usr/lib/ro-installer',
+  '/usr/share/applications/ro-installer.desktop',
+  '/usr/share/polkit-1/actions/org.roasd.installer.helper.policy',
   '/usr/share/polkit-1/actions/org.roasd.installer.policy',
   '/etc/polkit-1/rules.d/49-ro-installer-live.rules',
   '/etc/sudoers.d/ro-installer-live',
@@ -356,6 +362,25 @@ void main() {
       test('cleanup residue $path fails', () async {
         final fake = FakeCommandRunner();
         fake.addResponse('test', ['!', '-e', '/mnt$path'], exitCode: 1);
+        fake.addResponse('cat', [
+          '/mnt$installerSeedPath',
+        ], stdout: jsonEncode(installerSeed('tr')));
+        fake.addResponse('cat', [
+          '/mnt$installMetadataPath',
+        ], stdout: jsonEncode(installMetadata()));
+        expect(
+          (await const PostInstallValidationStage().execute(
+            context(fake),
+          )).success,
+          false,
+        );
+        expect(fake.wasCommandCalled('findmnt'), false);
+      });
+    }
+    for (final path in cleanupPaths) {
+      test('dangling installer symlink $path fails validation', () async {
+        final fake = FakeCommandRunner();
+        fake.addResponse('test', ['!', '-L', '/mnt$path'], exitCode: 1);
         fake.addResponse('cat', [
           '/mnt$installerSeedPath',
         ], stdout: jsonEncode(installerSeed('tr')));

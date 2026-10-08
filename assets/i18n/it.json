@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "Finalizzazione del sistema di destinazione completata.",
   "stage_result_bootloader_done": "Installazione del bootloader completata.",
   "stage_result_post_validation_done": "Convalida post-installazione completata.",
-  "stage_result_cleanup_done": "Pulizia completata."
+  "stage_result_cleanup_done": "Pulizia completata.",
+  "helper_error": "Autorizzazione o operazione privilegiata non riuscita. Nessun nuovo tentativo automatico.",
+  "disk_discovery_startFailed": "Impossibile avviare il rilevamento dischi. Controllare il pacchetto e aggiornare.",
+  "disk_discovery_commandFailed": "Rilevamento dischi non riuscito. Aggiornare.",
+  "disk_discovery_timeout": "Tempo di rilevamento dischi scaduto. Aggiornare.",
+  "disk_discovery_incompatibleJson": "Il rilevamento dischi ha restituito una risposta non supportata.",
+  "disk_discovery_topology": "Impossibile leggere in sicurezza la topologia dei dischi.",
+  "disk_discovery_partial": "Alcuni dischi sono stati esclusi perché non leggibili in sicurezza."
 }

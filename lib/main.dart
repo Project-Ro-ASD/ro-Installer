@@ -22,62 +22,14 @@ void main() async {
   final autoProfilePath =
       Platform.environment['RO_INSTALLER_AUTO_PROFILE']?.trim() ?? '';
   final isAutoInstallMode = autoProfilePath.isNotEmpty;
-  final useCommandSudo = _envFlag('RO_INSTALLER_COMMAND_SUDO');
-  // ═══════════════════════════════════════════════════
-  // ROOT YETKİ KONTROLÜ
-  // Disk yazma, mount, mkfs, sgdisk gibi tüm komutlar
-  // root yetkisi gerektirir. Root değilse pkexec ile
-  // kendini yeniden başlatır.
-  // ═══════════════════════════════════════════════════
-
-  // Mevcut kullanıcı root mu kontrol et
-  final idResult = await commandRunner.run('id', ['-u']);
-  final uid =
-      int.tryParse(Platform.environment['UID'] ?? idResult.stdout.trim()) ?? -1;
-
-  if (uid != 0 && isAutoInstallMode) {
-    debugPrint(
-      '[ro-Installer] Otomatik profil modu root yetkisiyle doğrudan çalıştırılmalıdır.',
-    );
-    debugPrint(
-      '[ro-Installer] Önerilen kullanım: sudo env RO_INSTALLER_AUTO_PROFILE=... /path/to/ro_installer',
-    );
-    exit(1);
-  }
-
-  if (uid != 0 && !useCommandSudo) {
-    // Root değiliz — pkexec ile yeniden başlat
-    debugPrint(
-      '[ro-Installer] Root yetkisi gerekiyor (UID: $uid). pkexec ile yükseltiliyor...',
-    );
-
-    // Kendi çalıştırılabilir dosyamızın yolunu bul
-    final execPath = Platform.resolvedExecutable;
-
-    final result = await commandRunner.run('pkexec', [
-      execPath,
-      ...Platform.executableArguments,
-    ]);
-    if (!result.started) {
-      debugPrint('[ro-Installer] pkexec başlatılamadı: ${result.stderr}');
-      debugPrint(
-        '[ro-Installer] Lütfen uygulamayı "sudo ro-installer" ile başlatın.',
-      );
+  // Only explicit automatic/profile execution uses the root engine directly.
+  // Interactive GUI always stays in its current graphical user session.
+  if (isAutoInstallMode) {
+    final id = await commandRunner.run('/usr/bin/id', ['-u']);
+    if (!id.started || id.exitCode != 0 || id.stdout.trim() != '0') {
+      stderr.writeln('Automatic profile mode requires direct root execution.');
       exit(1);
     }
-
-    // pkexec bittiğinde (kullanıcı iptal etti veya uygulama kapandı)
-    exit(result.exitCode);
-  }
-
-  if (uid == 0) {
-    debugPrint(
-      '[ro-Installer] Root yetkisi doğrulandı (UID: $uid). Başlatılıyor...',
-    );
-  } else {
-    debugPrint(
-      '[ro-Installer] Live sudo komut modu etkin (UID: $uid). GUI kullanıcı oturumunda başlatılıyor...',
-    );
   }
 
   if (isAutoInstallMode) {

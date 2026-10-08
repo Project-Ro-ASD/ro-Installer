@@ -123,6 +123,9 @@ class PartitioningStage {
       target: selectedDisk,
     );
     if (wipePlanFailure != null) return wipePlanFailure;
+    // All read-only planning/tool checks are complete. The helper revalidates
+    // the confirmed disk under its installation lock at this exact boundary.
+    await ctx.beforeFirstMutation?.call();
     if (!await ctx.runCmd(
       'wipefs',
       ['-a', selectedDisk],

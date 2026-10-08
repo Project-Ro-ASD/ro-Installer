@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "目标系统收尾完成。",
   "stage_result_bootloader_done": "引导加载程序安装完成。",
   "stage_result_post_validation_done": "安装后验证已完成。",
-  "stage_result_cleanup_done": "清理完成。"
+  "stage_result_cleanup_done": "清理完成。",
+  "helper_error": "安装授权或特权操作失败。未启动自动重试。",
+  "disk_discovery_startFailed": "无法启动磁盘检测。请检查安装包并刷新。",
+  "disk_discovery_commandFailed": "磁盘检测失败。请刷新。",
+  "disk_discovery_timeout": "磁盘检测超时。请刷新。",
+  "disk_discovery_incompatibleJson": "磁盘检测返回了不支持的响应。",
+  "disk_discovery_topology": "无法安全读取磁盘拓扑。",
+  "disk_discovery_partial": "部分磁盘无法安全读取，已从列表中排除。"
 }

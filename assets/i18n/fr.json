@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "Finalisation du système cible terminée.",
   "stage_result_bootloader_done": "Installation du chargeur de démarrage terminée.",
   "stage_result_post_validation_done": "Validation post-installation terminée.",
-  "stage_result_cleanup_done": "Nettoyage terminé."
+  "stage_result_cleanup_done": "Nettoyage terminé.",
+  "helper_error": "L’autorisation ou l’opération privilégiée a échoué. Aucun nouvel essai automatique.",
+  "disk_discovery_startFailed": "La détection des disques n’a pas démarré. Vérifiez le paquet puis actualisez.",
+  "disk_discovery_commandFailed": "La détection des disques a échoué. Actualisez.",
+  "disk_discovery_timeout": "La détection des disques a dépassé le délai. Actualisez.",
+  "disk_discovery_incompatibleJson": "La détection des disques a renvoyé une réponse non prise en charge.",
+  "disk_discovery_topology": "La topologie des disques n’a pas pu être lue en toute sécurité.",
+  "disk_discovery_partial": "Certains disques ont été exclus car leur lecture sûre était impossible."
 }

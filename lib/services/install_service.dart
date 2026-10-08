@@ -124,6 +124,8 @@ class InstallService {
     void Function(String message) onTechnicalLog, {
     bool isMock = false,
     InstallTranslator? translate,
+    Future<void> Function()? beforeFirstMutation,
+    void Function(int stage)? onStage,
   }) async {
     void log(String msg) {
       onTechnicalLog(msg);
@@ -178,6 +180,7 @@ class InstallService {
     }
 
     void stageBanner(int index, String key, String fallback) {
+      onStage?.call(index);
       state['_stage_${index}_startedAt'] = DateTime.now();
       final stageName = t(key, fallback);
       log('');
@@ -226,6 +229,7 @@ class InstallService {
         runCmd: runCmd,
         localizer: localizer,
         isMock: isMock,
+        beforeFirstMutation: beforeFirstMutation,
       );
 
       // ══════════════════════════════════════════════

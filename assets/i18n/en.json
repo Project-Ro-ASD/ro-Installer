@@ -470,5 +470,12 @@
   "stage_result_target_finalization_done": "Target finalization completed.",
   "stage_result_bootloader_done": "Bootloader installation completed.",
   "stage_result_post_validation_done": "Post-install validation completed.",
-  "stage_result_cleanup_done": "Cleanup completed."
+  "stage_result_cleanup_done": "Cleanup completed.",
+  "helper_error": "Installer authorization or privileged operation failed. No automatic retry was started.",
+  "disk_discovery_startFailed": "Disk discovery could not start. Check the installer package and try Refresh.",
+  "disk_discovery_commandFailed": "Disk discovery failed. Try Refresh.",
+  "disk_discovery_timeout": "Disk discovery timed out. Try Refresh.",
+  "disk_discovery_incompatibleJson": "Disk discovery returned an unsupported response.",
+  "disk_discovery_topology": "Disk topology could not be safely read.",
+  "disk_discovery_partial": "Some disks could not be safely read and were excluded."
 }

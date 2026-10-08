@@ -15,7 +15,10 @@ done
 while IFS= read -r path; do
   [ -e "$path" ] || [ -L "$path" ] || continue
   if rpm -qf "$path" >/dev/null 2>&1; then continue; fi
-  rm -f -- "$path"
+  case "$path" in
+    /usr/lib64/ro-installer|/usr/lib/ro-installer) rm -rf -- "$path" ;;
+    *) rm -f -- "$path" ;;
+  esac
 done <<'LIVE_PATHS'
 /etc/systemd/system/livesys.service
 /etc/systemd/system/livesys-late.service
@@ -36,6 +39,11 @@ done <<'LIVE_PATHS'
 /usr/bin/ro_installer
 /usr/share/applications/ro-installer.desktop
 /usr/libexec/ro-installer-launcher.sh
+/usr/libexec/ro-installer-helper
+/usr/libexec/ro-installer-backend
+/usr/lib64/ro-installer
+/usr/lib/ro-installer
+/usr/share/polkit-1/actions/org.roasd.installer.helper.policy
 /usr/share/polkit-1/actions/org.roasd.installer.policy
 /etc/polkit-1/rules.d/49-ro-installer-live.rules
 /etc/sudoers.d/ro-installer-live

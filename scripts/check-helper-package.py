@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 
 
 HELPER = "/usr/libexec/ro-installer-helper"
+BACKEND = "/usr/libexec/ro-installer-backend"
 POLICY = "/usr/share/polkit-1/actions/org.roasd.installer.helper.policy"
 
 
@@ -65,10 +66,15 @@ def check_package(rpm):
         if (path.startswith("/etc/sudoers") or path.startswith("/etc/polkit-1/rules.d/")
                 or path.startswith("/usr/share/polkit-1/rules.d/")):
             raise ValueError("installer RPM must not ship sudoers or live-only allow rules")
-    for path, permissions in ((HELPER, 0o755), (POLICY, 0o644)):
+    for path, permissions in ((HELPER, 0o755), (BACKEND, 0o755), (POLICY, 0o644)):
         mode, user, group = files[path]
         if not stat.S_ISREG(mode) or stat.S_IMODE(mode) != permissions or (user, group) != ("root", "root"):
             raise ValueError("helper payload ownership, type or mode is incorrect")
+    if "/usr/share/polkit-1/actions/org.roasd.installer.policy" in files:
+        raise ValueError("obsolete root-GUI action must not be packaged")
+    backend = extract_member(rpm, BACKEND)
+    if not backend.startswith(b"\x7fELF"):
+        raise ValueError("backend must be the compiled Dart executable")
     helper = extract_member(rpm, HELPER)
     policy = extract_member(rpm, POLICY)
     if not helper.startswith(b"#!/usr/bin/python3 -I\n"):
@@ -76,7 +82,7 @@ def check_package(rpm):
     if re.search(rb"NOPASSWD\s*:", helper + policy):
         raise ValueError("helper payload must not introduce passwordless sudo")
     check_policy(policy)
-    return {"helper": HELPER, "policy": POLICY,
+    return {"helper": HELPER, "backend": BACKEND, "policy": POLICY,
             "ownership": {"user": "root", "group": "root"}, "ok": True}
 
 

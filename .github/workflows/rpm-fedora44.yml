@@ -118,6 +118,22 @@ jobs:
           esac
           dnf -y --setopt=install_weak_deps=False install "$RPM_PATH"
           rpm -q ro-installer
+          python3 - <<'PY'
+          import json
+          import subprocess
+          # Invalid protocol exits before any engine stage or disk access. This
+          # catches RPM postprocessing that truncates Dart's appended snapshot.
+          result = subprocess.run(
+              ["/usr/libexec/ro-installer-backend", "--privileged-backend-v1"],
+              input='{"protocolVersion":999}\n', text=True, capture_output=True,
+              timeout=10, env={"PATH": "/usr/sbin:/usr/bin", "LC_ALL": "C", "HOME": "/root"},
+          )
+          assert result.returncode == 9, (result.returncode, result.stderr)
+          assert result.stderr == "", result.stderr
+          assert json.loads(result.stdout) == {
+              "protocolVersion": 1, "type": "result", "ok": False, "code": "BACKEND_ERROR",
+          }, result.stdout
+          PY
 
       - name: Show build manifest
         if: always()

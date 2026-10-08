@@ -153,9 +153,8 @@ class RealCommandRunner extends CommandRunner {
     Duration? timeout,
     String? stdinText,
   }) async {
-    final commandLine = _effectiveCommandLine(command, args);
-    final runCommand = commandLine.command;
-    final runArgs = commandLine.args;
+    final runCommand = command;
+    final runArgs = List<String>.unmodifiable(args);
 
     onLog?.call(
       CommandLogEvent(
@@ -304,48 +303,4 @@ class RealCommandRunner extends CommandRunner {
       stderrDone.future,
     ]).timeout(const Duration(seconds: 2), onTimeout: () => <void>[]);
   }
-
-  _EffectiveCommandLine _effectiveCommandLine(
-    String command,
-    List<String> args,
-  ) {
-    if (!_shouldUseSudo(command)) {
-      return _EffectiveCommandLine(command, List.unmodifiable(args));
-    }
-    return _EffectiveCommandLine(
-      'sudo',
-      List.unmodifiable(['-n', command, ...args]),
-    );
-  }
-
-  bool _shouldUseSudo(String command) {
-    final sudoModeRaw = Platform.environment['RO_INSTALLER_COMMAND_SUDO']
-        ?.toLowerCase()
-        .trim();
-    final sudoMode = sudoModeRaw == '1' || sudoModeRaw == 'true';
-    if (!sudoMode || _effectiveUid == 0) {
-      return false;
-    }
-
-    final basename = command.split('/').last;
-    return basename != 'sudo' && basename != 'pkexec' && basename != 'id';
-  }
-
-  static final int _effectiveUid = _readEffectiveUid();
-
-  static int _readEffectiveUid() {
-    try {
-      final result = Process.runSync('id', ['-u']);
-      return int.tryParse(result.stdout.toString().trim()) ?? -1;
-    } catch (_) {
-      return -1;
-    }
-  }
-}
-
-class _EffectiveCommandLine {
-  const _EffectiveCommandLine(this.command, this.args);
-
-  final String command;
-  final List<String> args;
 }

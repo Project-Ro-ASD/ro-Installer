@@ -35,6 +35,13 @@ class DiskPreparationStage {
         'Hedef disk bölümleri güvenli şekilde listelenemedi: $selectedDisk',
       );
     }
+    // Helper authorization refuses mounted/swap targets. Do not unmount other
+    // storage or disable system ZRAM in the helper-backed interactive path.
+    if (ctx.beforeFirstMutation != null) {
+      return mountedPartitions.isEmpty
+          ? StageResult.ok('Helper target is inactive.')
+          : StageResult.fail('Helper target became mounted.');
+    }
     if (mountedPartitions.isEmpty) {
       ctx.log('Hedef diskte ayrılacak aktif mount bulunamadı.');
     }

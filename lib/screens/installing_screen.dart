@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../services/command_runner.dart';
 import '../services/install_log_export_service.dart';
-import '../services/install_service.dart';
+import '../services/helper_client.dart';
 import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/nebula_ui.dart';
@@ -235,49 +235,31 @@ class _InstallingScreenState extends State<InstallingScreen>
 
     await Future.delayed(const Duration(seconds: 1));
 
-    final stateMap = <String, dynamic>{
-      'selectedDisk': state.selectedDisk,
-      'partitionMethod': state.partitionMethod,
-      'fileSystem': state.fileSystem,
-      'manualPartitions': state.manualPartitions,
-      'selectedFreeSpace': state.selectedFreeSpace,
-      'selectedLanguage': state.selectedLanguage,
-      'linuxDiskSizeGB': state.linuxDiskSizeGB,
-      'hasExistingEfi': state.hasExistingEfi,
-      'existingEfiPartition': state.existingEfiPartition,
-      'diskBootMode': state.diskBootMode,
-      'diskPartitionTable': state.diskPartitionTable,
-      'shrinkCandidatePartition': state.shrinkCandidatePartition,
-      'shrinkCandidateFs': state.shrinkCandidateFs,
-      'shrinkCandidateSizeBytes': state.shrinkCandidateSizeBytes,
-      'largestFreeContiguousBytes': state.largestFreeContiguousBytes,
-      'unsupportedStorageBlockers': state.unsupportedStorageBlockers,
-      'unsupportedStorageDetails': state.unsupportedStorageDetails,
-    };
-
+    if (!mounted) return;
+    state.beginInstallation();
     _pushStatus(_statusText);
-
-    final success = await InstallService.instance.runInstall(
-      stateMap,
-      (progress, status) {
-        if (!mounted) {
-          return;
-        }
-        final normalizedProgress = progress < 0
-            ? _progress
-            : progress.clamp(0.0, 1.0);
+    var success = false;
+    try {
+      final identity = state.confirmedDevice;
+      if (identity == null ||
+          identity.path != state.selectedDisk ||
+          state.partitionMethod != 'full' ||
+          state.fileSystem != 'btrfs') {
+        throw const HelperException('MISSING_CONFIRMATION');
+      }
+      await HelperClient.instance.install(identity, (progress, messageKey) {
+        if (!mounted) return;
+        final status = state.t(messageKey);
         setState(() {
-          _progress = normalizedProgress;
+          _progress = progress;
           _statusText = status;
         });
         _pushStatus(status);
-      },
-      (message) {
-        _pushLog(message);
-      },
-      isMock: state.isMockEnabled,
-      translate: state.t,
-    );
+      });
+      success = true;
+    } on HelperException catch (error) {
+      _pushLog('${state.t('helper_error')} (${error.code})');
+    }
 
     final finishedAt = DateTime.now();
     final exportResult = await InstallLogExportService.instance.exportSession(
