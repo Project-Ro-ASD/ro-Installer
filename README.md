@@ -203,6 +203,27 @@ PR-A1 guards remain: partitions, aliases, removable/read-only disks, live/root
 backing devices, mounted-device ancestors, active swap, nested target storage
 and ambiguous topology are refused. Loop and overlay backing storage are traced.
 Mounted Btrfs membership, unknown filesystems and stacked mounts still fail closed.
+For KIWI/Fedora live boots, a loop's sysfs `backing_file` may retain a pre-pivot
+name such as `/LiveOS/squashfs.img` although the ISO is now mounted at
+`/run/initramfs/live`. The helper reads the fixed, read-only `LOOP_GET_STATUS64`
+ioctl from the canonical loop device, checks its block identity and loop number,
+and resolves the kernel-reported backing superblock through current mountinfo.
+It does not guess a replacement pathname or treat missing backing metadata as
+harmless. Unmounted/unresolved backing, cycles, unavailable ioctl/sysfs and
+unsupported block-file backing fail closed. Missing topology data is
+`AMBIGUOUS_TOPOLOGY`; `DEVICE_NOT_FOUND` means the selected /dev node is absent.
+The kernel ABI is defined in [linux/loop.h](https://github.com/torvalds/linux/blob/master/include/uapi/linux/loop.h);
+the [loop driver](https://github.com/torvalds/linux/blob/master/drivers/block/loop.c)
+obtains backing device/inode from the open file, independent of its old name.
+
+Only the standalone [document portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Documents.html)
+`fuse.portal` / `portal` mount at `/run/user/<uid>/doc`,
+with an anonymous `0:*` device, is treated as a document-export namespace.
+Every real mount and active swap is still independently checked. Other FUSE
+filesystems remain unknown; a portal used as loop/overlay backing is rejected.
+The Fedora 44 KIWI fixture covers ISO → loop → erofs → overlay, ZRAM and portal,
+plus protected media, missing/ambiguous data and identity-change regressions.
+
 Only x86_64 UEFI, full erase, Btrfs, GPT, a 512 MiB ESP and the existing Btrfs
 subvolume layout are authorized. No disk swap is created. Helper disk preparation
 does not globally swapoff/unmount; ZRAM remains system policy. Alongside, manual,
@@ -218,6 +239,13 @@ is recovery from a stuck operation, not safe rollback. Any partial failure or
 watchdog expiry requires inspecting target/mount state before retrying. There is
 no automatic retry or promise of recovery from power loss/helper SIGKILL, even
 though the backend retains the lock after helper death.
+
+Before entering installation, the top bar always shows a localized Exit button
+on Welcome and Disk, including small VM viewports. It closes only the user GUI
+through Flutter's Linux application-exit channel; no reboot or privileged command
+is needed. It disappears on entering Install, including before the delayed engine
+start, and never represents cancellation of an already running backend. The full
+storage caption states EFI + Btrfs with ZRAM and no disk swap partition.
 
 ### Installed-target cleanup and validation
 

@@ -11,6 +11,7 @@ import re
 import select
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -238,6 +239,29 @@ class System:
         dev = info.st_rdev if block else info.st_dev
         return f"{os.major(dev)}:{os.minor(dev)}"
 
+    def loop_backing(self, number, path):
+        # LOOP_GET_STATUS64 reports the actual open backing file's superblock
+        # device, even when backing_file names a path from before pivot_root.
+        # Never relocate that filename by guessing a live-media mount prefix.
+        if not re.fullmatch(r"7:[0-9]+", number) or path != "/dev/loop" + number.split(":")[1]:
+            fail("AMBIGUOUS_TOPOLOGY", "Loop device identity is unsupported.")
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISBLK(info.st_mode) or f"{os.major(info.st_rdev)}:{os.minor(info.st_rdev)}" != number:
+                fail("AMBIGUOUS_TOPOLOGY", "Loop device changed during validation.")
+            raw = fcntl.ioctl(fd, 0x4C05, bytes(232))  # linux/loop.h, struct loop_info64
+            device, inode, rdevice = struct.unpack_from("=QQQ", raw)
+            loop_number = struct.unpack_from("=I", raw, 40)[0]
+            if device >> 32 or inode == 0 or rdevice != 0 or loop_number != os.minor(info.st_rdev):
+                fail("AMBIGUOUS_TOPOLOGY", "Loop backing identity is unsupported.")
+            # huge_encode_dev/new_encode_dev, not the kernel's internal dev_t.
+            major = (device >> 8) & 0xfff
+            minor = (device & 0xff) | ((device >> 12) & 0xfff00)
+            return f"{major}:{minor}"
+        finally:
+            os.close(fd)
+
     def sysfs(self, number):
         directory = Path("/sys/dev/block", number).resolve(strict=True)
         if not str(directory).startswith("/sys/devices/"):
@@ -336,11 +360,21 @@ class Topology:
         result = {number}
         for parent in info["parents"]:
             result.update(self.ancestors(parent, active))
+        if self.nodes[number]["type"] == "loop" and info["backingFile"] is None:
+            fail("AMBIGUOUS_TOPOLOGY", "Loop backing metadata is missing.")
         if info["backingFile"] is not None:
             path = info["backingFile"]
             if not path.startswith("/") or path.endswith(" (deleted)"):
                 fail("AMBIGUOUS_TOPOLOGY", "Loop backing file cannot be resolved.")
-            backing = self.backing_path(path, active)
+            backing_number = device_number(self.system.loop_backing(number, self.nodes[number]["name"]))
+            candidates = [m for m in self.mounts if m.number == backing_number]
+            if not candidates:
+                fail("AMBIGUOUS_TOPOLOGY", "Loop backing filesystem is not mounted in this namespace.")
+            backing = set()
+            # Resolve every visible mount of the authoritative superblock; never
+            # trust the stale filename, a guessed replacement, or a FUSE export.
+            for mount in candidates:
+                backing.update(self.backing_mount(mount, active))
             if not backing:
                 fail("AMBIGUOUS_TOPOLOGY", "Loop backing storage is ambiguous.")
             result.update(backing)
@@ -356,7 +390,7 @@ class Topology:
             fail("AMBIGUOUS_TOPOLOGY", "Backing file has no known mount.")
         return self.backing_mount(max(candidates, key=lambda m: len(m.target)), active)
 
-    def backing_mount(self, mount, active=frozenset()):
+    def backing_mount(self, mount, active=frozenset(), *, allow_portal=False):
         key = ("mount", mount.target)
         if key in active or len(active) > 64:
             fail("AMBIGUOUS_TOPOLOGY", "Cyclic mount ancestry.")
@@ -386,12 +420,19 @@ class Topology:
             return result
         if mount.filesystem in PSEUDO_FILESYSTEMS and mount.number.startswith("0:"):
             return set()
+        # Document portal is an exported-file namespace, not a block-backed
+        # filesystem. All real mounts are still independently protected. Permit
+        # only its usual standalone user mount, never as loop/overlay backing.
+        if (allow_portal and mount.filesystem == "fuse.portal" and mount.source == "portal"
+                and mount.number.startswith("0:")
+                and re.fullmatch(r"/run/user/[0-9]+/doc", mount.target)):
+            return set()
         fail("AMBIGUOUS_TOPOLOGY", "Mounted filesystem backing storage is unknown.")
 
     def protected_devices(self):
         protected = set()
         for mount in self.mounts:
-            backing = self.backing_mount(mount)
+            backing = self.backing_mount(mount, allow_portal=True)
             if mount.target == "/" and not backing:
                 fail("AMBIGUOUS_TOPOLOGY", "Root backing storage is unresolved.")
             protected.update(backing)
@@ -431,12 +472,18 @@ class Topology:
 
 
 def validate_device(system, path):
+    # Only absence of the requested /dev node is DEVICE_NOT_FOUND. Missing
+    # sysfs, overlay paths or unrelated backing storage is ambiguous topology.
     try:
-        # stat first distinguishes absent/non-block targets without invoking tools.
         system.path_identity(path, block=True)
+    except FileNotFoundError:
+        fail("DEVICE_NOT_FOUND", "Selected device is absent.")
+    except OSError:
+        fail("AMBIGUOUS_TOPOLOGY", "Selected device identity could not be read.")
+    try:
         return Topology(system).validate(path)
     except FileNotFoundError:
-        fail("DEVICE_NOT_FOUND", "Device or required topology data disappeared.")
+        fail("AMBIGUOUS_TOPOLOGY", "Required topology data disappeared.")
     except (OSError, ValueError, KeyError, TypeError, RecursionError):
         fail("AMBIGUOUS_TOPOLOGY", "Device topology could not be validated.")
 
