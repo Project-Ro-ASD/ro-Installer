@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:provider/provider.dart';
 
 import '../state/installer_state.dart';
@@ -747,6 +748,7 @@ class _NebulaTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final state = Provider.of<InstallerState>(context);
     final scheme = Theme.of(context).colorScheme;
     final visuals = context.installerVisuals;
     final density = context.installerDensity;
@@ -798,6 +800,23 @@ class _NebulaTopBar extends StatelessWidget {
               ],
             ),
           ),
+          if (!state.installationActive &&
+              state.steps[state.currentStep] != 'Install') ...[
+            const SizedBox(width: 12),
+            NebulaSecondaryButton(
+              key: const ValueKey('pre-install-exit'),
+              label: state.t('exit'),
+              icon: Icons.exit_to_app_rounded,
+              onPressed: () {
+                // This closes only the pre-install GUI. It is never a backend
+                // cancellation API, including during the install-screen delay.
+                if (!state.installationActive &&
+                    state.steps[state.currentStep] != 'Install') {
+                  SystemNavigator.pop();
+                }
+              },
+            ),
+          ],
           if (!density.tinyViewport) ...[
             const SizedBox(width: 12),
             Container(

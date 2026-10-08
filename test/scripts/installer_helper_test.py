@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -84,6 +85,9 @@ class FakeSystem:
     def sysfs(self, number):
         return copy.deepcopy(self.infos[number])
 
+    def loop_backing(self, number, path):
+        return self.identities[self.infos[number]["backingFile"]]
+
     def platform_supported(self):
         return self.supported
 
@@ -106,6 +110,146 @@ class ErrorAssertions:
         with self.assertRaises(helper.HelperError) as caught:
             function(*args)
         self.assertEqual(caught.exception.code, code)
+
+
+class KiwiLiveSystem(FakeSystem):
+    def __init__(self):
+        super().__init__()
+        fixture = json.loads((ROOT / "test/fixtures/helper_fedora44_kiwi_live.json").read_text())
+        self.data = {"blockdevices": fixture["blockdevices"]}
+        self.mountinfo = "\n".join(fixture["mountinfo"]) + "\n"
+        self.swapinfo = fixture["swaps"]
+        self.identities = fixture["identities"]
+        self.infos = {number: self.info(**info) for number, info in fixture["sysfs"].items()}
+        self.loop_devices = fixture["loopBacking"]
+
+    def loop_backing(self, number, path):
+        return self.loop_devices[number]
+
+
+class KiwiLiveTopologyTests(ErrorAssertions, unittest.TestCase):
+    def setUp(self):
+        self.system = KiwiLiveSystem()
+
+    def validate(self, path="/dev/vda"):
+        return helper.validate_device(self.system, path)
+
+    def test_pre_pivot_missing_filename_probe_accepts_blank_disk_without_mutation(self):
+        with self.assertRaises(FileNotFoundError):
+            self.system.path_identity("/LiveOS/squashfs.img")
+        with mock.patch.object(helper.os, "geteuid", return_value=0), \
+                mock.patch.object(helper.subprocess, "Popen") as spawn, \
+                mock.patch.object(helper, "run_backend") as backend:
+            data = helper.handle(helper.Request("probe-disk", "/dev/vda"), self.system)
+            self.assertEqual(data, {"device":{"path":"/dev/vda","majorMinor":"253:0","size":68719476736,"diskSequence":1}})
+            spawn.assert_not_called()
+            backend.assert_not_called()
+        self.assertEqual(helper.Topology(self.system).protected_devices(), {"7:0", "11:0", "252:0"})
+
+    def test_live_root_iso_and_active_zram_targets_rejected(self):
+        for path in ("/dev/loop0", "/dev/sr0", "/dev/zram0"):
+            self.error("UNSAFE_DEVICE", self.validate, path)
+        # Also protect a non-removable whole disk that contains the ISO image.
+        self.system.loop_devices["7:0"] = "253:0"
+        self.system.mountinfo += "36 31 253:0 / /media/source ro - ext4 /dev/vda ro\n"
+        self.error("UNSAFE_DEVICE", self.validate)
+
+    def test_mounted_or_root_target_rejected(self):
+        self.system.mountinfo += "36 31 253:0 / /mnt rw - ext4 /dev/vda rw\n"
+        self.error("UNSAFE_DEVICE", self.validate)
+        self.system.mountinfo = "1 0 253:0 / / rw - ext4 /dev/vda rw\n"
+        self.error("UNSAFE_DEVICE", self.validate)
+
+    def test_missing_backing_overlay_or_sysfs_is_ambiguous_not_selected_absence(self):
+        changes = [lambda s: s.loop_devices.update({"7:0":"11:99"}),
+                   lambda s: s.identities.pop("/run/rootfsbase"),
+                   lambda s: s.infos.pop("11:0"),
+                   lambda s: s.infos["7:0"].update(backingFile=None),
+                   lambda s: s.infos["7:0"].update(backingFile="/LiveOS/squashfs.img (deleted)"),
+                   lambda s: setattr(s, "loop_backing", mock.Mock(side_effect=FileNotFoundError))]
+        for change in changes:
+            self.setUp()
+            change(self.system)
+            self.error("AMBIGUOUS_TOPOLOGY", self.validate)
+        self.setUp()
+        self.system.identities.pop("/dev/vda")
+        self.error("DEVICE_NOT_FOUND", self.validate)
+
+    def test_missing_or_spoofed_filename_cannot_override_kernel_backing_identity(self):
+        self.system.identities["/LiveOS/squashfs.img"] = "253:0"
+        self.assertEqual(self.validate().major_minor, "253:0")
+        self.system.infos["7:0"]["backingFile"] = "/run/initramfs/live/nonexistent.img"
+        self.assertEqual(self.validate().major_minor, "253:0")
+        self.system.loop_devices["7:0"] = "0:99"
+        self.error("AMBIGUOUS_TOPOLOGY", self.validate)
+
+    def test_portal_exception_is_narrow_and_cannot_authorize_backing_storage(self):
+        for old, new in (("fuse.portal", "fuse.sshfs"), ("fuse.portal portal", "fuse.portal unknown"),
+                         ("/run/user/1000/doc", "/media/doc"), ("0:43", "8:43")):
+            self.setUp()
+            self.system.mountinfo = self.system.mountinfo.replace(old, new)
+            self.error("AMBIGUOUS_TOPOLOGY", self.validate)
+        self.setUp()
+        self.system.loop_devices["7:0"] = "0:43"
+        self.error("AMBIGUOUS_TOPOLOGY", self.validate)
+        self.setUp()
+        self.system.mountinfo = self.system.mountinfo.replace("lowerdir=/run/rootfsbase", "lowerdir=/run/user/1000/doc")
+        self.system.identities["/run/user/1000/doc"] = "0:43"
+        self.error("AMBIGUOUS_TOPOLOGY", self.validate)
+
+    def test_cycles_btrfs_and_changed_disk_identity_remain_rejected(self):
+        lock_type = helper.InstallerLock
+        self.system.loop_devices["7:0"] = "7:0"
+        self.error("AMBIGUOUS_TOPOLOGY", self.validate)
+        self.setUp()
+        self.system.mountinfo = self.system.mountinfo.replace("iso9660", "btrfs")
+        self.error("AMBIGUOUS_TOPOLOGY", self.validate)
+        for expected in ({"majorMinor":"253:0","size":68719476736,"diskSequence":2},
+                         {"majorMinor":"253:0","size":68719476735,"diskSequence":1},
+                         {"majorMinor":"253:1","size":68719476736,"diskSequence":1}):
+            self.setUp()
+            with tempfile.TemporaryDirectory() as td, mock.patch.object(helper.os, "geteuid", return_value=0), \
+                    mock.patch.object(helper, "InstallerLock", side_effect=lambda: lock_type(td + "/lock", os.getuid())), \
+                    mock.patch.object(helper, "run_backend") as backend:
+                self.error("DEVICE_CHANGED", helper.handle,
+                           helper.Request("install-full-disk", "/dev/vda", expected), self.system)
+                backend.assert_not_called()
+
+
+class LoopKernelIdentityTests(ErrorAssertions, unittest.TestCase):
+    def status(self, major=11, minor=0, inode=77, rdevice=0, loop_number=0):
+        raw = bytearray(232)
+        device = (minor & 0xff) | (major << 8) | ((minor & ~0xff) << 12)
+        struct.pack_into("=QQQ", raw, 0, device, inode, rdevice)
+        struct.pack_into("=I", raw, 40, loop_number)
+        return bytes(raw)
+
+    def read(self, raw, *, mode=stat.S_IFBLK, rdev=None):
+        with mock.patch.object(helper.os, "open", return_value=41) as opened, \
+                mock.patch.object(helper.os, "close") as closed, \
+                mock.patch.object(helper.os, "fstat", return_value=mock.Mock(st_mode=mode, st_rdev=rdev or os.makedev(7, 0))), \
+                mock.patch.object(helper.fcntl, "ioctl", return_value=raw) as ioctl:
+            try:
+                return helper.System().loop_backing("7:0", "/dev/loop0")
+            finally:
+                opened.assert_called_once_with("/dev/loop0", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+                closed.assert_called_once_with(41)
+                if ioctl.called:
+                    ioctl.assert_called_once_with(41, 0x4C05, bytes(232))
+
+    def test_kernel_device_encoding_including_large_minor_and_readonly_ioctl(self):
+        for major, minor in ((11, 0), (253, 0), (259, 65537), (0, 2000)):
+            self.assertEqual(self.read(self.status(major, minor)), f"{major}:{minor}")
+
+    def test_nonblock_mismatched_or_unsupported_loop_metadata_fails_closed(self):
+        for raw in (self.status(inode=0), self.status(rdevice=1), self.status(loop_number=1)):
+            self.error("AMBIGUOUS_TOPOLOGY", self.read, raw)
+        self.error("AMBIGUOUS_TOPOLOGY", lambda: self.read(self.status(), mode=stat.S_IFREG))
+        self.error("AMBIGUOUS_TOPOLOGY", lambda: self.read(self.status(), rdev=os.makedev(7, 1)))
+        with mock.patch.object(helper.os, "open") as opened:
+            self.error("AMBIGUOUS_TOPOLOGY", helper.System().loop_backing, "7:0", "/dev/alias")
+            opened.assert_not_called()
+
 
 
 class ProtocolTests(ErrorAssertions, unittest.TestCase):
