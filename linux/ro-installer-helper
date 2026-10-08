@@ -1,0 +1,540 @@
+#!/usr/bin/python3 -I
+"""Privileged protocol v1 foundation. No installation mutations in PR-A1."""
+
+import dataclasses
+import fcntl
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import select
+import stat
+import subprocess
+import sys
+import time
+
+
+PROTOCOL_VERSION = 1
+MAX_REQUEST_BYTES = 16384
+REQUEST_TIMEOUT = 5
+TOOL_TIMEOUT = 5
+MAX_TOPOLOGY_BYTES = 1024 * 1024
+LOCK_DIRECTORY = "/run/ro-installer"
+CHILD_ENV = {"PATH": "/usr/sbin:/usr/bin", "LC_ALL": "C", "HOME": "/root"}
+LSBLK_ARGV = (
+    "/usr/bin/lsblk", "--json", "--bytes", "--paths", "--tree", "--output",
+    "NAME,TYPE,MAJ:MIN,SIZE,PKNAME,RO,RM",
+)
+OPERATIONS = frozenset({"audit-live", "probe-disk", "install-full-disk"})
+PSEUDO_FILESYSTEMS = frozenset({
+    "proc", "sysfs", "tmpfs", "devtmpfs", "devpts", "cgroup", "cgroup2",
+    "pstore", "securityfs", "debugfs", "tracefs", "configfs", "efivarfs",
+    "mqueue", "hugetlbfs", "bpf", "fusectl", "binfmt_misc", "selinuxfs",
+    "nsfs", "ramfs", "autofs", "rpc_pipefs",
+})
+EXIT_CODES = {
+    "INVALID_REQUEST": 2, "REQUEST_TOO_LARGE": 2, "REQUEST_TIMEOUT": 2,
+    "ROOT_REQUIRED": 3, "DEVICE_NOT_FOUND": 4, "NOT_BLOCK_DEVICE": 4,
+    "UNSAFE_DEVICE": 4, "AMBIGUOUS_TOPOLOGY": 4, "DEVICE_CHANGED": 4,
+    "UNSUPPORTED_PLATFORM": 4, "BUSY": 5, "UNSAFE_LOCK": 5,
+    "NOT_IMPLEMENTED": 6, "SYSTEM_ERROR": 7,
+}
+
+
+class HelperError(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def fail(code, message):
+    raise HelperError(code, message)
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            fail("INVALID_REQUEST", "Duplicate JSON fields are forbidden.")
+        result[key] = value
+    return result
+
+
+def device_number(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]+:[0-9]+", value):
+        fail("AMBIGUOUS_TOPOLOGY", "Invalid block device identity.")
+    major, minor = (int(part) for part in value.split(":"))
+    if major > 4095 or minor > 1048575:
+        fail("AMBIGUOUS_TOPOLOGY", "Invalid block device identity.")
+    return f"{major}:{minor}"
+
+
+def positive_integer(value):
+    return type(value) is int and 0 < value <= (2**63 - 1)
+
+
+@dataclasses.dataclass(frozen=True)
+class Request:
+    operation: str
+    disk: str | None = None
+    expected_device: dict | None = None
+
+
+def parse_request(raw):
+    if len(raw) > MAX_REQUEST_BYTES:
+        fail("REQUEST_TOO_LARGE", "Request exceeds the protocol size limit.")
+    try:
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object,
+                          parse_constant=lambda _: fail("INVALID_REQUEST", "Invalid JSON number."))
+    except (UnicodeError, ValueError, RecursionError):
+        fail("INVALID_REQUEST", "Request must be one UTF-8 JSON object.")
+    if not isinstance(data, dict):
+        fail("INVALID_REQUEST", "Request must be one JSON object.")
+    if type(data.get("protocolVersion")) is not int or data["protocolVersion"] != 1:
+        fail("INVALID_REQUEST", "Unsupported protocol version.")
+    operation = data.get("operation")
+    if not isinstance(operation, str) or operation not in OPERATIONS:
+        fail("INVALID_REQUEST", "Unsupported operation.")
+    allowed = {"protocolVersion", "operation"}
+    if operation != "audit-live":
+        allowed.add("disk")
+    if operation == "install-full-disk":
+        allowed.update({"partitionMethod", "fileSystem", "confirmDestructive", "expectedDevice"})
+    if set(data) != allowed:
+        fail("INVALID_REQUEST", "Missing or unknown request fields.")
+    if operation == "audit-live":
+        return Request(operation)
+    disk = data["disk"]
+    # Canonical /dev names only. The authoritative checks below use stat/sysfs.
+    if not isinstance(disk, str) or not re.fullmatch(r"/dev/[A-Za-z0-9_-]{1,128}", disk):
+        fail("INVALID_REQUEST", "A canonical whole-disk /dev path is required.")
+    expected = None
+    if operation == "install-full-disk":
+        if (data["partitionMethod"] != "full" or data["fileSystem"] != "btrfs"
+                or data["confirmDestructive"] is not True):
+            fail("INVALID_REQUEST", "Only explicitly confirmed full/Btrfs installation is supported.")
+        expected = data["expectedDevice"]
+        if (not isinstance(expected, dict)
+                or set(expected) != {"majorMinor", "size", "diskSequence"}
+                or not positive_integer(expected["size"])
+                or not positive_integer(expected["diskSequence"])):
+            fail("INVALID_REQUEST", "A complete expected device identity is required.")
+        try:
+            number = device_number(expected["majorMinor"])
+        except HelperError:
+            fail("INVALID_REQUEST", "Invalid expected device identity.")
+        expected = dict(expected, majorMinor=number)
+    return Request(operation, disk, expected)
+
+
+def read_request(fd):
+    deadline = time.monotonic() + REQUEST_TIMEOUT
+    raw = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([fd], [], [], remaining)[0]:
+            fail("REQUEST_TIMEOUT", "Request was not completed before the deadline.")
+        chunk = os.read(fd, min(4096, MAX_REQUEST_BYTES + 1 - len(raw)))
+        if not chunk:
+            return bytes(raw)
+        raw.extend(chunk)
+        if len(raw) > MAX_REQUEST_BYTES:
+            fail("REQUEST_TOO_LARGE", "Request exceeds the protocol size limit.")
+
+
+def mount_unescape(value):
+    return re.sub(r"\\(040|011|012|134)", lambda m: chr(int(m[1], 8)), value)
+
+
+@dataclasses.dataclass(frozen=True)
+class Mount:
+    number: str
+    target: str
+    filesystem: str
+    source: str
+    options: str
+
+
+def parse_mounts(text):
+    mounts = []
+    for line in text.splitlines():
+        left, separator, right = line.partition(" - ")
+        fields, extra = left.split(), right.split()
+        if not separator or len(fields) < 6 or len(extra) != 3:
+            fail("AMBIGUOUS_TOPOLOGY", "Mount topology cannot be parsed.")
+        target = mount_unescape(fields[4])
+        if not target.startswith("/"):
+            fail("AMBIGUOUS_TOPOLOGY", "Mount topology contains an invalid path.")
+        mounts.append(Mount(device_number(fields[2]), target, extra[0],
+                            mount_unescape(extra[1]), extra[2]))
+    if sum(m.target == "/" for m in mounts) != 1:
+        fail("AMBIGUOUS_TOPOLOGY", "Root mount is missing or ambiguous.")
+    if len({m.target for m in mounts}) != len(mounts):
+        fail("AMBIGUOUS_TOPOLOGY", "Stacked mounts require additional validation.")
+    return mounts
+
+
+class System:
+    """Fixed OS reads and one fixed read-only tool. No caller-controlled argv."""
+
+    def lsblk(self):
+        # Stream both pipes with a shared byte/deadline limit; never echo stderr.
+        with subprocess.Popen(LSBLK_ARGV, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env=CHILD_ENV, close_fds=True) as process:
+            streams = [process.stdout, process.stderr]
+            output = bytearray()
+            total = 0
+            deadline = time.monotonic() + TOOL_TIMEOUT
+            try:
+                while streams:
+                    remaining = deadline - time.monotonic()
+                    ready = select.select(streams, [], [], max(0, remaining))[0]
+                    if remaining <= 0 or not ready:
+                        fail("SYSTEM_ERROR", "Block topology query timed out.")
+                    for stream in ready:
+                        chunk = os.read(stream.fileno(), 4096)
+                        total += len(chunk)
+                        if total > MAX_TOPOLOGY_BYTES:
+                            fail("AMBIGUOUS_TOPOLOGY", "Block topology exceeds the safety limit.")
+                        if not chunk:
+                            streams.remove(stream)
+                        elif stream is process.stdout:
+                            output.extend(chunk)
+                if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
+                    fail("SYSTEM_ERROR", "Block topology query failed.")
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=1)
+        try:
+            return json.loads(output, object_pairs_hook=unique_object)
+        except (ValueError, RecursionError):
+            fail("AMBIGUOUS_TOPOLOGY", "Invalid block topology JSON.")
+
+    def mounts(self):
+        return Path("/proc/self/mountinfo").read_text()
+
+    def swaps(self):
+        return Path("/proc/swaps").read_text()
+
+    def path_identity(self, path, *, block=False):
+        info = os.stat(path)
+        if block and not stat.S_ISBLK(info.st_mode):
+            fail("NOT_BLOCK_DEVICE", "Selected path is not a block device.")
+        dev = info.st_rdev if block else info.st_dev
+        return f"{os.major(dev)}:{os.minor(dev)}"
+
+    def sysfs(self, number):
+        directory = Path("/sys/dev/block", number).resolve(strict=True)
+        if not str(directory).startswith("/sys/devices/"):
+            fail("AMBIGUOUS_TOPOLOGY", "Unexpected sysfs device location.")
+        if device_number((directory / "dev").read_text().strip()) != number:
+            fail("DEVICE_CHANGED", "Device identity changed during validation.")
+        parents = {device_number((entry / "dev").read_text().strip())
+                   for entry in (directory / "slaves").iterdir()} if (directory / "slaves").is_dir() else set()
+        partition = (directory / "partition").exists()
+        if partition:
+            parents.add(device_number((directory.parent / "dev").read_text().strip()))
+        loop_file = directory / "loop/backing_file"
+        sequence = directory / "diskseq"
+        return {
+            "path": str(directory), "partition": partition, "parents": parents,
+            "size": int((directory / "size").read_text().strip()) * 512,
+            "diskSequence": int(sequence.read_text().strip()) if sequence.exists() else None,
+            "backingFile": loop_file.read_text().strip() if loop_file.exists() else None,
+        }
+
+    def platform_supported(self):
+        return platform.machine() == "x86_64" and Path("/sys/firmware/efi").is_dir()
+
+    def audit(self):
+        return {"effectiveUid": os.geteuid(), "architecture": platform.machine(),
+                "uefi": Path("/sys/firmware/efi").is_dir(),
+                "operations": sorted(OPERATIONS), "installationImplemented": False}
+
+
+@dataclasses.dataclass(frozen=True)
+class Device:
+    path: str
+    major_minor: str
+    size: int
+    disk_sequence: int
+    sysfs_path: str
+
+    def public(self):
+        return {"path": self.path, "majorMinor": self.major_minor,
+                "size": self.size, "diskSequence": self.disk_sequence}
+
+
+class Topology:
+    def __init__(self, system):
+        self.system = system
+        self.nodes = {}
+        self.tree_parents = {}
+        self.mounts = parse_mounts(system.mounts())
+        data = system.lsblk()
+        if not isinstance(data, dict) or not isinstance(data.get("blockdevices"), list):
+            fail("AMBIGUOUS_TOPOLOGY", "Missing block topology.")
+        self._collect(data["blockdevices"])
+        paths = {node["name"]: number for number, node in self.nodes.items()}
+        if len(paths) != len(self.nodes):
+            fail("AMBIGUOUS_TOPOLOGY", "Conflicting device paths.")
+        for number, node in self.nodes.items():
+            if node.get("pkname"):
+                if node["pkname"] not in paths:
+                    fail("AMBIGUOUS_TOPOLOGY", "Unknown parent device.")
+                self.tree_parents[number].add(paths[node["pkname"]])
+
+    def _collect(self, entries, parent=None, depth=0):
+        if depth > 32 or len(self.nodes) > 4096:
+            fail("AMBIGUOUS_TOPOLOGY", "Block topology is too complex.")
+        for raw in entries:
+            if not isinstance(raw, dict):
+                fail("AMBIGUOUS_TOPOLOGY", "Invalid block topology entry.")
+            number = device_number(raw.get("maj:min"))
+            if (not isinstance(raw.get("name"), str) or not raw["name"].startswith("/dev/")
+                    or not isinstance(raw.get("type"), str)
+                    or type(raw.get("size")) is not int or raw["size"] < 0
+                    or raw.get("pkname") is not None and not isinstance(raw["pkname"], str)
+                    or type(raw.get("ro")) is not bool or type(raw.get("rm")) is not bool):
+                fail("AMBIGUOUS_TOPOLOGY", "Incomplete block topology entry.")
+            node = {key: raw.get(key) for key in ("name", "type", "size", "pkname", "ro", "rm")}
+            if number in self.nodes and self.nodes[number] != node:
+                fail("AMBIGUOUS_TOPOLOGY", "Conflicting block device identities.")
+            self.nodes[number] = node
+            self.tree_parents.setdefault(number, set())
+            if parent is not None:
+                self.tree_parents[number].add(parent)
+            children = raw.get("children", [])
+            if not isinstance(children, list):
+                fail("AMBIGUOUS_TOPOLOGY", "Invalid block device children.")
+            self._collect(children, number, depth + 1)
+
+    def ancestors(self, number, active=frozenset()):
+        key = ("device", number)
+        if key in active or len(active) > 64 or number not in self.nodes:
+            fail("AMBIGUOUS_TOPOLOGY", "Unresolved or cyclic block ancestry.")
+        active = active | {key}
+        info = self.system.sysfs(number)
+        if (info["size"] != self.nodes[number]["size"]
+                or info["parents"] != self.tree_parents[number]):
+            fail("AMBIGUOUS_TOPOLOGY", "lsblk and sysfs disagree about block ancestry.")
+        result = {number}
+        for parent in info["parents"]:
+            result.update(self.ancestors(parent, active))
+        if info["backingFile"] is not None:
+            path = info["backingFile"]
+            if not path.startswith("/") or path.endswith(" (deleted)"):
+                fail("AMBIGUOUS_TOPOLOGY", "Loop backing file cannot be resolved.")
+            backing = self.backing_path(path, active)
+            if not backing:
+                fail("AMBIGUOUS_TOPOLOGY", "Loop backing storage is ambiguous.")
+            result.update(backing)
+        return result
+
+    def backing_path(self, path, active):
+        number = self.system.path_identity(path)
+        if number in self.nodes:
+            return self.ancestors(number, active)
+        candidates = [m for m in self.mounts
+                      if path == m.target or path.startswith(m.target.rstrip("/") + "/")]
+        if not candidates:
+            fail("AMBIGUOUS_TOPOLOGY", "Backing file has no known mount.")
+        return self.backing_mount(max(candidates, key=lambda m: len(m.target)), active)
+
+    def backing_mount(self, mount, active=frozenset()):
+        key = ("mount", mount.target)
+        if key in active or len(active) > 64:
+            fail("AMBIGUOUS_TOPOLOGY", "Cyclic mount ancestry.")
+        active = active | {key}
+        # mountinfo/lsblk do not enumerate every member of multi-device Btrfs.
+        # Until membership is independently verified, even a single reported
+        # source cannot authorize erasing any disk in this mount namespace.
+        if mount.filesystem == "btrfs":
+            fail("AMBIGUOUS_TOPOLOGY", "Mounted Btrfs membership requires additional validation.")
+        if mount.number in self.nodes:
+            return self.ancestors(mount.number, active)
+        if mount.source.startswith("/dev/"):
+            return self.ancestors(self.system.path_identity(mount.source, block=True), active)
+        if mount.filesystem == "overlay":
+            options = dict(item.split("=", 1) for item in mount.options.split(",") if "=" in item)
+            if "lowerdir" not in options:
+                fail("AMBIGUOUS_TOPOLOGY", "Overlay backing directories are missing.")
+            result = set()
+            for option in ("lowerdir", "upperdir", "workdir"):
+                for path in options.get(option, "").split(":"):
+                    if not path and option != "lowerdir":
+                        continue
+                    # Escaped delimiters and overlay data-only layers are not supported.
+                    if not path.startswith("/") or "\\" in path:
+                        fail("AMBIGUOUS_TOPOLOGY", "Overlay backing path is ambiguous.")
+                    result.update(self.backing_path(path, active))
+            return result
+        if mount.filesystem in PSEUDO_FILESYSTEMS and mount.number.startswith("0:"):
+            return set()
+        fail("AMBIGUOUS_TOPOLOGY", "Mounted filesystem backing storage is unknown.")
+
+    def protected_devices(self):
+        protected = set()
+        for mount in self.mounts:
+            backing = self.backing_mount(mount)
+            if mount.target == "/" and not backing:
+                fail("AMBIGUOUS_TOPOLOGY", "Root backing storage is unresolved.")
+            protected.update(backing)
+        swaps = self.system.swaps().splitlines()
+        if not swaps or not swaps[0].startswith("Filename"):
+            fail("AMBIGUOUS_TOPOLOGY", "Swap topology is unreadable.")
+        for line in swaps[1:]:
+            fields = line.split()
+            if len(fields) != 5 or fields[1] not in {"partition", "file"}:
+                fail("AMBIGUOUS_TOPOLOGY", "Swap topology is ambiguous.")
+            path = mount_unescape(fields[0])
+            if fields[1] == "partition":
+                protected.update(self.ancestors(self.system.path_identity(path, block=True)))
+            else:
+                protected.update(self.backing_path(path, frozenset()))
+        return protected
+
+    def validate(self, path):
+        number = self.system.path_identity(path, block=True)
+        node = self.nodes.get(number)
+        if node is None:
+            fail("AMBIGUOUS_TOPOLOGY", "Selected device is absent from block topology.")
+        info = self.system.sysfs(number)
+        if (node["name"] != path or node["type"] != "disk" or info["partition"]
+                or info["parents"] or info["backingFile"] is not None
+                or node["ro"] or node["rm"]):
+            fail("UNSAFE_DEVICE", "Target must be an inactive non-removable whole disk.")
+        self.ancestors(number)
+        if not positive_integer(info["size"]) or not positive_integer(info["diskSequence"]):
+            fail("AMBIGUOUS_TOPOLOGY", "Target size or disk sequence is unavailable.")
+        if number in self.protected_devices():
+            fail("UNSAFE_DEVICE", "Target backs a mounted filesystem or active swap.")
+        for other, child in self.nodes.items():
+            if other != number and number in self.ancestors(other) and child["type"] != "part":
+                fail("UNSAFE_DEVICE", "Nested target storage is unsupported.")
+        return Device(path, number, info["size"], info["diskSequence"], info["path"])
+
+
+def validate_device(system, path):
+    try:
+        # stat first distinguishes absent/non-block targets without invoking tools.
+        system.path_identity(path, block=True)
+        return Topology(system).validate(path)
+    except FileNotFoundError:
+        fail("DEVICE_NOT_FOUND", "Device or required topology data disappeared.")
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        fail("AMBIGUOUS_TOPOLOGY", "Device topology could not be validated.")
+
+
+class InstallerLock:
+    """Persistent inode under a root-owned /run directory; never unlink a lock."""
+
+    def __init__(self, directory=LOCK_DIRECTORY, owner_uid=0):
+        self.directory = directory
+        self.owner_uid = owner_uid
+        self.fd = None
+
+    def trusted(self, fd, directory=False):
+        info = os.fstat(fd)
+        expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+        if (info.st_uid != self.owner_uid or not expected_type(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600)
+                or not directory and info.st_nlink != 1):
+            fail("UNSAFE_LOCK", "Installer lock ownership or permissions are unsafe.")
+
+    def __enter__(self):
+        parent = child = None
+        try:
+            parent_path, name = os.path.split(self.directory)
+            parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            info = os.fstat(parent)
+            if info.st_uid != self.owner_uid or stat.S_IMODE(info.st_mode) & 0o022:
+                fail("UNSAFE_LOCK", "Installer runtime directory is unsafe.")
+            try:
+                os.mkdir(name, 0o700, dir_fd=parent)
+            except FileExistsError:
+                pass
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+            self.trusted(child, directory=True)
+            self.fd = os.open("install.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+                              0o600, dir_fd=child)
+            self.trusted(self.fd)
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                fail("BUSY", "Another privileged installation operation holds the lock.")
+            return self
+        except BaseException:
+            if self.fd is not None:
+                os.close(self.fd)
+                self.fd = None
+            raise
+        finally:
+            for fd in (child, parent):
+                if fd is not None:
+                    os.close(fd)
+
+    def __exit__(self, *_):
+        os.close(self.fd)
+        self.fd = None
+
+
+def handle(request, system):
+    if os.geteuid() != 0:
+        fail("ROOT_REQUIRED", "The helper requires effective UID zero.")
+    if request.operation == "audit-live":
+        return {"audit": system.audit()}
+    if request.operation == "probe-disk":
+        return {"device": validate_device(system, request.disk).public()}
+    if request.operation != "install-full-disk":
+        fail("INVALID_REQUEST", "Unsupported operation.")
+    if not system.platform_supported():
+        fail("UNSUPPORTED_PLATFORM", "Installation requires x86_64 UEFI.")
+    with InstallerLock():
+        before = validate_device(system, request.disk)
+        expected = {key: value for key, value in before.public().items() if key != "path"}
+        if expected != request.expected_device:
+            fail("DEVICE_CHANGED", "Target no longer matches the confirmed device identity.")
+        # Future engine integration must begin immediately after this repeated gate
+        # while holding this lock. Never infer mutation safety from a prior probe.
+        after = validate_device(system, request.disk)
+        if before != after:
+            fail("DEVICE_CHANGED", "Target identity changed before installation.")
+        fail("NOT_IMPLEMENTED", "PR-A1 validates installation requests but performs no installation.")
+
+
+def main():
+    # The isolated shebang ignores Python import/environment injection before this.
+    os.environ.clear()
+    os.environ.update(CHILD_ENV)
+    os.umask(0o077)
+    operation = None
+    try:
+        os.chdir("/")
+        if sys.argv[1:] not in ([], ["--protocol=1"]):
+            fail("INVALID_REQUEST", "Only protocol v1 on stdin is supported.")
+        request = parse_request(read_request(sys.stdin.fileno()))
+        operation = request.operation
+        result = handle(request, System())
+        output = {"protocolVersion": 1, "operation": operation, "ok": True, **result}
+        status = 0
+    except HelperError as error:
+        output = {"protocolVersion": 1, "operation": operation, "ok": False,
+                  "error": {"code": error.code, "message": error.message}}
+        status = EXIT_CODES[error.code]
+    except (Exception, KeyboardInterrupt):
+        # Constant diagnostics only: no attacker-controlled JSON/tool output,
+        # environment values, secrets or tracebacks on either protocol channel.
+        output = {"protocolVersion": 1, "operation": operation, "ok": False,
+                  "error": {"code": "SYSTEM_ERROR", "message": "Helper operation failed safely."}}
+        status = 7
+    sys.stdout.write(json.dumps(output, separators=(",", ":")) + "\n")
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main())

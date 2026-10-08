@@ -66,6 +66,103 @@ Destructive disk operations remain guarded by storage planning and validation.
 The current stable path rejects LUKS, LVM, RAID, multipath, and nested storage
 topologies before destructive disk writes.
 
+## Privileged Helper Foundation (PR-A1)
+
+The same `ro-installer` RPM now owns `/usr/libexec/ro-installer-helper`
+(`root:root`, 0755) and `org.roasd.installer.helper.policy` (0644). The helper
+uses isolated system Python (`/usr/bin/python3 -I`) and its standard library.
+It has no GUI dependency and does not duplicate the Dart installation engine.
+The intended PR-A2 boundary is user-session GUI → `pkexec` → this fixed helper
+→ a validated installer operation. PR-A1 does not wire this into the GUI:
+the current launcher, interactive privilege path, sudo behavior and old polkit
+action remain active.
+
+The new action `org.roasd.installer.helper` binds only the exact helper path.
+Inactive/non-local authorization defaults to denial; active authorization
+requires `auth_admin` without retained authorization. No live-only allow rule
+or sudoers payload is added. Any future active/local `liveuser` rule belongs
+to Ro-image-compose. Root authority is checked with the effective process UID;
+caller environment variables never confer authority.
+
+### Protocol v1
+
+Invoke the fixed executable with no arguments or `--protocol=1`. Write exactly
+one UTF-8 JSON object to stdin and close stdin within five seconds. Input is
+limited to 16 KiB. Every listed field is required; all other fields, duplicate
+keys, unknown versions/operations, malformed JSON and non-finite numbers are
+rejected. These are the complete request shapes:
+
+```json
+{"protocolVersion":1,"operation":"audit-live"}
+```
+
+```json
+{"protocolVersion":1,"operation":"probe-disk","disk":"/dev/vda"}
+```
+
+```json
+{"protocolVersion":1,"operation":"install-full-disk","disk":"/dev/vda","partitionMethod":"full","fileSystem":"btrfs","confirmDestructive":true,"expectedDevice":{"majorMinor":"252:0","size":68719476736,"diskSequence":11}}
+```
+
+The example identity must be replaced with the actual probe result. Size is
+an integer byte count; `diskSequence` is the kernel disk-generation identity.
+Only canonical `/dev` names are accepted. Caller-controlled commands, argv,
+environment, source/destination paths and chroots have no protocol fields.
+
+Stdout contains exactly one JSON result with `protocolVersion`, `operation`
+(null if parsing failed) and `ok`. A successful probe adds
+`device: {path, majorMinor, size, diskSequence}`. Audit adds effective UID,
+architecture, UEFI presence, operation names and `installationImplemented:false`;
+it reports runtime facts and does not certify live-image provenance. Errors
+add `error: {code, message}` with constant diagnostics and no caller text or
+secrets. Stderr is unused by the helper.
+
+| Exit | Meaning / structured codes |
+| --- | --- |
+| 0 | Successful read-only audit or probe |
+| 2 | `INVALID_REQUEST`, `REQUEST_TOO_LARGE`, `REQUEST_TIMEOUT` |
+| 3 | `ROOT_REQUIRED` |
+| 4 | `DEVICE_NOT_FOUND`, `NOT_BLOCK_DEVICE`, `UNSAFE_DEVICE`, `AMBIGUOUS_TOPOLOGY`, `DEVICE_CHANGED`, `UNSUPPORTED_PLATFORM` |
+| 5 | `BUSY`, `UNSAFE_LOCK` |
+| 6 | `NOT_IMPLEMENTED` |
+| 7 | `SYSTEM_ERROR` |
+
+### Safety and remaining integration
+
+Root independently checks block-device `stat`, major:minor, sysfs ancestry,
+size and disk sequence against fixed, read-only `lsblk` output. All mounted
+filesystem backing devices, their parents and active swap are protected.
+Loop backing files and overlay directories are traced to their backing
+storage. Partitions, aliases, removable/read-only disks, nested target storage
+and ambiguous ancestry are refused. Mounted Btrfs is currently refused because
+mountinfo/lsblk cannot prove all members of a multi-device filesystem; unknown
+filesystems, unresolved loops and stacked mounts also fail closed.
+
+`install-full-disk` additionally requires x86_64 UEFI, full erase, Btrfs and
+explicit confirmation. It acquires an exclusive persistent-inode lock at
+`/run/ro-installer/install.lock` in a root-owned 0700 directory; the lock file
+is root-owned 0600 and cannot be a symlink. Under that lock it checks the
+confirmed identity and repeats authoritative validation immediately before
+returning `NOT_IMPLEMENTED`. It performs no disk mutation and has no success
+installation path. Future mutation must follow that repeated gate under the
+same lock. The helper clears inherited environment and uses fixed executable
+paths, argument lists, output limits and timeouts for child processes.
+
+Before PR-A2, connect the existing engine across this boundary without a
+second partitioning implementation; define progress/cancellation and target
+cleanup; establish live-image authorization separately; and validate the
+topology guards on a real Compose-produced ISO. Mounted Btrfs membership and
+other currently refused topologies need independent validation before support
+can be widened. GUI launch changes and destructive E2E acceptance are outside
+PR-A1. No release or tag is needed for this foundation.
+
+The stable gate runs `python3 -B test/scripts/installer_helper_test.py`, covering
+protocol injection, storage fixtures, identity changes, concurrent lock holders,
+and real payload RPMs with valid and invalid modes. Fedora RPM CI additionally
+runs `python3 -B scripts/check-helper-package.py RPM_PATH` on the built product
+RPM to inspect paths, modes, ownership, policy binding and absence of sudoers
+or polkit allow-rule files. Payload fixtures are not product releases.
+
 ## Technology and Repository Layout
 
 - Flutter and Dart for the Linux desktop application.

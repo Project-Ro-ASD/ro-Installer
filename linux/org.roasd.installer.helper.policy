@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+  <vendor>Ro-ASD</vendor>
+  <vendor_url>https://github.com/Project-Ro-ASD/ro-Installer</vendor_url>
+  <action id="org.roasd.installer.helper">
+    <description>Run a validated Ro-ASD installer helper operation</description>
+    <message>Administrative authorization is required for the Ro-ASD installer helper.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/ro-installer-helper</annotate>
+  </action>
+</policyconfig>
