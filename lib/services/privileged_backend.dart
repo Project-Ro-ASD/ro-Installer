@@ -89,11 +89,14 @@ Future<int> runPrivilegedBackend(
       },
       beforeFirstMutation: () async {
         if (authorized) throw const FormatException('Repeated mutation gate');
+        final authorizationLines = lines!;
         emit({'protocolVersion': 1, 'type': 'ready'});
-        if (!await lines!.moveNext().timeout(const Duration(seconds: 15))) {
+        if (!await authorizationLines.moveNext().timeout(
+          const Duration(seconds: 15),
+        )) {
           throw const FormatException('Missing authorization');
         }
-        final gate = decodeProtocolObject(lines.current);
+        final gate = decodeProtocolObject(authorizationLines.current);
         if (!exactFields(gate, {'protocolVersion', 'type', 'device'}) ||
             gate['protocolVersion'] is! int ||
             gate['protocolVersion'] != 1 ||
@@ -103,7 +106,9 @@ Future<int> runPrivilegedBackend(
                 jsonEncode(identity.json)) {
           throw const FormatException('Identity authorization mismatch');
         }
-        if (await lines.moveNext().timeout(const Duration(seconds: 1))) {
+        if (await authorizationLines.moveNext().timeout(
+          const Duration(seconds: 1),
+        )) {
           throw const FormatException('Unexpected backend input after gate');
         }
         authorized = true;
