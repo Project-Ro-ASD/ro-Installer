@@ -53,6 +53,41 @@ LIVE_PATHS
 if getent passwd liveuser >/dev/null 2>&1; then
   userdel -r liveuser
 fi
+# Live OOBE state must not suppress Plasma Setup on the fresh target's first boot.
+rm -f /etc/plasma-setup-done
+# Clean only the main PLM config; KDE owns the temporary Plasma Setup override.
+file=/etc/plasmalogin.conf
+if [ -f "$file" ]; then
+  tmp=$(mktemp "${file}.ro-clean.XXXXXX")
+  trap 'rm -f -- "$tmp"' 0
+  # Buffer each section so Session is handled even when it precedes User.
+  awk '
+    function flush_section( i) {
+      for (i = 1; i <= count; i++) {
+        if (autologin && lines[i] ~ /^[[:space:]]*User[[:space:]]*=[[:space:]]*liveuser[[:space:]]*$/) continue
+        if (autologin && live_user && lines[i] ~ /^[[:space:]]*Session[[:space:]]*=/) continue
+        print lines[i]
+      }
+    }
+    /^[[:space:]]*\[.*\][[:space:]]*$/ {
+      flush_section()
+      count = 0
+      autologin = ($0 ~ /^[[:space:]]*\[Autologin\][[:space:]]*$/)
+      live_user = 0
+    }
+    {
+      lines[++count] = $0
+      if (autologin && $0 ~ /^[[:space:]]*User[[:space:]]*=/) {
+        live_user = ($0 ~ /^[[:space:]]*User[[:space:]]*=[[:space:]]*liveuser[[:space:]]*$/)
+      }
+    }
+    END { flush_section() }
+  ' "$file" > "$tmp"
+  # Retain the composed file's permissions, ownership and SELinux label.
+  cat "$tmp" > "$file"
+  rm -f -- "$tmp"
+  trap - 0
+fi
 # Remove only the live autologin settings, preserving composed SDDM configuration.
 for file in /etc/sddm.conf /etc/sddm.conf.d/*.conf; do
   [ -f "$file" ] || continue
