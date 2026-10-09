@@ -11,6 +11,7 @@ concurrency:
 
 env:
   FLUTTER_COMMIT: 5fc346839b5d0eef006ed8404392afb4dfae428d
+  FLUTTER_TAG: 3.47.6
 
 jobs:
   metadata:
@@ -95,10 +96,21 @@ jobs:
             ripgrep
 
       - name: Install pinned Flutter SDK
+        shell: bash
         run: |
-          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git /opt/flutter
+          set -euo pipefail
+          git init /opt/flutter
+          git -C /opt/flutter remote add origin https://github.com/flutter/flutter.git
+          # Fetch only the pin and its release tag for Flutter version detection.
+          git -C /opt/flutter fetch --depth 1 --no-tags origin \
+            "${FLUTTER_COMMIT}" "refs/tags/${FLUTTER_TAG}:refs/tags/${FLUTTER_TAG}"
+          git -C /opt/flutter checkout --detach "${FLUTTER_COMMIT}"
           [[ "$(git -C /opt/flutter rev-parse HEAD)" == "${FLUTTER_COMMIT}" ]] || {
-            echo "Flutter stable moved away from tested commit ${FLUTTER_COMMIT}; update the pin through reviewed CI." >&2
+            echo "Flutter checkout does not match pinned commit ${FLUTTER_COMMIT}." >&2
+            exit 1
+          }
+          [[ "$(git -C /opt/flutter rev-parse "refs/tags/${FLUTTER_TAG}^{commit}")" == "${FLUTTER_COMMIT}" ]] || {
+            echo "Flutter tag ${FLUTTER_TAG} does not match pinned commit ${FLUTTER_COMMIT}." >&2
             exit 1
           }
           echo "/opt/flutter/bin" >> "$GITHUB_PATH"
