@@ -832,7 +832,7 @@ class _NebulaTopBar extends StatelessWidget {
                 color: scheme.surface.withValues(alpha: 0.18),
               ),
               child: Text(
-                'v2.4.4',
+                'v2.4.5',
                 style: Theme.of(
                   context,
                 ).textTheme.labelLarge?.copyWith(color: scheme.primary),
@@ -1079,7 +1079,7 @@ class _NebulaFooter extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            'Ro-Installer v2.4.4',
+            'Ro-Installer v2.4.5',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: visuals.footerForeground,
               letterSpacing: 1.4,

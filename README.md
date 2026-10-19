@@ -4,6 +4,46 @@ Ro-Installer is the system installer for Ro-ASD, a Fedora KDE based Linux
 distribution. It installs the prepared Ro-Compose filesystem onto a target disk
 and validates the resulting system. Ro-Installer is not a distro builder.
 
+## 2.4.5 release preparation
+
+The candidate version is `2.4.5+1`, producing
+`ro-installer-2.4.5-1.fc44.x86_64.rpm` and
+`ro-installer-2.4.5-1.fc44.src.rpm`. Published `v2.4.4` stays immutable;
+preparing or merging this change does not publish a release.
+
+This candidate includes PR #22–24 (privileged helper, user-session GUI and
+fail-closed live/root topology checks) and PR #25, merged on 2026-10-09.
+PR #25 target finalization removes the copied `/etc/plasma-setup-done` marker
+and only the Live user's autologin keys in `/etc/plasmalogin.conf`. It preserves
+other users, sections, session settings and KDE's temporary
+`/etc/plasmalogin.conf.d/99-plasma-setup.conf`. Existing SDDM residue, Live user
+and installer removal remain in place, along with the v1 firstboot seed and
+metadata. The existing target-finalization fixtures execute the production
+cleanup script against temporary files and cover idempotence and preservation.
+
+Acceptance evidence has three separate levels:
+
+1. Code checks: the complete Flutter suite, analysis, i18n and
+   `scripts/check-stable.sh`, including the existing Plasma Setup regressions.
+2. Fedora 44 package checks: build Flutter and the Dart backend, inspect RPM
+   payload permissions, install the binary, run the invalid-protocol backend
+   smoke test, match binary/SRPM identity, and generate/check the manifest and
+   `SHA256SUMS`. PR artifacts are verification fixtures, not published releases
+   or release attestations.
+3. Compose ISO GUI/firstboot acceptance: still required in the subsequent
+   Ro-image-compose stage. Green package CI does not prove Plasma Setup runs on
+   a physical computer. No ISO build or QEMU install is required for this PR.
+
+After operator approval, merge the reviewed PR, confirm the accepted commit and
+version, then create and push `v2.4.5` on that commit. The tag-triggered
+`.github/workflows/release.yml` builds the exact RPM/SRPM pair, binds the
+manifest to the real release ID and run, attests both RPMs, `SHA256SUMS` and
+`component-artifact-manifest-v1.json`, and verifies the four immutable assets.
+The workflow publishes automatically after its checks; pushing the tag is the
+publication action and requires operator approval. Verify that workflow's
+attestations and exact asset digests before Ro-Repo V2 admission. Never reuse
+`v2.4.4` or substitute PR fixture metadata for release provenance.
+
 ## Architecture and Ownership
 
 Ro-Installer owns:
@@ -262,13 +302,12 @@ The stable gate runs helper protocol/storage/locking/backend/launcher/RPM tests
 and the full Flutter suite. Package CI additionally checks the compiled backend,
 helper ownership/modes and exact helper policy in the actual Fedora 44 product
 RPM, rejects old root-GUI policy/sudoers/allow rules, and verifies installability.
-No release/version/tag changes are needed for this integration.
+The helper and storage protections are retained in the 2.4.5 release candidate.
 
-Before release, run a real Compose ISO with an active graphical polkit agent,
+For ISO acceptance, run a real Compose ISO with an active graphical polkit agent,
 validate its live/root topology and authorization, then perform full install and
-reboot to RO_INSTALLER_VM_BOOT_OK. This PR does not create an ISO or claim that
-hardware/destructive E2E has passed. Further recovery/diagnostic hardening and any
-fixes found during that run should precede the single future immutable release.
+reboot to RO_INSTALLER_VM_BOOT_OK. Package CI does not establish Plasma Setup GUI/firstboot or physical-hardware
+acceptance; that verification belongs to the subsequent Ro-image-compose stage.
 
 ## Technology and Repository Layout
 
