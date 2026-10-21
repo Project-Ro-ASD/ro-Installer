@@ -92,6 +92,12 @@ $body
       final chmod = Process.runSync('chmod', ['+x', file.path]);
       if (chmod.exitCode != 0) throw StateError('fixture chmod failed');
     }
+    // These discovery/order tests must never run depmod against the host.
+    final depmod = File('${root.path}/bin/depmod');
+    depmod.writeAsStringSync('#!/bin/sh\nexit 0\n');
+    if (Process.runSync('chmod', ['+x', depmod.path]).exitCode != 0) {
+      throw StateError('fixture depmod chmod failed');
+    }
   }
   void candidate(
     String version, {

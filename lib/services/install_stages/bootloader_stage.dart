@@ -9,6 +9,9 @@ candidates="$(discover_prepared_kernels)"
 while IFS="$(printf '\t')" read -r kver image; do
   echo "Preparing BLS entry for kernel: $kver"
   kernel-install add "$kver" "$image"
+  # Plugins may run depmod again with the inherited restrictive mask.
+  # Only depmod gets 0022; kernel-install and all its other plugins keep 0077.
+  (umask 022; exec depmod -a "$kver")
 done <<CANDIDATES
 $candidates
 CANDIDATES
@@ -20,6 +23,9 @@ const bootloaderDracutScript =
 candidates="$(discover_prepared_kernels)"
 while IFS="$(printf '\t')" read -r kver image; do
   echo "Generating initramfs for kernel: $kver"
+  # Regenerate even existing Live/Compose indexes before dracut consumes them.
+  # A subshell keeps the installer and initramfs generation mask unchanged.
+  (umask 022; exec depmod -a "$kver")
   dracut -f "/boot/initramfs-$kver.img" "$kver"
 done <<CANDIDATES
 $candidates
