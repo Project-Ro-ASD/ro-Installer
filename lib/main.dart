@@ -34,12 +34,36 @@ void main() async {
 
   if (isAutoInstallMode &&
       !Platform.environment.containsKey('RO_INSTALLER_SESSION_SOCKET')) {
+    // Keep malformed/unsupported profile exit semantics before privileged setup.
+    var invalid = false;
+    try {
+      invalid = InstallProfile.fromJsonFile(
+        autoProfilePath,
+      ).validate().isNotEmpty;
+    } catch (_) {
+      invalid = true;
+    }
+    if (invalid) {
+      exit(
+        await runAutoInstall(
+          autoProfilePath,
+          commandRunner,
+          translationCatalog,
+        ),
+      );
+    }
     // Re-enter through the fixed root supervisor before the engine starts.
     // Profile/test environment remains root-only and is explicitly preserved.
     try {
-      final process = await Process.start('/usr/libexec/ro-installer-session', [
-        '--auto',
-      ]);
+      final process = await Process.start(
+        '/usr/libexec/ro-installer-session',
+        ['--auto'],
+        environment: {
+          ...Platform.environment,
+          'RO_INSTALLER_AUTO_EXECUTABLE': Platform.resolvedExecutable,
+        },
+      );
+      await process.stdin.close();
       final streams = Future.wait([
         stdout.addStream(process.stdout),
         stderr.addStream(process.stderr),

@@ -29,7 +29,7 @@ AUTO = ('/usr/bin/ro-installer',)
 SESSION_ENV = 'RO_INSTALLER_SESSION_SOCKET'
 ROOT_ENV = {'PATH':'/usr/sbin:/usr/bin','LC_ALL':'C','HOME':'/root'}
 AUTO_ENV = ('RO_INSTALLER_AUTO_PROFILE','RO_INSTALLER_VM_TEST_MODE',
-            'RO_INSTALLER_EXTRA_KERNEL_ARGS','DISPLAY','WAYLAND_DISPLAY',
+            'RO_INSTALLER_EXTRA_KERNEL_ARGS','RO_INSTALLER_AUTO_REBOOT','RO_INSTALLER_LOG_DIR','DISPLAY','WAYLAND_DISPLAY',
             'XAUTHORITY','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS',
             'GDK_BACKEND','LIBGL_ALWAYS_SOFTWARE')
 
@@ -107,18 +107,29 @@ def descendants(pid):
     return result
 
 
-def kill_owned_children():
+def kill_owned_children(exclude=()):
     # pidfds avoid signalling a reused PID. Only this supervisor's descendants.
-    for pid in descendants(os.getpid()):
+    killed=False
+    for pid in descendants(os.getpid()) - set(exclude):
         try:
             fd = os.pidfd_open(pid)
             try:
                 if pid in descendants(os.getpid()):
                     signal.pidfd_send_signal(fd, signal.SIGKILL)
+                    killed=True
             finally:
                 os.close(fd)
         except ProcessLookupError:
             pass
+    return killed
+
+
+def safe_target_path():
+    try:
+        info=os.lstat('/mnt')
+        return stat.S_ISDIR(info.st_mode) and info.st_uid==0 and not stat.S_IMODE(info.st_mode)&0o022
+    except FileNotFoundError:
+        return True
 
 
 class Supervisor:
@@ -172,7 +183,8 @@ class Supervisor:
                 with self.serial:
                     op = request.get('op')
                     if op == 'describe' and set(request) == {'op'}:
-                        emit({'namespace':self.namespace,'parentNamespace':self.before,'lease':True})
+                        emit({'namespace':self.namespace,'parentNamespace':self.before,'lease':True,
+                              'targetSafe':safe_target_path()})
                     elif op == 'validate-target' and set(request) == {'op','disk','commit'}:
                         identity = self.gate.validate_device(self.system, request['disk'])
                         if request['commit'] is False and self.expected is None:
@@ -233,6 +245,8 @@ class Supervisor:
                 process.kill()
                 process.wait()
                 status=-124
+            if kill_owned_children(exclude=(self.engine.pid,)):
+                status=-125
             for thread in pumps:thread.join()
             if errors:raise RuntimeError('command transport lost')
             emit({'started':True,'exitCode':status})
@@ -240,6 +254,8 @@ class Supervisor:
             if process.poll() is None:
                 process.kill()
                 process.wait()
+            kill_owned_children(exclude=(self.engine.pid,))
+            for thread in pumps:thread.join()
 
     def run(self, argv, env):
         # Starts after namespace/private propagation; no engine-controlled env/argv from GUI.
@@ -248,7 +264,12 @@ class Supervisor:
         server=threading.Thread(target=self.serve)
         server.start()
         try:
-            status=self.engine.wait()
+            try:
+                status=self.engine.wait(timeout=self.gate.BACKEND_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                self.engine.kill()
+                self.engine.wait()
+                status=9
             leaked=bool(descendants(os.getpid()))
             return status if not leaked else 9
         finally:
@@ -266,6 +287,17 @@ def main():
     if os.geteuid()!=0 or sys.argv[1:] not in (['--backend'],['--auto']):
         return 9
     mode=sys.argv[1]
+    argv=BACKEND if mode=='--backend' else AUTO
+    if mode=='--auto' and 'RO_INSTALLER_AUTO_EXECUTABLE' in os.environ:
+        candidate=os.environ['RO_INSTALLER_AUTO_EXECUTABLE']
+        # Continue the exact already-running root binary (including VM builds).
+        # No GUI/helper field selects an executable. Reject a different inode.
+        try:
+            if not os.path.isabs(candidate) or not os.path.samefile(candidate,f'/proc/{os.getppid()}/exe'):
+                return 9
+            argv=(candidate,)
+        except OSError:
+            return 9
     gate=helper_module()
     env=dict(ROOT_ENV)
     if mode=='--auto':
@@ -280,7 +312,7 @@ def main():
             try:
                 session=Supervisor(gate,lease,before,namespace,directory)
                 env[SESSION_ENV]=session.path
-                return session.run(BACKEND if mode=='--backend' else AUTO,env)
+                return session.run(argv,env)
             finally:
                 shutil.rmtree(directory)
     except Exception:

@@ -2,6 +2,11 @@
 import importlib.machinery
 import importlib.util
 import os
+import json
+import socket
+import threading
+import time
+from types import SimpleNamespace
 from pathlib import Path
 import subprocess
 import sys
@@ -62,5 +67,70 @@ class NamespaceTests(unittest.TestCase):
         # Probe only: do NOT create a namespace here. Dedicated real test does that.
         result=subprocess.run([sys.executable,'-c','import os; print(hasattr(os,"unshare"))'],capture_output=True,text=True)
         self.assertEqual(result.stdout.strip(),'True')
+
+
+class TransportLeaseTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp=tempfile.TemporaryDirectory(prefix='session-native-')
+        cls.binary=str(Path(cls.temp.name)/'engine')
+        result=subprocess.run(['dart','compile','exe',str(ROOT/'test/fixtures/session_transport.dart'),'-o',cls.binary],capture_output=True,text=True)
+        if result.returncode:raise AssertionError(result.stdout+result.stderr)
+        helper_loader=importlib.machinery.SourceFileLoader('session_test_helper',str(ROOT/'linux/ro-installer-helper'))
+        helper_spec=importlib.util.spec_from_loader(helper_loader.name,helper_loader)
+        cls.gate=importlib.util.module_from_spec(helper_spec)
+        sys.modules[helper_loader.name]=cls.gate
+        helper_loader.exec_module(cls.gate)
+    @classmethod
+    def tearDownClass(cls):cls.temp.cleanup()
+
+    def run_fixture(self,crash=False):
+        with tempfile.TemporaryDirectory(prefix='session-ipc-') as td:
+            directory=str(Path(td)/'runtime')
+            result_file=str(Path(td)/'result.json')
+            command_pid=str(Path(td)/'command.pid')
+            with self.gate.InstallerLock(directory,os.geteuid()) as lock:
+                supervisor=session.Supervisor(self.gate,lock.fd,'synthetic-before','synthetic-test',td)
+                env={**session.ROOT_ENV,'FIXTURE_SOCKET':supervisor.path,'LOCK_FILE':directory+'/install.lock','RESULT_FILE':result_file}
+                if crash:env['COMMAND_PID']=command_pid
+                statuses=[]
+                with mock.patch.object(session,'verify_private'):
+                    thread=threading.Thread(target=lambda:statuses.append(supervisor.run((self.binary,),env)))
+                    thread.start()
+                    try:
+                        deadline=time.monotonic()+15
+                        if crash:
+                            while not Path(command_pid).exists() and time.monotonic()<deadline:time.sleep(.02)
+                            self.assertTrue(Path(command_pid).exists())
+                            with self.assertRaises(self.gate.HelperError):
+                                with self.gate.InstallerLock(directory,os.geteuid()):pass
+                            auto_gate=SimpleNamespace(InstallerLock=lambda:self.gate.InstallerLock(directory,os.geteuid()))
+                            with self.assertRaises(self.gate.HelperError):
+                                with session.session_lock(auto_gate,'--auto'):pass
+                            intruder=socket.socket(socket.AF_UNIX)
+                            try:
+                                intruder.connect(supervisor.path)
+                                intruder.sendall(b'{"op":"describe"}\n')
+                                self.assertEqual(json.loads(intruder.makefile('rb').readline()),{'error':'SESSION_ERROR'})
+                            finally:intruder.close()
+                            supervisor.engine.kill()
+                        thread.join(20)
+                        self.assertFalse(thread.is_alive(),'session did not drain children')
+                    finally:
+                        if thread.is_alive():
+                            if supervisor.engine:supervisor.engine.kill()
+                            session.kill_owned_children()
+                            thread.join(5)
+                self.assertEqual(statuses,[9] if crash else [0])
+                if not crash:
+                    report=json.loads(Path(result_file).read_text())
+                    self.assertEqual(report['stdout'],'lease-held:18')
+                    self.assertEqual(report['exit'],0)
+                    self.assertNotIn('stdin-private-test',str(report['logs']))
+                    self.assertFalse(report['namespace_test'])
+            with self.gate.InstallerLock(directory,os.geteuid()):pass
+
+    def test_native_dart_commands_inherit_original_kernel_lease(self):self.run_fixture()
+    def test_engine_crash_kills_owned_command_before_releasing_lock(self):self.run_fixture(crash=True)
 
 if __name__=='__main__':unittest.main(verbosity=2)
