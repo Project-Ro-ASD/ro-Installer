@@ -93,6 +93,7 @@ jobs:
             gtk3-devel \
             pkgconf-pkg-config \
             python3 \
+            kmod \
             ripgrep
 
       - name: Install pinned Flutter SDK
@@ -124,6 +125,9 @@ jobs:
 
       - name: Mark workspace as safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Check documentation policy in the real checkout
+        run: python3 scripts/check-source-policy.py --mode checkout
 
       - name: Build committed source as RPM and SRPM
         run: scripts/01-build-rpm.sh --source-mode git --require-clean-git
