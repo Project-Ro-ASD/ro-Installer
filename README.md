@@ -88,6 +88,27 @@ future milestones. Manual installation may later support ext4/XFS; these
 filesystems are valid for reliable normal Ro-ASD operation, but Ro-ASD must not
 promise Btrfs snapshot/rollback/recovery features on them.
 
+File-copy acceptance requires exit 0 for the main rsync and every EFI mkdir/rsync.
+Partial-transfer exit 23 and other failures stop stage 5 before finalization or
+bootloader stages. Nonempty systemd/os-release and Fedora shim/GRUB files are
+checked in both source and destination; this is a small required-file guard,
+not a full image manifest or post-reboot integrity proof. Copy errors contain
+fixed operation/path messages, without forwarding raw rsync filenames/stderr.
+
+The prepared KIWI/Fedora root contains `/boot` and `/boot/efi`; it is copied
+with the existing `-aAX --numeric-ids` options. A valid `findmnt` JSON snapshot
+is mandatory outside simulation. Foreign mounts are excluded literally
+(including spaces and glob characters); mounted system source directories
+without provenance fail closed. Only the prepared `/boot/efi` directory gets
+the secondary `-aA --numeric-ids --no-xattrs` copy. Arbitrary FAT/NTFS mounts
+are never extra sources. Live runtime/cache trees and `/home/liveuser` are
+excluded; Initial Setup and account cleanup keep their existing contract.
+No `--one-file-system`, `-H`, or `-S` policy is added: hardlink identity is not
+preserved and sparse allocation is not guaranteed. Copy fixtures use real
+rsync and ACL tools (`rsync`, `acl` on Fedora) on disposable directories.
+They do not mount images or certify FAT32/SELinux/power-loss behavior;
+privileged UID/GID and device-node coverage is reported per environment.
+
 ## Implementation Status
 
 The current installation contract uses full-disk Btrfs deployment, narrow target

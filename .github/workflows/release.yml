@@ -75,6 +75,7 @@ jobs:
             git \
             rpm-build \
             rsync \
+            acl \
             tar \
             gzip \
             findutils \

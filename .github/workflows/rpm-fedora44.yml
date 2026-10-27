@@ -33,6 +33,7 @@ jobs:
             rpm-build \
             cpio \
             rsync \
+            acl \
             tar \
             gzip \
             findutils \
