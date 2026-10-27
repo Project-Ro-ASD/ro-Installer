@@ -765,7 +765,7 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
             self.assertEqual(call.func.attr, "Popen")
             self.assertFalse(any(keyword.arg == "shell" for keyword in call.keywords))
         self.assertEqual(helper.LSBLK_ARGV[0], "/usr/bin/lsblk")
-        self.assertEqual(helper.BACKEND_ARGV, ("/usr/libexec/ro-installer-backend", "--privileged-backend-v1"))
+        self.assertEqual(helper.BACKEND_ARGV, ("/usr/libexec/ro-installer-session", "--backend"))
         self.assertEqual(stat.S_IMODE((ROOT / "linux/ro-installer-helper").stat().st_mode), 0o755)
 
     @unittest.skipUnless(all(shutil.which(tool) for tool in ("rpmbuild", "rpm2cpio", "cpio")), "RPM tools unavailable")

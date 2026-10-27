@@ -1,0 +1,292 @@
+#!/usr/bin/python3 -I
+"""Root-only session supervisor. No polkit action and no GUI request API.
+
+The fixed engine is the only permitted command client (SO_PEERCRED UID/PID).
+All command children are spawned here, after namespace setup, inheriting the
+same kernel lock description. Dart Process.start cannot forward that lease.
+"""
+import contextlib
+import ctypes
+import fcntl
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import socket
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+import threading
+
+HELPER = '/usr/libexec/ro-installer-helper'
+BACKEND = ('/usr/libexec/ro-installer-backend', '--privileged-backend-v1')
+AUTO = ('/usr/bin/ro-installer',)
+SESSION_ENV = 'RO_INSTALLER_SESSION_SOCKET'
+ROOT_ENV = {'PATH':'/usr/sbin:/usr/bin','LC_ALL':'C','HOME':'/root'}
+AUTO_ENV = ('RO_INSTALLER_AUTO_PROFILE','RO_INSTALLER_VM_TEST_MODE',
+            'RO_INSTALLER_EXTRA_KERNEL_ARGS','DISPLAY','WAYLAND_DISPLAY',
+            'XAUTHORITY','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS',
+            'GDK_BACKEND','LIBGL_ALWAYS_SOFTWARE')
+
+
+def helper_module():
+    loader = importlib.machinery.SourceFileLoader('ro_session_gate', HELPER)
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
+    loader.exec_module(module)
+    return module
+
+
+def private_namespace():
+    before = os.readlink('/proc/self/ns/mnt')
+    os.unshare(os.CLONE_NEWNS)
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.mount(None, b'/', None, 16384 | 262144, None) != 0:
+        raise OSError(ctypes.get_errno(), 'private propagation failed')
+    after = os.readlink('/proc/self/ns/mnt')
+    if after == before:
+        raise RuntimeError('namespace did not change')
+    verify_private(after)
+    if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+        raise OSError(ctypes.get_errno(), 'subreaper failed')
+    return before, after
+
+
+def verify_private(expected):
+    if os.readlink('/proc/self/ns/mnt') != expected:
+        raise RuntimeError('namespace changed')
+    rows = Path('/proc/self/mountinfo').read_text().splitlines()
+    if not rows:
+        raise RuntimeError('missing mount inventory')
+    for row in rows:
+        fields = row.split()
+        split = fields.index('-')
+        if split < 6 or any(p.startswith(('shared:', 'master:', 'propagate_from:')) for p in fields[6:split]):
+            raise RuntimeError('non-private propagation')
+
+
+@contextlib.contextmanager
+def session_lock(gate, mode):
+    if mode == '--auto':
+        with gate.InstallerLock() as lock:
+            yield lock.fd
+        return
+    # A capability inherited from the GUI helper; do not reopen or unlock it.
+    anchor = os.stat(gate.LOCK_DIRECTORY + '/install.lock', follow_symlinks=False)
+    for name in os.listdir('/proc/self/fd'):
+        fd = int(name)
+        try:
+            info = os.fstat(fd)
+        except OSError:
+            continue
+        if (info.st_dev, info.st_ino) == (anchor.st_dev, anchor.st_ino):
+            gate.InstallerLock().trusted(fd)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            yield fd
+            return
+    raise RuntimeError('missing helper lease')
+
+
+def descendants(pid):
+    result = set()
+    for task in Path(f'/proc/{pid}/task').glob('*'):
+        try:
+            children = (task / 'children').read_text().split()
+        except OSError:
+            continue
+        for raw in children:
+            child = int(raw)
+            result.add(child)
+            result.update(descendants(child))
+    return result
+
+
+def kill_owned_children():
+    # pidfds avoid signalling a reused PID. Only this supervisor's descendants.
+    for pid in descendants(os.getpid()):
+        try:
+            fd = os.pidfd_open(pid)
+            try:
+                if pid in descendants(os.getpid()):
+                    signal.pidfd_send_signal(fd, signal.SIGKILL)
+            finally:
+                os.close(fd)
+        except ProcessLookupError:
+            pass
+
+
+class Supervisor:
+    def __init__(self, gate, lease, before, namespace, directory):
+        self.gate, self.lease = gate, lease
+        self.before, self.namespace = before, namespace
+        self.directory = directory
+        self.socket = socket.socket(socket.AF_UNIX)
+        self.path = directory + '/commands.sock'
+        self.socket.bind(self.path)
+        self.socket.listen(8)
+        self.socket.settimeout(.2)
+        self.stop = threading.Event()
+        self.threads = []
+        self.serial = threading.Lock()
+        self.engine = None
+        self.expected = None
+        self.system = gate.System()
+        self.system.lease_fd = lease
+
+    def serve(self):
+        while not self.stop.is_set():
+            try:
+                connection, _ = self.socket.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            thread = threading.Thread(target=self.client, args=(connection,))
+            self.threads.append(thread)
+            thread.start()
+
+    def client(self, connection):
+        with connection:
+            connection.settimeout(10)
+            stream = connection.makefile('rwb', buffering=0)
+            write_lock = threading.Lock()
+            def emit(data):
+                encoded = json.dumps(data, separators=(',',':')).encode() + b'\n'
+                with write_lock:
+                    stream.write(encoded)
+            try:
+                pid, uid, _ = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                if uid != os.geteuid() or self.engine is None or pid != self.engine.pid:
+                    raise RuntimeError('invalid session client')
+                raw = stream.readline(1024 * 1024 + 1)
+                if len(raw) > 1024 * 1024 or not raw.endswith(b'\n'):
+                    raise RuntimeError('invalid session frame')
+                request = json.loads(raw)
+                verify_private(self.namespace)
+                with self.serial:
+                    op = request.get('op')
+                    if op == 'describe' and set(request) == {'op'}:
+                        emit({'namespace':self.namespace,'parentNamespace':self.before,'lease':True})
+                    elif op == 'validate-target' and set(request) == {'op','disk','commit'}:
+                        identity = self.gate.validate_device(self.system, request['disk'])
+                        if request['commit'] is False and self.expected is None:
+                            self.expected = identity
+                        elif request['commit'] is not True or identity != self.expected:
+                            raise RuntimeError('target identity changed')
+                        emit({'device':identity.public()})
+                    elif op == 'idle' and set(request) == {'op'}:
+                        emit({'idle':descendants(os.getpid()) == {self.engine.pid}})
+                    elif op == 'command':
+                        self.command(request, emit)
+                    else:
+                        raise RuntimeError('invalid operation')
+            except Exception:
+                try:
+                    emit({'error':'SESSION_ERROR'})
+                except OSError:
+                    pass
+            finally:
+                stream.close()
+
+    def command(self, request, emit):
+        if set(request) != {'op','command','args','stdin','timeoutMs'}:
+            raise RuntimeError('invalid command')
+        command, args = request['command'], request['args']
+        if (not isinstance(command,str) or not command or '\0' in command or
+                not isinstance(args,list) or not all(isinstance(a,str) and '\0' not in a for a in args) or
+                request['stdin'] is not None and not isinstance(request['stdin'],str) or
+                request['timeoutMs'] is not None and (type(request['timeoutMs']) is not int or request['timeoutMs'] <= 0)):
+            raise RuntimeError('invalid command fields')
+        try:
+            process = subprocess.Popen([command,*args], stdin=subprocess.PIPE if request['stdin'] is not None else subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ROOT_ENV, close_fds=True, pass_fds=(self.lease,),
+                text=True,encoding='utf-8',errors='replace')
+        except OSError:
+            emit({'started':False,'exitCode':-1})
+            return
+        errors = []
+        def pump(pipe, name):
+            try:
+                while data := pipe.readline(16384):
+                    emit({'stream':name,'data':data})
+            except OSError as error:
+                errors.append(error)
+                process.kill()
+            finally:
+                pipe.close()
+        pumps=[threading.Thread(target=pump,args=(process.stdout,'stdout')),
+               threading.Thread(target=pump,args=(process.stderr,'stderr'))]
+        for thread in pumps:thread.start()
+        try:
+            if process.stdin is not None:
+                try:process.stdin.write(request['stdin'])
+                finally:process.stdin.close()
+            try:
+                status=process.wait(timeout=None if request['timeoutMs'] is None else request['timeoutMs']/1000)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                status=-124
+            for thread in pumps:thread.join()
+            if errors:raise RuntimeError('command transport lost')
+            emit({'started':True,'exitCode':status})
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+
+    def run(self, argv, env):
+        # Starts after namespace/private propagation; no engine-controlled env/argv from GUI.
+        self.engine = subprocess.Popen(argv, stdin=sys.stdin.buffer,stdout=sys.stdout.buffer,
+            stderr=sys.stderr.buffer,env=env,close_fds=True,pass_fds=(self.lease,))
+        server=threading.Thread(target=self.serve)
+        server.start()
+        try:
+            status=self.engine.wait()
+            leaked=bool(descendants(os.getpid()))
+            return status if not leaked else 9
+        finally:
+            self.stop.set()
+            self.socket.close()
+            server.join()
+            kill_owned_children()
+            for thread in self.threads:thread.join()
+            while True:
+                try:os.waitpid(-1,0)
+                except ChildProcessError:break
+
+
+def main():
+    if os.geteuid()!=0 or sys.argv[1:] not in (['--backend'],['--auto']):
+        return 9
+    mode=sys.argv[1]
+    gate=helper_module()
+    env=dict(ROOT_ENV)
+    if mode=='--auto':
+        env.update({key:os.environ[key] for key in AUTO_ENV if key in os.environ})
+        if not env.get('RO_INSTALLER_AUTO_PROFILE'):return 9
+    try:
+        os.umask(0o077)
+        if os.getpgrp()!=os.getpid():os.setsid()
+        with session_lock(gate,mode) as lease:
+            before,namespace=private_namespace()
+            directory=tempfile.mkdtemp(prefix='session-',dir=gate.LOCK_DIRECTORY)
+            try:
+                session=Supervisor(gate,lease,before,namespace,directory)
+                env[SESSION_ENV]=session.path
+                return session.run(BACKEND if mode=='--backend' else AUTO,env)
+            finally:
+                shutil.rmtree(directory)
+    except Exception:
+        sys.stderr.write('Installer session initialization/finalization failed.\n')
+        return 9
+
+
+if __name__=='__main__':
+    sys.exit(main())

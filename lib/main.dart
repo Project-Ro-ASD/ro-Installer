@@ -32,6 +32,29 @@ void main() async {
     }
   }
 
+  if (isAutoInstallMode &&
+      !Platform.environment.containsKey('RO_INSTALLER_SESSION_SOCKET')) {
+    // Re-enter through the fixed root supervisor before the engine starts.
+    // Profile/test environment remains root-only and is explicitly preserved.
+    try {
+      final process = await Process.start('/usr/libexec/ro-installer-session', [
+        '--auto',
+      ]);
+      final streams = Future.wait([
+        stdout.addStream(process.stdout),
+        stderr.addStream(process.stderr),
+      ]);
+      final status = await process.exitCode;
+      await streams;
+      exit(status);
+    } catch (_) {
+      stderr.writeln(
+        'Isolated automatic installation session could not start.',
+      );
+      exit(9);
+    }
+  }
+
   if (isAutoInstallMode) {
     final exitCode = await runAutoInstall(
       autoProfilePath,

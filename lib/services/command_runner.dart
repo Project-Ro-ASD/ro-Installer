@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'session_command_runner.dart';
 
 enum CommandLogType { command, stdout, stderr, mock }
 
@@ -68,7 +69,9 @@ abstract class CommandRunner {
   /// Mevcut aktif CommandRunner.
   /// Varsayılan olarak [RealCommandRunner] kullanılır.
   /// Test ortamında [setInstance] ile değiştirilebilir.
-  static CommandRunner _instance = RealCommandRunner();
+  static CommandRunner _instance = _defaultRunner();
+  static CommandRunner _defaultRunner() =>
+      SessionCommandRunner.fromEnvironment() ?? RealCommandRunner();
   static CommandRunner get instance => _instance;
 
   /// Test veya özel senaryolarda runner'ı değiştirmek için kullanılır.
@@ -79,7 +82,7 @@ abstract class CommandRunner {
 
   /// Runner'ı varsayılan [RealCommandRunner]'a geri döndürür.
   static void resetInstance() {
-    _instance = RealCommandRunner();
+    _instance = _defaultRunner();
   }
 
   /// Verilen komutu çalıştırır ve sonucu döndürür.
