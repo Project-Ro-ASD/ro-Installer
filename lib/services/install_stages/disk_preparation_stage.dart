@@ -6,8 +6,8 @@ import 'stage_result.dart';
 /// AŞAMA 1: Disk Hazırlığı
 ///
 /// Kurulum öncesi diski hazırlar:
-/// - Tüm mevcut bağlantıları (mount) kaldırır
-/// - Swap alanlarını kapatır
+/// - Aktif hedef bağlantılarını reddeder
+/// - Sistem swap/ZRAM veya yabancı mount durumunu değiştirmez
 ///
 /// Bu aşama, disk üzerinde güvenli bir şekilde çalışılabilmesi
 /// için ön koşulları sağlar.
@@ -35,30 +35,13 @@ class DiskPreparationStage {
         'Hedef disk bölümleri güvenli şekilde listelenemedi: $selectedDisk',
       );
     }
-    // Helper authorization refuses mounted/swap targets. Do not unmount other
-    // storage or disable system ZRAM in the helper-backed interactive path.
-    if (ctx.beforeFirstMutation != null) {
-      return mountedPartitions.isEmpty
-          ? StageResult.ok('Helper target is inactive.')
-          : StageResult.fail('Helper target became mounted.');
+    // Neither namespace isolation nor a full erase requires global swapoff
+    // or force-unmounting user resources. Both entry paths require inactivity.
+    if (mountedPartitions.isNotEmpty) {
+      return StageResult.fail(
+        'Hedef disk kullanımda; kullanıcı bağlantıları değiştirilmedi.',
+      );
     }
-    if (mountedPartitions.isEmpty) {
-      ctx.log('Hedef diskte ayrılacak aktif mount bulunamadı.');
-    }
-    for (final partition in mountedPartitions.reversed) {
-      if (!await ctx.runCmd(
-        'umount',
-        ['-f', partition],
-        ctx.log,
-        isMock: ctx.isMock,
-      )) {
-        return StageResult.fail('Bölüm bağlantısı kaldırılamadı: $partition');
-      }
-    }
-
-    // 2. Takas alanlarını kapat
-    ctx.log('Takas (swap) alanları kapatılıyor...');
-    await ctx.runCmd('swapoff', ['-a'], ctx.log, isMock: ctx.isMock);
 
     ctx.log('[AŞAMA 1] Disk hazırlığı tamamlandı.');
     return StageResult.ok(

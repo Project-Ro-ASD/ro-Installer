@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:test/test.dart';
+import 'package:ro_installer/services/mount_session.dart';
 import 'package:ro_installer/models/installer_handoff.dart';
 import 'package:ro_installer/models/standard_storage_layout.dart';
 import 'package:ro_installer/services/command_runner.dart';
@@ -116,6 +117,7 @@ StageContext context(
     '$disk${disk.contains('nvme') || disk.contains('mmcblk') ? 'p' : ''}1',
   ], stdout: 'esp-uuid');
   return StageContext(
+    mountSession: SimulatedMountSession(runner),
     state: {
       'selectedDisk': disk,
       'partitionMethod': 'full',
@@ -411,7 +413,7 @@ Session=keep-nested-group
           isTrue,
         );
         expect(
-          runner.wasCalledWith('mount', ['--make-rslave', '/mnt/$mount']),
+          runner.wasCalledWith('mount', ['--make-rprivate', '/mnt/$mount']),
           isTrue,
         );
       }

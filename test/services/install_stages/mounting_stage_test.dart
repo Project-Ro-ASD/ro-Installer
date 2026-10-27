@@ -1,4 +1,5 @@
 import 'package:test/test.dart';
+import 'package:ro_installer/services/mount_session.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
 import 'package:ro_installer/services/install_stages/mounting_stage.dart';
 import 'package:ro_installer/services/install_stages/stage_context.dart';
@@ -9,6 +10,7 @@ StageContext makeContext(
   bool isMock = false,
 }) {
   return StageContext(
+    mountSession: SimulatedMountSession(runner),
     state: state,
     log: (msg) {},
     onProgress: (p, s) {},

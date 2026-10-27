@@ -25,17 +25,13 @@ class MountingStage {
     ctx.log('[AŞAMA 4] Bağlama Başlatılıyor (Hedef: /mnt)');
     ctx.log('════════════════════════════════════════════');
 
-    // Önce mevcut /mnt bağlantılarını temizle
+    if (ctx.mountSession == null) {
+      return StageResult.fail('Verified mount session required.');
+    }
     ctx.progress(
       0.3,
       'stage_progress_mount_target',
       'Bölümler (/mnt) hedefine bağlanıyor...',
-    );
-    await ctx.runCmd(
-      'sh',
-      ['-c', 'umount -R /mnt 2>/dev/null || true'],
-      ctx.log,
-      isMock: ctx.isMock,
     );
 
     switch (partitionMethod) {
@@ -201,8 +197,8 @@ class MountingStage {
       )) {
         return StageResult.fail('Bağlama noktası oluşturulamadı: $mntPoint');
       }
-      if (!await ctx.runCmd(
-        'mount',
+      if (!await _mount(
+        ctx,
         [p['name'], mntPoint],
         ctx.log,
         isMock: ctx.isMock,
@@ -237,8 +233,8 @@ class MountingStage {
       return false;
     }
     // Explicit ID 5 ensures all five subvolumes are flat siblings.
-    if (!await ctx.runCmd(
-      'mount',
+    if (!await _mount(
+      ctx,
       ['-o', 'subvolid=5', rootPart, '/mnt'],
       ctx.log,
       isMock: ctx.isMock,
@@ -255,7 +251,7 @@ class MountingStage {
         return false;
       }
     }
-    if (!await ctx.runCmd('umount', ['/mnt'], ctx.log, isMock: ctx.isMock)) {
+    if (!await ctx.mountSession!.unmount('/mnt')) {
       return false;
     }
     for (final entry in StandardStorageLayout.subvolumes.entries) {
@@ -268,8 +264,8 @@ class MountingStage {
       )) {
         return false;
       }
-      if (!await ctx.runCmd(
-        'mount',
+      if (!await _mount(
+        ctx,
         ['-o', StandardStorageLayout.mountOptions(entry.key), rootPart, target],
         ctx.log,
         isMock: ctx.isMock,
@@ -289,12 +285,7 @@ class MountingStage {
   }) async {
     if (rootFs == 'btrfs') {
       // Önce geçici bağla, subvolume'ları oluştur
-      if (!await ctx.runCmd(
-        'mount',
-        [rootPart, '/mnt'],
-        ctx.log,
-        isMock: ctx.isMock,
-      )) {
+      if (!await _mount(ctx, [rootPart, '/mnt'], ctx.log, isMock: ctx.isMock)) {
         return false;
       }
       if (!await ctx.runCmd(
@@ -315,11 +306,11 @@ class MountingStage {
           return false;
         }
       }
-      await ctx.runCmd('umount', ['/mnt'], ctx.log, isMock: ctx.isMock);
+      await ctx.mountSession!.unmount('/mnt');
 
       // Subvolume'ları bağla (fstab ile tutarlı seçenekler: compress=zstd:1)
-      if (!await ctx.runCmd(
-        'mount',
+      if (!await _mount(
+        ctx,
         ['-o', 'subvol=@,compress=zstd:1', rootPart, '/mnt'],
         ctx.log,
         isMock: ctx.isMock,
@@ -335,8 +326,8 @@ class MountingStage {
         )) {
           return false;
         }
-        if (!await ctx.runCmd(
-          'mount',
+        if (!await _mount(
+          ctx,
           ['-o', 'subvol=@home,compress=zstd:1', rootPart, '/mnt/home'],
           ctx.log,
           isMock: ctx.isMock,
@@ -345,12 +336,7 @@ class MountingStage {
         }
       }
     } else {
-      if (!await ctx.runCmd(
-        'mount',
-        [rootPart, '/mnt'],
-        ctx.log,
-        isMock: ctx.isMock,
-      )) {
+      if (!await _mount(ctx, [rootPart, '/mnt'], ctx.log, isMock: ctx.isMock)) {
         return false;
       }
     }
@@ -367,8 +353,8 @@ class MountingStage {
     )) {
       return false;
     }
-    if (!await ctx.runCmd(
-      'mount',
+    if (!await _mount(
+      ctx,
       [efiPart, '/mnt/boot/efi'],
       ctx.log,
       isMock: ctx.isMock,
@@ -377,6 +363,13 @@ class MountingStage {
     }
     return true;
   }
+
+  Future<bool> _mount(
+    StageContext ctx,
+    List<String> args,
+    void Function(String) log, {
+    bool isMock = false,
+  }) => ctx.mountSession!.mount(args);
 
   String _normalizeFsType(String fsType) {
     switch (fsType) {

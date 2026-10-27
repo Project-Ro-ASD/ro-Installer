@@ -19,13 +19,12 @@ class CleanupStage {
       'Sistem dosyaları korunuyor ve unmount işlemi başlatılıyor...',
     );
 
-    // Tüm bağlama noktalarını kaldır
-    await ctx.runCmd(
-      'sh',
-      ['-c', 'umount -R /mnt 2>/dev/null || true'],
-      ctx.log,
-      isMock: ctx.isMock,
-    );
+    final report = await ctx.mountSession?.cleanup();
+    if (report == null || !report.success) {
+      return StageResult.fail(
+        'Kurulum oturumu bağlantıları güvenli biçimde kapatılamadı.',
+      );
+    }
 
     ctx.log('[AŞAMA 9] Temizlik tamamlandı. Sistem yeniden başlatmaya hazır.');
     return StageResult.ok(

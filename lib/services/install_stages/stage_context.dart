@@ -1,4 +1,5 @@
 import '../command_runner.dart';
+import '../mount_session.dart';
 import '../install_localizer.dart';
 
 /// Tüm kurulum aşamalarının eriştiği ortak bağlam (context) nesnesi.
@@ -19,6 +20,7 @@ class StageContext {
     this.localizer = const InstallLocalizer(),
     this.isMock = false,
     this.beforeFirstMutation,
+    this.mountSession,
   });
 
   /// Kurulum yapılandırma verisi (disk, storage layout, Installer UI language hint)
@@ -49,6 +51,7 @@ class StageContext {
   /// Simülasyon modu aktif mi
   final bool isMock;
   final Future<void> Function()? beforeFirstMutation;
+  final MountSession? mountSession;
 
   String t(
     String key,
