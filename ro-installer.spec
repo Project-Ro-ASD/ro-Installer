@@ -22,6 +22,8 @@ BuildRequires:  python3
 BuildRequires:  ripgrep
 BuildRequires:  git
 BuildRequires:  kmod
+BuildRequires:  rsync
+BuildRequires:  acl
 
 Requires:       gtk3
 Requires:       libX11
