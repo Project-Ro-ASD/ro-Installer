@@ -466,7 +466,27 @@ storage or boot risk, and verification performed. Changes that affect disk
 writes, boot configuration, package trust, release artifacts, or CI should
 include tests or an explicit explanation of the remaining verification gap.
 
-Do not commit local planning notes, historical reports, generated build output,
-debug captures, VM disks, ISO files, RPM files, or workspace-specific editor
-state. Keep active architecture documentation in this README. The repository
-should remain usable as a clean source tree for review, CI, and release automation.
+Do not commit local planning notes, generated build output, debug captures, VM
+disks, ISO files, RPM files, or workspace-specific editor state. Keep active
+architecture documentation in this README. The sole retained historical report
+is `docs/I01-kernel-index-permissions-20261021.md`; preserve it as reviewed I01
+evidence. These are the two allowed source Markdown files. Additional historical
+reports and raw test evidence belong in ignored `outputs/` directories or CI
+artifacts, with commands, toolchain versions, source commit and PASS/FAIL/SKIP
+counts recorded alongside the logs.
+
+`scripts/check-source-policy.py --mode checkout` requires the actual worktree
+root and a successful, nonempty Git source listing. Its automatic mode selects
+checkout only when the source root has its own `.git` marker; extracted RPM
+sources are checked as archives by inspecting shipped files, even below an
+unrelated parent checkout. Generated build/output directories are excluded from
+archive inspection. Missing required documents, unexpected source Markdown and
+Git errors in a checkout fail acceptance. CI checks the real checkout before
+RPM build; RPM `%check` also checks the extracted source tree.
+
+Stable acceptance requires real `depmod` and `modprobe` (Fedora package `kmod`).
+The dedicated I01 acceptance runner requires all four kernel-index regressions
+to complete successfully with zero skips, in addition to the full Flutter
+suite. The two optional physical-log corpus tests remain separately reported
+skips when their intentionally uncommitted input is absent. CI keeps its pinned
+Flutter SDK; local evidence must record any toolchain difference.

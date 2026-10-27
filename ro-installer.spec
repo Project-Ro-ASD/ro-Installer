@@ -20,6 +20,8 @@ BuildRequires:  gtk3-devel
 BuildRequires:  pkgconfig(gtk+-3.0)
 BuildRequires:  python3
 BuildRequires:  ripgrep
+BuildRequires:  git
+BuildRequires:  kmod
 
 Requires:       gtk3
 Requires:       libX11

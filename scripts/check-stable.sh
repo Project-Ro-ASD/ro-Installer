@@ -82,9 +82,17 @@ run_check "GitHub release-state tests" \
 run_check "privileged helper protocol, device safety, locking and packaging" \
   python3 -B test/scripts/installer_helper_test.py
 
+run_check "source policy checkout/archive regressions" \
+  python3 -B test/scripts/source_policy_test.py
+
+run_check "CI tools and zero-skip I01 acceptance regressions" \
+  python3 -B test/scripts/ci_test_gates_test.py
+
 if command -v flutter >/dev/null 2>&1; then
   run_check "flutter analyze" flutter analyze
   run_check "flutter test" flutter test
+  run_check "I01 real-tool regressions (no skips allowed)" \
+    python3 scripts/check-kernel-index-tests.py
 else
   fail "flutter bulunamadi; stable kabul icin flutter analyze/test zorunlu"
 fi
@@ -149,7 +157,6 @@ require_log_artifact_contract() {
 run_check "log ve hata artefakt sozlesmesi" require_log_artifact_contract
 
 require_document_lifecycle_policy() {
-  local extra_markdown
   rg -q 'Do not commit local planning notes' README.md || return 1
   ! rg -q 'docs/road|docs/old|road-plan|durum.md|plan.md|test.md|eksikler.md|optimizasyon.md' README.md || return 1
   rg -q '^/docs/road.md$' .gitignore || return 1
@@ -157,16 +164,7 @@ require_document_lifecycle_policy() {
   rg -q '^/docs/old/$' .gitignore || return 1
   rg -q '^/docs/old/ export-ignore$' .gitattributes || return 1
 
-  extra_markdown="$(
-    while IFS= read -r file; do
-      [[ -e "${file}" ]] || continue
-      [[ "${file}" == "README.md" ]] || printf '%s\n' "${file}"
-    done < <(git ls-files '*.md')
-  )"
-  if [[ -n "${extra_markdown}" ]]; then
-    printf '%s\n' "${extra_markdown}" >&2
-    return 1
-  fi
+  python3 scripts/check-source-policy.py
 }
 
 run_check "dokuman yasam dongusu ve aktif markdown siniri" require_document_lifecycle_policy

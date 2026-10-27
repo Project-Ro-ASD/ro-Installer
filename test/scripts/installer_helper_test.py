@@ -3,6 +3,7 @@
 
 import ast
 import copy
+import gc
 import importlib.machinery
 import importlib.util
 import json
@@ -16,6 +17,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import weakref
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -224,12 +227,17 @@ class LoopKernelIdentityTests(ErrorAssertions, unittest.TestCase):
         struct.pack_into("=I", raw, 40, loop_number)
         return bytes(raw)
 
-    def read(self, raw, *, mode=stat.S_IFBLK, rdev=None):
-        with mock.patch.object(helper.os, "open", return_value=41) as opened, \
-                mock.patch.object(helper.os, "close") as closed, \
-                mock.patch.object(helper.os, "fstat", return_value=mock.Mock(st_mode=mode, st_rdev=rdev or os.makedev(7, 0))), \
+    def read(self, raw, *, mode=stat.S_IFBLK, rdev=None, during_read=lambda: None):
+        # helper.os otherwise aliases the process-global os module, including
+        # multiprocessing finalizers that may run during this mock's lifetime.
+        local_os = SimpleNamespace(**vars(os))
+        with mock.patch.object(helper, "os", local_os), \
+                mock.patch.object(local_os, "open", return_value=41) as opened, \
+                mock.patch.object(local_os, "close") as closed, \
+                mock.patch.object(local_os, "fstat", return_value=mock.Mock(st_mode=mode, st_rdev=rdev or os.makedev(7, 0))), \
                 mock.patch.object(helper.fcntl, "ioctl", return_value=raw) as ioctl:
             try:
+                during_read()
                 return helper.System().loop_backing("7:0", "/dev/loop0")
             finally:
                 opened.assert_called_once_with("/dev/loop0", os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -241,12 +249,42 @@ class LoopKernelIdentityTests(ErrorAssertions, unittest.TestCase):
         for major, minor in ((11, 0), (253, 0), (259, 65537), (0, 2000)):
             self.assertEqual(self.read(self.status(major, minor)), f"{major}:{minor}")
 
+    def test_gc_finalizer_closes_real_descriptors_without_polluting_helper_mock(self):
+        class Cycle:
+            pass
+
+        read_fd, write_fd = os.pipe()
+        cycle = Cycle()
+        cycle.self = cycle
+        holder = [cycle]  # Keep it alive until the helper mocks are active.
+
+        def close_descriptors():
+            os.close(read_fd)
+            os.close(write_fd)
+
+        finalizer = weakref.finalize(cycle, close_descriptors)
+        del cycle
+
+        def collect_during_read():
+            holder.clear()
+            gc.collect()
+
+        try:
+            self.assertEqual(self.read(self.status(), during_read=collect_during_read), "11:0")
+            self.assertFalse(finalizer.alive)
+            for descriptor in (read_fd, write_fd):
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
+        finally:
+            finalizer()
+
     def test_nonblock_mismatched_or_unsupported_loop_metadata_fails_closed(self):
         for raw in (self.status(inode=0), self.status(rdevice=1), self.status(loop_number=1)):
             self.error("AMBIGUOUS_TOPOLOGY", self.read, raw)
         self.error("AMBIGUOUS_TOPOLOGY", lambda: self.read(self.status(), mode=stat.S_IFREG))
         self.error("AMBIGUOUS_TOPOLOGY", lambda: self.read(self.status(), rdev=os.makedev(7, 1)))
-        with mock.patch.object(helper.os, "open") as opened:
+        with mock.patch.object(helper, "os", SimpleNamespace(**vars(os))), \
+                mock.patch.object(helper.os, "open") as opened:
             self.error("AMBIGUOUS_TOPOLOGY", helper.System().loop_backing, "7:0", "/dev/alias")
             opened.assert_not_called()
 
@@ -419,8 +457,8 @@ class LockAndGateTests(ErrorAssertions, unittest.TestCase):
             context = multiprocessing.get_context("fork")
             parent, child = context.Pipe()
             worker = context.Process(target=lock_worker, args=(directory, child))
-            worker.start()
             try:
+                worker.start()
                 self.assertTrue(parent.poll(5))
                 self.assertEqual(parent.recv(), "locked")
                 self.error("BUSY", helper.InstallerLock(directory, os.geteuid()).__enter__)
@@ -433,8 +471,13 @@ class LockAndGateTests(ErrorAssertions, unittest.TestCase):
                 if worker.is_alive():
                     worker.terminate()
                     worker.join(5)
-                parent.close()
-                child.close()
+                try:
+                    worker.close()
+                finally:
+                    parent.close()
+                    child.close()
+            with self.assertRaises(ValueError):
+                _ = worker.sentinel
 
     def test_symlink_and_unsafe_lock_modes_rejected(self):
         with tempfile.TemporaryDirectory() as td:
