@@ -85,6 +85,9 @@ run_check "privileged helper protocol, device safety, locking and packaging" \
 run_check "isolated session and inherited child lease regressions" \
   python3 -B test/scripts/installer_session_test.py
 
+run_check "explicit real-namespace acceptance status regressions" \
+  python3 -B test/scripts/namespace_acceptance_test.py
+
 run_check "source policy checkout/archive regressions" \
   python3 -B test/scripts/source_policy_test.py
 
