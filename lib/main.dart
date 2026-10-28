@@ -172,6 +172,7 @@ Future<int> runAutoInstall(
   CommandRunner commandRunner,
   InstallerTranslationCatalog translationCatalog, {
   InstallService? installService,
+  SessionExporter? exportSession,
 }) async {
   final startedAt = DateTime.now();
   final statusHistory = <String>[];
@@ -251,30 +252,35 @@ Future<int> runAutoInstall(
             );
 
     final finishedAt = DateTime.now();
-    final exportResult = await InstallLogExportService.instance.exportSession(
-      startedAt: startedAt,
-      finishedAt: finishedAt,
-      success: success,
-      finalStatus: success
-          ? t('auto_install_success')
-          : t('auto_install_failure'),
-      statusHistory: statusHistory,
-      technicalLogs: technicalLogs,
-      installContext: {
-        ...profile.toJson(),
-        'autoInstallMode': true,
-        'vmTestMode': stateMap['vmTestMode'],
-      },
-    );
+    try {
+      final exportResult =
+          await (exportSession ??
+              InstallLogExportService.instance.exportSession)(
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            success: success,
+            finalStatus: success
+                ? t('auto_install_success')
+                : t('auto_install_failure'),
+            statusHistory: statusHistory,
+            technicalLogs: technicalLogs,
+            installContext: {
+              ...profile.toJson(),
+              'autoInstallMode': true,
+              'vmTestMode': stateMap['vmTestMode'],
+            },
+          );
 
-    if (exportResult.success) {
-      pushLog('Oturum kaydi yazildi: ${exportResult.logPath}');
-      pushLog('Oturum ozeti yazildi: ${exportResult.summaryPath}');
-      pushLog('Oturum manifesti yazildi: ${exportResult.manifestPath}');
-    } else {
-      pushLog('Oturum disa aktarimi basarisiz: ${exportResult.error}');
+      if (exportResult.success) {
+        pushLog('Oturum kaydi yazildi: ${exportResult.logPath}');
+        pushLog('Oturum ozeti yazildi: ${exportResult.summaryPath}');
+        pushLog('Oturum manifesti yazildi: ${exportResult.manifestPath}');
+      } else {
+        pushLog('Oturum disa aktarimi basarisiz: ${exportResult.error}');
+      }
+    } catch (_) {
+      pushLog('Oturum disa aktarimi tamamlanamadi.');
     }
-
     if (!success) {
       pushStatus(t('auto_install_failed_done'));
       return 1;

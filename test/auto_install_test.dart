@@ -6,6 +6,8 @@ import 'package:ro_installer/l10n/installer_translation_catalog.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
 import 'package:ro_installer/services/install_service.dart';
 import 'package:ro_installer/services/install_localizer.dart';
+import 'services/install_service_finalization_test.dart'
+    show PipelineGraph, engine, noMutation;
 
 class CapturingInstallService extends InstallService {
   CapturingInstallService(FakeCommandRunner runner)
@@ -24,6 +26,20 @@ class CapturingInstallService extends InstallService {
     states.add(Map.of(state));
     return false; // Stop before target operations; exercise the real auto entry point.
   }
+}
+
+class SuccessfulInstallService extends CapturingInstallService {
+  SuccessfulInstallService(super.runner);
+  @override
+  Future<bool> runInstall(
+    Map<String, dynamic> state,
+    void Function(double, String) onProgress,
+    void Function(String) onTechnicalLog, {
+    bool isMock = false,
+    InstallTranslator? translate,
+    Future<void> Function()? beforeFirstMutation,
+    void Function(int)? onStage,
+  }) async => true;
 }
 
 void main() {
@@ -54,6 +70,68 @@ void main() {
     return runAutoInstall(file.path, runner, catalog, installService: service);
   }
 
+  test(
+    'root auto uses actual early shared gate and export cannot change failure',
+    () async {
+      final graph = PipelineGraph()
+        ..addResponse('sh', [
+          '-c',
+          'command -v rsync >/dev/null 2>&1',
+        ], exitCode: 1);
+      final file = File('${temp.path}/shared.json')
+        ..writeAsStringSync(jsonEncode(valid()));
+      expect(
+        await runAutoInstall(
+          file.path,
+          graph,
+          catalog,
+          installService: engine(graph),
+          exportSession:
+              ({
+                required startedAt,
+                required finishedAt,
+                required success,
+                required finalStatus,
+                required statusHistory,
+                required technicalLogs,
+                required installContext,
+              }) async {
+                expect(success, isFalse);
+                throw StateError('export failure');
+              },
+        ),
+        1,
+      );
+      noMutation(graph);
+    },
+  );
+  test('root auto verified result survives export exception', () async {
+    final file = File('${temp.path}/export.json')
+      ..writeAsStringSync(jsonEncode(valid()));
+    final passing = SuccessfulInstallService(runner);
+    expect(
+      await runAutoInstall(
+        file.path,
+        runner,
+        catalog,
+        installService: passing,
+        exportSession:
+            ({
+              required startedAt,
+              required finishedAt,
+              required success,
+              required finalStatus,
+              required statusHistory,
+              required technicalLogs,
+              required installContext,
+            }) async {
+              expect(success, isTrue);
+              throw StateError('export failure');
+            },
+      ),
+      0,
+    );
+  });
   test(
     'auto profile reaches engine without identity, secret or kernel policy',
     () async {
