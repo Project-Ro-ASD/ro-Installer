@@ -129,7 +129,7 @@ class VerifiedMountSession implements MountSession {
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>) control;
   final Map<int, MountRecord> _owned = {};
   String? _namespace, _disk;
-  bool _unsafe = false, _attempted = false;
+  bool _unsafe = false, _attempted = false, _verified = false;
   CleanupReport? _report;
   static bool below(String path, String root) =>
       path == root || path.startsWith('$root/');
@@ -159,6 +159,7 @@ class VerifiedMountSession implements MountSession {
       throw StateError('Unverified isolated root session');
     }
     await assertEmpty();
+    _verified = true;
   }
 
   @override
@@ -188,7 +189,7 @@ class VerifiedMountSession implements MountSession {
 
   @override
   Future<bool> mount(List<String> args) async {
-    if (_attempted || _unsafe || _disk == null) return false;
+    if (!_verified || _attempted || _unsafe || _disk == null) return false;
     final target = args.isEmpty ? '' : args.last;
     final private = args.length == 2 && args.first == '--make-rprivate';
     final bind =
@@ -302,6 +303,7 @@ class VerifiedMountSession implements MountSession {
 
   @override
   Future<bool> unmount(String target) async {
+    if (!_verified) return false;
     try {
       if ((await control({'op': 'idle'}))['idle'] != true) return false;
       final rows = await _read();
@@ -326,6 +328,11 @@ class VerifiedMountSession implements MountSession {
 
   @override
   Future<CleanupReport> cleanup() async {
+    if (!_verified)
+      return const CleanupReport(
+        false,
+        reason: 'Session initialization not verified',
+      );
     if (_attempted && _report?.success == false) return _report!;
     try {
       final rows = await _read();

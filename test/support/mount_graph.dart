@@ -8,6 +8,9 @@ class MountGraph extends FakeCommandRunner {
     MountRecord(1, 0, '0:1', '/', '/', 'overlay', 'LiveOS_rootfs'),
     MountRecord(2, 1, '0:2', '/', '/dev', 'devtmpfs', 'devtmpfs'),
     MountRecord(3, 2, '0:3', '/', '/dev/pts', 'devpts', 'devpts'),
+    MountRecord(4, 1, '0:4', '/', '/proc', 'proc', 'proc'),
+    MountRecord(5, 1, '0:5', '/', '/sys', 'sysfs', 'sysfs'),
+    MountRecord(6, 1, '0:6', '/', '/run', 'tmpfs', 'tmpfs'),
   ];
   int next = 20;
   String ns = 'mnt:[2]';
@@ -144,8 +147,8 @@ class MountGraph extends FakeCommandRunner {
           source: args.first == '-t'
               ? 'tmpfs'
               : args.last == '/mnt/boot/efi'
-              ? '/dev/fixture1'
-              : '/dev/fixture2',
+              ? args.first
+              : args[2],
         );
       }
       if (throwAfterMount) {

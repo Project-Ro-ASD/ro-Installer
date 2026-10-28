@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'mount_session.dart';
+import 'install_preflight.dart';
+import 'install_outcome.dart';
 import 'command_runner.dart';
 import 'install_stages/install_stages.dart';
 import 'install_artifact_collector.dart';
@@ -22,10 +25,15 @@ import 'install_localizer.dart';
 ///   9. Temizlik              [CleanupStage]
 class InstallService {
   final CommandRunner _commandRunner;
+  final Future<MountSession> Function(CommandRunner)? _sessionFactory;
+  InstallOutcome? lastOutcome;
   late final InstallArtifactCollector _artifactCollector;
 
-  InstallService({CommandRunner? commandRunner})
-    : _commandRunner = commandRunner ?? CommandRunner.instance {
+  InstallService({
+    CommandRunner? commandRunner,
+    Future<MountSession> Function(CommandRunner)? sessionFactory,
+  }) : _sessionFactory = sessionFactory,
+       _commandRunner = commandRunner ?? CommandRunner.instance {
     _artifactCollector = InstallArtifactCollector(
       commandRunner: _commandRunner,
     );
@@ -127,8 +135,13 @@ class InstallService {
     Future<void> Function()? beforeFirstMutation,
     void Function(int stage)? onStage,
   }) async {
+    lastOutcome = null;
     void log(String msg) {
-      onTechnicalLog(msg);
+      try {
+        onTechnicalLog(msg);
+      } catch (_) {
+        /* diagnostics cannot bypass cleanup */
+      }
     }
 
     // Discard obsolete identity/secret input before it can enter stage logs.
@@ -219,7 +232,30 @@ class InstallService {
       }
     }
 
+    MountSession? mountSession;
+    var stagesSucceeded = false;
+    String? primaryFailure;
+    Future<void> diagnostics() async {
+      try {
+        await _artifactCollector.collectDiagnostics(
+          log,
+          isMock: isMock,
+          localizer: localizer,
+        );
+      } catch (_) {
+        log('Tanılama tamamlanamadı; oturum temizliği yine uygulanacak.');
+      }
+    }
+
     try {
+      mountSession = _sessionFactory != null
+          ? await _sessionFactory(_commandRunner)
+          : isMock
+          ? SimulatedMountSession(_commandRunner)
+          : await MountSession.open(_commandRunner);
+      await mountSession.initialize();
+      final disk = state['selectedDisk'] as String;
+      await mountSession.validateTarget(disk);
       // ── Ortak bağlam (context) nesnesi oluştur ──
       final ctx = StageContext(
         state: state,
@@ -229,8 +265,20 @@ class InstallService {
         runCmd: runCmd,
         localizer: localizer,
         isMock: isMock,
-        beforeFirstMutation: beforeFirstMutation,
+        mountSession: mountSession,
+        beforeFirstMutation: () async {
+          await mountSession!.validateTarget(disk, commit: true);
+          await beforeFirstMutation?.call();
+        },
       );
+
+      if (!await const InstallPreflight().check(ctx)) {
+        primaryFailure = 'PREFLIGHT_FAILED';
+        log(
+          'Kurulum öncesi güvenlik kontrolleri başarısız; disk değiştirilmedi.',
+        );
+        return false;
+      }
 
       // ══════════════════════════════════════════════
       //  AŞAMA 1: Disk Hazırlığı
@@ -238,12 +286,9 @@ class InstallService {
       stageBanner(1, 'install_stage_disk_preparation', 'Disk Hazırlığı');
       final stage1 = await _diskPreparation.execute(ctx);
       if (!stage1.success) {
+        primaryFailure = 'STAGE_1_FAILED';
         stageFailed(1, stage1);
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
-        );
+        await diagnostics();
         return false;
       }
       stageDone(1, stage1);
@@ -254,12 +299,9 @@ class InstallService {
       stageBanner(2, 'install_stage_partitioning', 'Bölümleme');
       final stage2 = await _partitioning.execute(ctx);
       if (!stage2.success) {
+        primaryFailure = 'STAGE_2_FAILED';
         stageFailed(2, stage2);
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
-        );
+        await diagnostics();
         return false;
       }
       stageDone(2, stage2);
@@ -270,12 +312,9 @@ class InstallService {
       stageBanner(3, 'install_stage_formatting', 'Biçimlendirme');
       final stage3 = await _formatting.execute(ctx);
       if (!stage3.success) {
+        primaryFailure = 'STAGE_3_FAILED';
         stageFailed(3, stage3);
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
-        );
+        await diagnostics();
         return false;
       }
       stageDone(3, stage3);
@@ -286,12 +325,9 @@ class InstallService {
       stageBanner(4, 'install_stage_mounting', 'Bağlama');
       final stage4 = await _mounting.execute(ctx);
       if (!stage4.success) {
+        primaryFailure = 'STAGE_4_FAILED';
         stageFailed(4, stage4);
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
-        );
+        await diagnostics();
         return false;
       }
       stageDone(4, stage4);
@@ -302,12 +338,9 @@ class InstallService {
       stageBanner(5, 'install_stage_file_copy', 'Dosya Kopyalama');
       final stage5 = await _fileCopy.execute(ctx);
       if (!stage5.success) {
+        primaryFailure = 'STAGE_5_FAILED';
         stageFailed(5, stage5);
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
-        );
+        await diagnostics();
         return false;
       }
       stageDone(5, stage5);
@@ -318,12 +351,9 @@ class InstallService {
       stageBanner(6, 'install_stage_target_finalization', 'Hedef Sonlandırma');
       final stage6 = await _targetFinalization.execute(ctx);
       if (!stage6.success) {
+        primaryFailure = 'STAGE_6_FAILED';
         stageFailed(6, stage6);
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
-        );
+        await diagnostics();
         return false;
       }
       stageDone(6, stage6);
@@ -334,12 +364,9 @@ class InstallService {
       stageBanner(7, 'install_stage_bootloader', 'Bootloader Kurulumu');
       final stage7 = await _bootloader.execute(ctx);
       if (!stage7.success) {
+        primaryFailure = 'STAGE_7_FAILED';
         stageFailed(7, stage7);
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
-        );
+        await diagnostics();
         return false;
       }
       stageDone(7, stage7);
@@ -354,12 +381,9 @@ class InstallService {
       );
       final stage8 = await _postInstallValidation.execute(ctx);
       if (!stage8.success) {
+        primaryFailure = 'STAGE_8_FAILED';
         stageFailed(8, stage8);
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
-        );
+        await diagnostics();
         return false;
       }
       stageDone(8, stage8);
@@ -370,43 +394,44 @@ class InstallService {
       stageBanner(9, 'install_stage_cleanup', 'Temizlik');
       final stage9 = await _cleanup.execute(ctx);
       if (!stage9.success) {
+        primaryFailure = 'STAGE_9_FAILED';
         stageFailed(9, stage9);
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
-        );
+        await diagnostics();
         return false;
       }
       stageDone(9, stage9);
 
-      // ══════════════════════════════════════════════
-      //  KURULUM BAŞARIYLA TAMAMLANDI
-      // ══════════════════════════════════════════════
-      log('');
-      log('══════════════════════════════════════════');
-      log(
-        t('install_log_all_stages_done', '✅ TÜM AŞAMALAR BAŞARIYLA TAMAMLANDI'),
+      stagesSucceeded = true;
+    } catch (_) {
+      primaryFailure ??= 'INSTALL_EXCEPTION';
+      log('Kurulum oturumunda beklenmeyen hata; güvenli temizlik denenecek.');
+      await diagnostics();
+    } finally {
+      CleanupReport cleanup;
+      try {
+        cleanup = await mountSession?.cleanup() ?? const CleanupReport(true);
+      } catch (_) {
+        cleanup = const CleanupReport(false, reason: 'Cleanup exception');
+      }
+      lastOutcome = InstallOutcome(
+        primaryFailure:
+            primaryFailure ?? (stagesSucceeded ? null : 'SESSION_REJECTED'),
+        cleanup: cleanup,
       );
-      log('══════════════════════════════════════════');
-
+      if (!cleanup.success) {
+        log('Kurulum oturumu temizliği doğrulanamadı; sonuç başarısız.');
+      }
+    }
+    final ok = stagesSucceeded && lastOutcome!.success;
+    if (ok) {
       onProgress(
         1.0,
         t(
           'install_progress_complete',
-          'Kurulum Hatasız Tamamlandı! Sistemi Yeniden Başlatabilirsiniz.',
+          'Kurulum doğrulanmış biçimde tamamlandı.',
         ),
       );
-      return true;
-    } catch (e, stack) {
-      log('FATAL CATCH: $e');
-      log('STACKTRACE:\n$stack');
-      await _artifactCollector.collectDiagnostics(
-        log,
-        isMock: isMock,
-        localizer: localizer,
-      );
-      return false;
     }
+    return ok;
   }
 }
