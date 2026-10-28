@@ -132,6 +132,20 @@ def safe_target_path():
         return True
 
 
+def verify_mount_target(target):
+    # A copied directory must never redirect a fixed mount path through a
+    # symlink. Namespace isolation does not isolate underlying file contents.
+    if str(Path(target)) != target or '..' in Path(target).parts or (target != '/mnt' and not target.startswith('/mnt/')):
+        raise RuntimeError('invalid mount target')
+    current=Path('/')
+    for part in Path(target).parts[1:]:
+        current=current/part
+        info=current.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise RuntimeError('mount target contains symlink/non-directory')
+
+
+
 class Supervisor:
     def __init__(self, gate, lease, before, namespace, directory):
         self.gate, self.lease = gate, lease
@@ -215,6 +229,9 @@ class Supervisor:
                 request['stdin'] is not None and not isinstance(request['stdin'],str) or
                 request['timeoutMs'] is not None and (type(request['timeoutMs']) is not int or request['timeoutMs'] <= 0)):
             raise RuntimeError('invalid command fields')
+        if command in ('mount','umount'):
+            if not args:raise RuntimeError('missing mount target')
+            verify_mount_target(args[-1])
         try:
             process = subprocess.Popen([command,*args], stdin=subprocess.PIPE if request['stdin'] is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ROOT_ENV, close_fds=True, pass_fds=(self.lease,),

@@ -164,24 +164,42 @@ class InstallService {
       log(
         'Storage MVP yalnızca full-disk erase destekler; disk işlemleri başlatılmadı.',
       );
+      lastOutcome = InstallOutcome(
+        primaryFailure: 'UNSUPPORTED_MODE',
+        cleanup: const CleanupReport(true),
+      );
       return false;
     }
-    if (!isMock) {
-      final arch = await _commandRunner.run('uname', ['-m']);
-      final uefi = await _commandRunner.run('test', [
-        '-d',
-        '/sys/firmware/efi',
-      ]);
-      if (!arch.started ||
-          arch.exitCode != 0 ||
-          arch.stdout.trim() != 'x86_64' ||
-          !uefi.started ||
-          uefi.exitCode != 0) {
-        log('Storage MVP x86_64 UEFI gerektirir; disk işlemleri başlatılmadı.');
-        return false;
+    try {
+      if (!isMock) {
+        final arch = await _commandRunner.run('uname', ['-m']);
+        final uefi = await _commandRunner.run('test', [
+          '-d',
+          '/sys/firmware/efi',
+        ]);
+        if (!arch.started ||
+            arch.exitCode != 0 ||
+            arch.stdout.trim() != 'x86_64' ||
+            !uefi.started ||
+            uefi.exitCode != 0) {
+          log(
+            'Storage MVP x86_64 UEFI gerektirir; disk işlemleri başlatılmadı.',
+          );
+          lastOutcome = InstallOutcome(
+            primaryFailure: 'UNSUPPORTED_PLATFORM',
+            cleanup: const CleanupReport(true),
+          );
+          return false;
+        }
       }
+    } catch (_) {
+      lastOutcome = InstallOutcome(
+        primaryFailure: 'PLATFORM_CHECK_FAILED',
+        cleanup: const CleanupReport(true),
+      );
+      log('Temel ortam kontrolleri tamamlanamadı; disk değiştirilmedi.');
+      return false;
     }
-
     final localizer = InstallLocalizer(translate: translate);
 
     String t(

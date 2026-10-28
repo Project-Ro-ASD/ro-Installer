@@ -135,24 +135,63 @@ Interactive main never reexecutes the GUI as root. `CommandRunner` executes
 commands directly; `RO_INSTALLER_COMMAND_SUDO` has no effect. Normal `lsblk`,
 `uname`, EFI checks and `nmcli` queries need no helper authorization. Explicit
 root automatic-profile/QEMU execution remains separate and uses the existing
-engine directly; its root check ignores UID environment variables.
+engine through the same isolated session; its root check ignores UID environment variables.
 
 The interactive privilege boundary is now:
 
 ```text
 user GUI → /usr/bin/pkexec --disable-internal-agent
          /usr/libexec/ro-installer-helper --protocol=1
+         → /usr/libexec/ro-installer-session --backend
          → /usr/libexec/ro-installer-backend --privileged-backend-v1
          → existing Dart InstallService and its nine stages
 ```
 
 The same RPM owns the isolated Python helper and the compiled, non-GUI Dart
-backend, both root:root 0755. The backend is built with `dart compile exe`;
+backend and session supervisor, all root:root 0755. The backend is built with `dart compile exe`;
 partitioning/install logic remains in the existing Dart stages. Only the
 helper-specific `org.roasd.installer.helper` polkit action remains, bound to
 exactly `/usr/libexec/ro-installer-helper`, with defaults no/no/auth_admin.
 There is no retained authorization, root-GUI policy, sudoers or live-only allow
 rule. A future active/local liveuser rule belongs to Ro-image-compose.
+
+P0-03 gives GUI and root-auto the same persistent kernel installation lock and
+root session supervisor. Before any engine child it creates a new mount namespace,
+marks propagation recursively private and verifies it; failure has no host fallback.
+Only the exact root engine PID may use the private internal command socket. Every
+command child inherits the same lock description; surviving descendants are drained
+before the lease is released. The GUI helper request schema and polkit action stay
+unchanged. Root-auto preserves existing profile/test/display options; a custom VM
+binary can continue only when it is the exact inode of the already-running root
+parent executable. Active target disks are rejected on both paths, without global
+swapoff or force-unmounting user resources.
+
+Before stage 1, read-only preflight checks source topology and required EFI/system
+files, runtime tools, target capacity and the existing
+`/usr/lib/ro-asd/release.json` Ro-ASD/Fedora 44 x86_64 metadata contract. This is
+compatibility validation, not cryptographic source attestation. No new Compose
+marker is required. The inherited 40 GiB root safety floor is temporary, not a
+measured image-size guarantee. Device identity and empty target inventory are
+rechecked before the first mutation, retaining the helper ready/continue handshake.
+
+A typed mount session records only validated resources it creates, including
+partial rbind results. Foreign `/mnt` mounts, replaced IDs, changed namespaces and
+symlink mount targets cause refusal. Cleanup checks ownership, removes individual
+owned leaf mounts and verifies the final inventory. No recursive, lazy or forced
+unmount is used. Primary and cleanup errors stay separate; any cleanup failure
+prevents success. GUI terminal state depends on the validated helper result, never
+on 100% progress. Export failure cannot change the result on either entry path.
+Namespace isolation does not roll back formatting or file content, isolate swap,
+or protect against malicious root processes, power loss or SIGKILL.
+
+Run `python3 -B test/scripts/namespace_acceptance.py` separately from fake tests.
+It uses only a fresh `/tmp` tree inside disposable user/mount namespaces, exercises
+the production namespace primitive, real nested rbind and individual cleanup, and
+checks that the parent mount inventory stayed unchanged. Exit 77 explicitly means
+UNAVAILABLE and full security acceptance **NO-GO**; it is never a passing isolation
+test. Fedora PR CI preserves the JSON and warns when kernel capabilities prevent
+this probe. Synthetic Dart mount graphs, real IPC/flock/child-lifetime fixtures and
+this Linux probe provide distinct evidence; none is a physical installation test.
 
 RPM stripping preserves only `/usr/libexec/ro-installer-backend`, because Dart
 appends its AOT snapshot after the ELF image and strip would truncate it. Other

@@ -28,8 +28,9 @@ class PipelineGraph extends MountGraph {
     if (fault == 'exception' && command == 'btrfs') {
       throw StateError('synthetic unexpected failure');
     }
-    if (diagnosticsThrow && command == 'dmesg')
+    if (diagnosticsThrow && command == 'dmesg') {
       throw StateError('diagnostic failure');
+    }
     if (command == 'rsync' &&
         ((fault == 'main' && args.contains('/')) ||
             (fault == 'efi' && args.contains('/boot/efi/')))) {
@@ -47,9 +48,8 @@ class PipelineGraph extends MountGraph {
 }
 
 class ThrowingCleanup extends VerifiedMountSession {
-  ThrowingCleanup(MountGraph graph)
+  ThrowingCleanup(MountGraph super.graph)
     : super(
-        graph,
         inventory: graph.inventory,
         namespace: () async => graph.ns,
         control: graph.control,
@@ -93,16 +93,18 @@ void main() {
   for (final fault in ['rsync', 'efi-file', 'source', 'foreign', 'namespace']) {
     test('real early gate $fault emits no stage or disk mutation', () async {
       final graph = PipelineGraph();
-      if (fault == 'rsync')
+      if (fault == 'rsync') {
         graph.addResponse('sh', [
           '-c',
           'command -v rsync >/dev/null 2>&1',
         ], exitCode: 1);
-      if (fault == 'efi-file')
+      }
+      if (fault == 'efi-file') {
         graph.addResponse('test', [
           '-s',
           '/boot/efi/EFI/fedora/shimx64.efi',
         ], exitCode: 1);
+      }
       if (fault == 'source') {
         graph.reset();
         graph.addResponse('uname', ['-m'], stdout: 'x86_64');
@@ -129,8 +131,9 @@ void main() {
       expect(stages, isEmpty);
       noMutation(graph);
       expect(service.lastOutcome!.success, isFalse);
-      if (fault == 'foreign')
+      if (fault == 'foreign') {
         expect(graph.rows.any((r) => r.target == '/mnt/foreign'), isTrue);
+      }
     });
   }
   test(
@@ -163,13 +166,14 @@ void main() {
       () async {
         final graph = PipelineGraph()..fault = fault;
         if (fault == 'efi-mount') graph.failedMountTargets.add('/mnt/boot/efi');
-        if (fault == 'bootloader')
+        if (fault == 'bootloader') {
           graph.addResponse('chroot', [
             '/mnt',
             'sh',
             '-c',
             bootloaderDracutScript,
           ], exitCode: 1);
+        }
         final service = engine(graph);
         final progress = <double>[];
         expect(

@@ -328,11 +328,12 @@ class VerifiedMountSession implements MountSession {
 
   @override
   Future<CleanupReport> cleanup() async {
-    if (!_verified)
+    if (!_verified) {
       return const CleanupReport(
         false,
         reason: 'Session initialization not verified',
       );
+    }
     if (_attempted && _report?.success == false) return _report!;
     try {
       final rows = await _read();

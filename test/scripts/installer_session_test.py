@@ -63,6 +63,35 @@ class NamespaceTests(unittest.TestCase):
         self.assertIn('with session_lock(gate,mode)',(ROOT/'linux/ro-installer-session').read_text())
         self.assertIn('pass_fds=(self.lease,)',(ROOT/'linux/ro-installer-session').read_text())
 
+    def test_mount_target_rejects_symlink_component_before_command(self):
+        with mock.patch.object(session.Path,'lstat',return_value=SimpleNamespace(st_mode=0o40755)):
+            session.verify_mount_target('/mnt/boot/efi')
+        with mock.patch.object(session.Path,'lstat',side_effect=[SimpleNamespace(st_mode=0o40755),SimpleNamespace(st_mode=0o120777)]):
+            with self.assertRaises(RuntimeError):session.verify_mount_target('/mnt/dev')
+        for target in ['/outside','/mnt/../etc','/mnt//dev','/mnt/dev/']:
+            with self.assertRaises(RuntimeError):session.verify_mount_target(target)
+
+    def test_namespace_initialization_failure_never_starts_engine(self):
+        gate=mock.MagicMock()
+        with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',side_effect=PermissionError),mock.patch.object(session,'Supervisor') as supervisor:
+            self.assertEqual(session.main(),9)
+            supervisor.assert_not_called()
+
+    def test_root_auto_preserves_profile_options_without_gui_environment_override(self):
+        gate=mock.MagicMock()
+        with tempfile.TemporaryDirectory() as td:
+            gate.LOCK_DIRECTORY=td
+            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture','RO_INSTALLER_VM_TEST_MODE':'1','LD_PRELOAD':'untrusted','PYTHONPATH':'untrusted','PATH':'untrusted'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'Supervisor') as supervisor:
+                supervisor.return_value.run.return_value=0
+                self.assertEqual(session.main(),0)
+                argv,env=supervisor.return_value.run.call_args.args
+                self.assertEqual(argv,session.AUTO)
+                self.assertEqual(env['RO_INSTALLER_AUTO_PROFILE'],'fixture')
+                self.assertEqual(env['RO_INSTALLER_VM_TEST_MODE'],'1')
+                self.assertEqual(env['PATH'],session.ROOT_ENV['PATH'])
+                self.assertNotIn('LD_PRELOAD',env)
+                self.assertNotIn('PYTHONPATH',env)
+
     def test_real_namespace_capability_is_reported_separately(self):
         # Probe only: do NOT create a namespace here. Dedicated real test does that.
         result=subprocess.run([sys.executable,'-c','import os; print(hasattr(os,"unshare"))'],capture_output=True,text=True)
