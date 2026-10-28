@@ -26,13 +26,13 @@ class FileCopyStage {
 
     // The prepared KIWI root includes /boot and its EFI payload. Mounts
     // outside that root are not additional installation sources.
-    final dynamicExcludes = await _sourceExcludes(ctx);
+    final dynamicExcludes = await inspectSource(ctx);
     if (dynamicExcludes == null) {
       return StageResult.fail(
         'Kaynak bağlama topolojisi doğrulanamadı; kopyalama durduruldu.',
       );
     }
-    for (final path in _requiredFiles) {
+    for (final path in requiredFiles) {
       if (!await _hasFile(ctx, path)) {
         return StageResult.fail('Zorunlu kaynak dosyası okunamadı: $path');
       }
@@ -87,7 +87,7 @@ class FileCopyStage {
         'Ana dosya aktarımı başarısız; eksik veya kısmi kopya kabul edilmedi.',
       );
     }
-    for (final path in _requiredFiles.where(
+    for (final path in requiredFiles.where(
       (p) => !p.startsWith('/boot/efi/'),
     )) {
       if (!await _hasFile(ctx, '/mnt$path')) {
@@ -116,9 +116,7 @@ class FileCopyStage {
     ])) {
       return StageResult.fail('EFI dosya aktarımı başarısız: $dir');
     }
-    for (final path in _requiredFiles.where(
-      (p) => p.startsWith('/boot/efi/'),
-    )) {
+    for (final path in requiredFiles.where((p) => p.startsWith('/boot/efi/'))) {
       if (!await _hasFile(ctx, '/mnt$path')) {
         return StageResult.fail('Zorunlu EFI hedef dosyası eksik: $path');
       }
@@ -130,7 +128,7 @@ class FileCopyStage {
     );
   }
 
-  static const _requiredFiles = [
+  static const requiredFiles = [
     '/usr/lib/os-release',
     '/usr/lib/systemd/systemd',
     '/boot/efi/EFI/fedora/shimx64.efi',
@@ -172,7 +170,7 @@ class FileCopyStage {
     }
   }
 
-  Future<List<String>?> _sourceExcludes(StageContext ctx) async {
+  Future<List<String>?> inspectSource(StageContext ctx) async {
     final excluded = <String>{'/boot/efi'};
     if (!ctx.isMock) {
       try {
@@ -214,7 +212,7 @@ class FileCopyStage {
             hasRoot = true;
             continue;
           }
-          if (_requiredFiles.any((path) => _within(path, target))) return null;
+          if (requiredFiles.any((path) => _within(path, target))) return null;
           if (_within(target, '/mnt')) {
             continue; // Already excluded, recursively.
           }
