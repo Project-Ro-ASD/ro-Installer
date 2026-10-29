@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'helper_protocol.dart';
+import 'session_report.dart';
 
 abstract class HelperProcess {
   Stream<List<int>> get output;
@@ -45,9 +46,11 @@ class HelperClient {
   HelperClient({
     HelperProcessStarter? start,
     this.readTimeout = const Duration(minutes: 2),
+    this.protocolVersion = 1,
   }) : _start = start ?? _startNative;
   static final instance = HelperClient();
   final HelperProcessStarter _start;
+  final int protocolVersion;
   final Duration readTimeout;
   static const executable = '/usr/bin/pkexec';
   static const arguments = [
@@ -67,7 +70,7 @@ class HelperClient {
       throw const HelperException('INVALID_REQUEST');
     }
     final result = await _call({
-      'protocolVersion': 1,
+      'protocolVersion': protocolVersion,
       'operation': 'probe-disk',
       'disk': disk,
     });
@@ -93,8 +96,18 @@ class HelperClient {
   Future<void> install(
     DeviceIdentity identity,
     void Function(double, String) onProgress,
-  ) async {
-    final result = await _call(identity.installRequest, onProgress: onProgress);
+  ) => installWithReport(identity, onProgress);
+
+  Future<void> installWithReport(
+    DeviceIdentity identity,
+    void Function(double, String) onProgress, {
+    void Function(SessionReport? report, String status)? onReport,
+  }) async {
+    final result = await _call(
+      {...identity.installRequest, 'protocolVersion': protocolVersion},
+      onProgress: onProgress,
+      onReport: onReport,
+    );
     if (!exactFields(result, {
           'protocolVersion',
           'type',
@@ -110,11 +123,34 @@ class HelperClient {
   Future<Map<String, dynamic>> _call(
     Map<String, dynamic> request, {
     void Function(double, String)? onProgress,
+    void Function(SessionReport? report, String status)? onReport,
   }) async {
+    if (protocolVersion != 1 && protocolVersion != 2) {
+      throw const HelperException('INVALID_REQUEST');
+    }
     final installing = request['operation'] == 'install-full-disk';
+    var reportSeen = false;
+    SessionReport? report;
+    var reportStatus = 'unavailable';
+    var reportNotified = false;
+    void notifyReport(SessionReport? value, String status) {
+      if (reportNotified || protocolVersion != 2 || !installing) return;
+      reportNotified = true;
+      try {
+        onReport?.call(value, status);
+      } catch (_) {}
+    }
+
     HelperProcess process;
     try {
-      process = await _start(executable, List.unmodifiable(arguments));
+      process = await _start(
+        executable,
+        List.unmodifiable(
+          protocolVersion == 1
+              ? arguments
+              : [...arguments.take(2), '--protocol=2'],
+        ),
+      );
     } catch (_) {
       throw const HelperException('PKEXEC_UNAVAILABLE');
     }
@@ -162,11 +198,36 @@ class HelperClient {
             if (messages > 16384 ||
                 result != null ||
                 message['protocolVersion'] is! int ||
-                message['protocolVersion'] != 1) {
+                message['protocolVersion'] != protocolVersion) {
               throw const FormatException();
             }
-            if (message['type'] == 'progress' && installing) {
-              validateProgress(message);
+            if (message['type'] == 'session-report' &&
+                installing &&
+                protocolVersion == 2) {
+              if (reportSeen ||
+                  !exactFields(message, {
+                    'protocolVersion',
+                    'type',
+                    'status',
+                    'report',
+                  }) ||
+                  !const [
+                    'available',
+                    'invalid',
+                    'unavailable',
+                  ].contains(message['status'])) {
+                throw const FormatException();
+              }
+              reportSeen = true;
+              report = SessionReport.parse(message['report']);
+              reportStatus = message['status'] == 'available' && report != null
+                  ? 'available'
+                  : message['status'] == 'unavailable'
+                  ? 'unavailable'
+                  : 'invalid';
+            } else if (message['type'] == 'progress' && installing) {
+              if (reportSeen) throw const FormatException();
+              validateProgress(message, expectedVersion: protocolVersion);
               onProgress?.call(
                 (message['progress'] as num).toDouble(),
                 message['messageKey'] as String,
@@ -210,6 +271,10 @@ class HelperClient {
         if (status == 127) throw const HelperException('AUTH_DENIED');
         throw HelperException(status == 0 ? 'PROTOCOL_ERROR' : 'HELPER_FAILED');
       }
+      notifyReport(
+        result['ok'] == false || status == 0 ? report : null,
+        result['ok'] == false || status == 0 ? reportStatus : 'unavailable',
+      );
       if (result['ok'] == false) {
         throw HelperException(result['error']['code']);
       }
@@ -223,6 +288,7 @@ class HelperClient {
     } catch (_) {
       throw const HelperException('TRANSPORT_ERROR');
     } finally {
+      notifyReport(null, 'unavailable');
       await output.cancel();
       await diagnostics.cancel();
     }

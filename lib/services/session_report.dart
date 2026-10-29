@@ -12,18 +12,14 @@ class SessionReport {
   static SessionReport? parse(dynamic value) {
     try {
       if (!validSchema(value, ['object', 'report']) ||
-          utf8.encode(jsonEncode(value)).length + 1 > 4096)
+          utf8.encode(jsonEncode(value)).length + 1 >
+              observabilitySchema['limits']['reportBytes']) {
         return null;
+      }
       final stages = value['stages'] as List;
       final spans = value['spans'] as List;
-      const names = [
-        'preflight',
-        'copy.main',
-        'copy.efi',
-        'diagnostics',
-        'cleanup',
-        'engine',
-      ];
+      final names =
+          observabilitySchema['objects']['span']['operationId'][1] as List;
       if (stages.length != 9 || spans.length != names.length) return null;
       for (var i = 0; i < 9; i++) {
         if (stages[i]['stageId'] != i + 1) return null;
@@ -32,8 +28,19 @@ class SessionReport {
         if (spans[i]['operationId'] != names[i]) return null;
       }
       for (final row in [...stages, ...spans]) {
-        if ((row['status'] == 'notStarted') != (row['durationMs'] == null))
+        if ((row['status'] == 'notStarted') != (row['durationMs'] == null)) {
           return null;
+        }
+      }
+      if (value['terminalStatus'] == 'success' &&
+          (value['failedStage'] != null ||
+              value['primaryError'] != null ||
+              value['cleanupStatus'] != 'success' ||
+              value['remainingResources'] != 0 ||
+              value['lastSuccessfulStage'] != 9 ||
+              value['engineDurationMs'] == null ||
+              stages.any((s) => s['status'] != 'success'))) {
+        return null;
       }
       return SessionReport._(
         jsonDecode(jsonEncode(value)) as Map<String, dynamic>,
@@ -60,7 +67,7 @@ bool validSchema(dynamic value, List<dynamic> rule) {
     case 'utc':
       return value is String &&
           RegExp(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$').hasMatch(value) &&
-          DateTime.tryParse(value) != null;
+          DateTime.tryParse(value)?.toUtc().toIso8601String() == value;
     case 'array':
       return value is List &&
           value.length <= rule[1] &&

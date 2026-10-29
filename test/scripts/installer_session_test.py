@@ -21,6 +21,13 @@ session=importlib.util.module_from_spec(spec)
 loader.exec_module(session)
 
 class NamespaceTests(unittest.TestCase):
+    def setUp(self):
+        previous=os.umask(0o077)
+        os.umask(previous)
+        self.addCleanup(os.umask,previous)
+        original_flag=sys.dont_write_bytecode
+        self.addCleanup(setattr,sys,"dont_write_bytecode",original_flag)
+
     def test_unshare_failure_has_no_fallback_or_mount(self):
         with mock.patch.object(session.os,'unshare',side_effect=PermissionError), mock.patch.object(session.ctypes,'CDLL') as libc:
             with self.assertRaises(PermissionError):session.private_namespace()
@@ -73,7 +80,7 @@ class NamespaceTests(unittest.TestCase):
 
     def test_namespace_initialization_failure_never_starts_engine(self):
         gate=mock.MagicMock()
-        with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',side_effect=PermissionError),mock.patch.object(session,'Supervisor') as supervisor:
+        with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session,'records_module',side_effect=RuntimeError('store fixture unavailable')),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',side_effect=PermissionError),mock.patch.object(session,'Supervisor') as supervisor:
             self.assertEqual(session.main(),9)
             supervisor.assert_not_called()
 
@@ -81,7 +88,7 @@ class NamespaceTests(unittest.TestCase):
         gate=mock.MagicMock()
         with tempfile.TemporaryDirectory() as td:
             gate.LOCK_DIRECTORY=td
-            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture','RO_INSTALLER_VM_TEST_MODE':'1','LD_PRELOAD':'untrusted','PYTHONPATH':'untrusted','PATH':'untrusted'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'Supervisor') as supervisor:
+            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session,'records_module',side_effect=RuntimeError('store fixture unavailable')),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture','RO_INSTALLER_VM_TEST_MODE':'1','LD_PRELOAD':'untrusted','PYTHONPATH':'untrusted','PATH':'untrusted'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'Supervisor') as supervisor:
                 supervisor.return_value.run.return_value=0
                 self.assertEqual(session.main(),0)
                 argv,env=supervisor.return_value.run.call_args.args
@@ -91,6 +98,33 @@ class NamespaceTests(unittest.TestCase):
                 self.assertEqual(env['PATH'],session.ROOT_ENV['PATH'])
                 self.assertNotIn('LD_PRELOAD',env)
                 self.assertNotIn('PYTHONPATH',env)
+
+    def test_report_is_finalized_before_root_auto_reboot_with_lease(self):
+        order=[];gate=mock.MagicMock();gate.InstallerLock.return_value.__enter__.return_value.fd=41
+        record=mock.Mock();record.finish.side_effect=lambda *a,**k:order.append('finish') or {}
+        record.close.side_effect=lambda:order.append('close')
+        module=SimpleNamespace(Recorder=mock.Mock(return_value=record),valid_report=lambda _:False)
+        with tempfile.TemporaryDirectory() as td:
+            gate.LOCK_DIRECTORY=td
+            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture','RO_INSTALLER_AUTO_REBOOT':'1','RO_INSTALLER_LOG_DIR':'SECRET_SENTINEL'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'records_module',return_value=module),mock.patch.object(session,'Supervisor') as supervisor,mock.patch.object(session.subprocess,'run',side_effect=lambda *a,**k:order.append('reboot')) as reboot:
+                supervisor.return_value.run.return_value=0
+                self.assertEqual(session.main(),0)
+                env=supervisor.return_value.run.call_args.args[1]
+                self.assertEqual(env['RO_INSTALLER_AUTO_REBOOT'],'0')
+                self.assertNotIn('RO_INSTALLER_LOG_DIR',env)
+                self.assertEqual(order,['finish','close','reboot'])
+                self.assertEqual(reboot.call_args.kwargs['pass_fds'],(41,))
+                self.assertEqual(set(module.Recorder.call_args.kwargs),{'started_ns'})
+
+    def test_broken_report_and_warning_channels_cannot_change_success(self):
+        gate=mock.MagicMock();record=mock.Mock()
+        module=SimpleNamespace(Recorder=mock.Mock(return_value=record),valid_report=lambda _:True)
+        with tempfile.TemporaryDirectory() as td:
+            gate.LOCK_DIRECTORY=td
+            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'records_module',return_value=module),mock.patch.object(session,'Supervisor') as supervisor,mock.patch.object(session.sys.stdout,'write',side_effect=BrokenPipeError),mock.patch.object(session.sys.stderr,'write',side_effect=BrokenPipeError):
+                supervisor.return_value.run.return_value=0
+                self.assertEqual(session.main(),0)
+                record.close.assert_called_once()
 
     def test_real_namespace_capability_is_reported_separately(self):
         # Probe only: do NOT create a namespace here. Dedicated real test does that.
@@ -119,7 +153,9 @@ class TransportLeaseTests(unittest.TestCase):
             result_file=str(Path(td)/'result.json')
             command_pid=str(Path(td)/'command.pid')
             with self.gate.InstallerLock(directory,os.geteuid()) as lock:
-                supervisor=session.Supervisor(self.gate,lock.fd,'synthetic-before','synthetic-test',td)
+                recorder=session.records_module().Recorder(directory=td+'/records',owner_uid=os.geteuid())
+                self.addCleanup(recorder.close)
+                supervisor=session.Supervisor(self.gate,lock.fd,'synthetic-before','synthetic-test',td,recorder=recorder)
                 env={**session.ROOT_ENV,'FIXTURE_SOCKET':supervisor.path,'LOCK_FILE':directory+'/install.lock','RESULT_FILE':result_file}
                 if crash:env['COMMAND_PID']=command_pid
                 statuses=[]
@@ -151,6 +187,12 @@ class TransportLeaseTests(unittest.TestCase):
                             session.kill_owned_children()
                             thread.join(5)
                 self.assertEqual(statuses,[9] if crash else [0])
+                report=recorder.finish(statuses[0],remaining=0)
+                if crash:
+                    self.assertEqual(report['terminalStatus'],'incomplete')
+                    self.assertEqual(report['primaryError'],'ENGINE_CRASH')
+                    self.assertEqual(report['cleanupStatus'],'unknown')
+                    self.assertNotIn('stdin-private-test',json.dumps(report))
                 if not crash:
                     report=json.loads(Path(result_file).read_text())
                     self.assertEqual(report['stdout'],'lease-held:18')

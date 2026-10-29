@@ -98,47 +98,200 @@ abstract class CommandRunner {
 
 class SecretRedactor {
   SecretRedactor._();
+  static const _aliases = {
+    'password',
+    'passwd',
+    'passphrase',
+    'passwordhash',
+    'token',
+    'accesstoken',
+    'refreshtoken',
+    'idtoken',
+    'apikey',
+    'accesskey',
+    'accesskeyid',
+    'secretaccesskey',
+    'secret',
+    'clientsecret',
+    'authorization',
+    'credential',
+    'credentials',
+    'psk',
+    'privatekey',
+    'sessiontoken',
+    'auth',
+    'signature',
+  };
+  static bool isSecretKey(String key) {
+    var normalized = key.toLowerCase();
+    try {
+      for (var i = 0; i < 2; i++) {
+        normalized = Uri.decodeComponent(normalized);
+      }
+    } catch (_) {}
+    normalized = normalized.replaceAll(RegExp(r'[^a-z0-9]'), '');
+    return _aliases.contains(normalized) ||
+        normalized.endsWith('password') ||
+        normalized.endsWith('passphrase') ||
+        normalized.endsWith('token') ||
+        normalized.endsWith('secret') ||
+        normalized.endsWith('apikey') ||
+        normalized.endsWith('accesskey') ||
+        normalized.endsWith('signature') ||
+        normalized.endsWith('credential') ||
+        normalized.endsWith('secretkey') ||
+        normalized == 'pwd';
+  }
+
+  static dynamic _json(dynamic value) {
+    if (value is Map) {
+      return {
+        for (final e in value.entries)
+          e.key.toString(): isSecretKey(e.key.toString())
+              ? '***'
+              : _json(e.value),
+      };
+    }
+    if (value is List) return value.map(_json).toList();
+    if (value is String) return _text(value);
+    return value;
+  }
 
   static String redactCommandLine(String command, List<String> args) {
-    return redactText([command, ...args].join(' ').trim());
+    final safe = <String>[];
+    var hide = false;
+    for (final arg in args) {
+      if (hide) {
+        safe.add('***');
+        hide = false;
+        continue;
+      }
+      final parts = arg.split('=');
+      if (isSecretKey(parts.first)) {
+        if (parts.length > 1) {
+          safe.add('${parts.first}=***');
+        } else {
+          safe.add(arg);
+          hide = true;
+        }
+      } else {
+        safe.add(redactText(arg));
+      }
+    }
+    return redactText([command, ...safe].join(' '));
   }
 
   static String redactText(String raw) {
-    var line = raw;
+    // Public free-text export is bounded. Structured telemetry never uses this
+    // as its security boundary: it accepts only typed allowlisted fields.
+    final bounded = raw.length > 65536 ? raw.substring(0, 65536) : raw;
+    try {
+      return jsonEncode(_json(jsonDecode(bounded)));
+    } catch (_) {}
+    return _text(bounded);
+  }
 
+  static String _text(String raw) {
+    var line = raw
+        .replaceAll(r'\"', '"')
+        .replaceAllMapped(
+          RegExp(r'\u([0-9a-fA-F]{4})'),
+          (m) => String.fromCharCode(int.parse(m[1]!, radix: 16)),
+        );
+    line = line.replaceAllMapped(RegExp(r'''https?://[^\s<>"']+'''), (match) {
+      try {
+        final uri = Uri.parse(match[0]!);
+        final query = <String, dynamic>{};
+        for (final e in uri.queryParametersAll.entries) {
+          query[e.key] =
+              isSecretKey(e.key) ||
+                  const ['code', 'key', 'sig'].contains(e.key.toLowerCase())
+              ? '***'
+              : e.value;
+        }
+        return uri
+            .replace(
+              userInfo: uri.userInfo.isEmpty ? '' : '***',
+              queryParameters: uri.hasQuery ? query : null,
+            )
+            .toString();
+      } catch (_) {
+        return '[URL_REDACTED]';
+      }
+    });
     line = line.replaceAllMapped(
       RegExp(
-        r'((?:^|\s)(?:password|passwd|passphrase|802-1x\.password)\s+)([^\s]+)',
-        caseSensitive: false,
+        r'''(["'])([A-Za-z0-9_.-]+)\1\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s}\]]+)''',
       ),
-      (m) => '${m.group(1)}***',
+      (m) => isSecretKey(m[2]!) ? '${m[1]}${m[2]}${m[1]}:"***"' : m[0]!,
     );
-
     line = line.replaceAllMapped(
       RegExp(
-        r'((?:--)?(?:password|passwd|passphrase)=)([^\s]+)',
+        r'''(?<![A-Za-z0-9_])((?:--)?(?:password|passwd|passphrase|passwordHash|api[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|token|secret|authorization|credential|802-1x\.password|wifi-sec\.psk))\s*(?:=|:|\s)\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n]*)''',
         caseSensitive: false,
       ),
-      (m) => '${m.group(1)}***',
+      (m) => '${m[1]} ***',
     );
-
     if (line.toLowerCase().contains('chpasswd')) {
-      line = line.replaceAllMapped(
-        RegExp(r'''(['"])[^'":\s]+:[^'"\s]+\1'''),
-        (m) => '${m.group(1)}***:***${m.group(1)}',
-      );
-      line = line.replaceAllMapped(
-        RegExp(r'''([a-z_][a-z0-9_-]*):([^\s'"]+)''', caseSensitive: false),
-        (m) => '***:***',
+      line = line.replaceAll(
+        RegExp(r'''[a-z_][a-z0-9_-]*:[^\s'"|]+''', caseSensitive: false),
+        '***:***',
       );
     }
-
-    line = line.replaceAllMapped(
-      RegExp(r'''(root:)([^\s'"]+)''', caseSensitive: false),
-      (m) => '${m.group(1)}***',
+    line = line.replaceAll(
+      RegExp(r'''root:[^\s'"|]+''', caseSensitive: false),
+      'root:***',
     );
-
     return line;
+  }
+}
+
+/// Functional output retention, independent of the record-store quota. Parsed
+/// output is never silently truncated: callers receive -126 on overflow. Rsync
+/// output is not parsed by FileCopyStage; its actual exit code stays authoritative.
+class BoundedCommandOutput {
+  BoundedCommandOutput({this.rsync = false});
+  final bool rsync;
+  final _output = {'stdout': StringBuffer(), 'stderr': StringBuffer()};
+  final _pending = {'stdout': '', 'stderr': ''};
+  final _discardLine = {'stdout': false, 'stderr': false};
+  bool overflow = false;
+  String value(String name) => _output[name].toString().trim();
+  void add(String name, String text, void Function(String, String) log) {
+    final buffer = _output[name]!;
+    final limit = name == 'stderr' || rsync ? 65536 : 1024 * 1024;
+    final remaining = limit - buffer.length;
+    if (remaining > 0) {
+      buffer.write(
+        text.length > remaining ? text.substring(0, remaining) : text,
+      );
+    }
+    if (name == 'stdout' && !rsync && text.length > remaining) overflow = true;
+    for (final line in text.split(RegExp(r'[\r\n]')).asMap().entries) {
+      if (line.key > 0) {
+        if (!_discardLine[name]! && _pending[name]!.isNotEmpty) {
+          log(name, _pending[name]!);
+        }
+        _pending[name] = '';
+        _discardLine[name] = false;
+      }
+      if (!_discardLine[name]!) {
+        if (_pending[name]!.length + line.value.length > 8192) {
+          _pending[name] = '';
+          _discardLine[name] = true;
+        } else {
+          _pending[name] = '${_pending[name]}${line.value}';
+        }
+      }
+    }
+  }
+
+  void finish(void Function(String, String) log) {
+    for (final name in _pending.keys) {
+      if (!_discardLine[name]! && _pending[name]!.isNotEmpty) {
+        log(name, _pending[name]!);
+      }
+    }
   }
 }
 
@@ -194,64 +347,49 @@ class RealCommandRunner extends CommandRunner {
         process.stdin.write(stdinText);
         await process.stdin.close();
       }
-      final stdoutBuffer = StringBuffer();
-      final stderrBuffer = StringBuffer();
+      final captured = BoundedCommandOutput(
+        rsync: runCommand.split('/').last == 'rsync',
+      );
       final stdoutDone = Completer<void>();
       final stderrDone = Completer<void>();
+      void log(String name, String line) {
+        onLog?.call(
+          CommandLogEvent(
+            type: name == 'stdout'
+                ? CommandLogType.stdout
+                : CommandLogType.stderr,
+            command: runCommand,
+            args: runArgs,
+            message: SecretRedactor.redactText(line),
+          ),
+        );
+      }
 
-      process.stdout
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .listen(
-            (line) {
-              final trimmed = line.trim();
-              if (trimmed.isEmpty) return;
-              stdoutBuffer.writeln(trimmed);
-              onLog?.call(
-                CommandLogEvent(
-                  type: CommandLogType.stdout,
-                  command: runCommand,
-                  args: List.unmodifiable(runArgs),
-                  message: SecretRedactor.redactText(trimmed),
-                ),
-              );
-            },
-            onDone: () => stdoutDone.complete(),
-            onError: (_) => stdoutDone.complete(),
-            cancelOnError: false,
-          );
-
-      process.stderr
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .listen(
-            (line) {
-              final trimmed = line.trim();
-              if (trimmed.isEmpty) return;
-              stderrBuffer.writeln(trimmed);
-              onLog?.call(
-                CommandLogEvent(
-                  type: CommandLogType.stderr,
-                  command: runCommand,
-                  args: List.unmodifiable(runArgs),
-                  message: SecretRedactor.redactText(trimmed),
-                ),
-              );
-            },
-            onDone: () => stderrDone.complete(),
-            onError: (_) => stderrDone.complete(),
-            cancelOnError: false,
-          );
-
-      final exitCode = await _waitForExit(process, timeout, stderrBuffer);
+      for (final name in ['stdout', 'stderr']) {
+        final complete = name == 'stdout' ? stdoutDone : stderrDone;
+        (name == 'stdout' ? process.stdout : process.stderr)
+            .transform(utf8.decoder)
+            .listen(
+              (text) => captured.add(name, text, log),
+              onDone: () => complete.complete(),
+              onError: (_) => complete.complete(),
+              cancelOnError: false,
+            );
+      }
+      final timeoutDetail = StringBuffer();
+      final exitCode = await _waitForExit(process, timeout, timeoutDetail);
       await _waitForStreams(stdoutDone, stderrDone);
-
+      captured.finish(log);
       return CommandResult(
         command: runCommand,
         args: List.unmodifiable(runArgs),
-        exitCode: exitCode,
-        stdout: stdoutBuffer.toString().trim(),
-        stderr: stderrBuffer.toString().trim(),
+        exitCode: captured.overflow ? -126 : exitCode,
+        stdout: captured.overflow ? '' : captured.value('stdout'),
+        stderr: captured.overflow
+            ? 'COMMAND_OUTPUT_LIMIT'
+            : timeoutDetail.isNotEmpty
+            ? timeoutDetail.toString()
+            : captured.value('stderr'),
         started: true,
       );
     } catch (e) {

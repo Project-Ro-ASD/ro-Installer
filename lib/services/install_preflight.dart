@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'command_runner.dart';
 import '../models/standard_storage_layout.dart';
 import 'install_stages/file_copy_stage.dart';
 import 'install_stages/prepared_kernel_artifacts.dart';
@@ -56,31 +57,46 @@ class InstallPreflight {
     try {
       await ctx.mountSession!.assertEmpty();
       for (final tool in tools) {
-        final result = await ctx.commandRunner.run('sh', [
+        final result = await _read(ctx, 'preflight.tool.$tool', 'sh', [
           '-c',
           'command -v $tool >/dev/null 2>&1',
         ]);
         if (!result.started || result.exitCode != 0) return false;
       }
-      final gpt = await ctx.commandRunner.run('sh', [
+      final gpt = await _read(ctx, 'preflight.gpt.sgdisk', 'sh', [
         '-c',
         'command -v sgdisk >/dev/null 2>&1',
       ]);
       if (!gpt.started || gpt.exitCode != 0) {
-        final fallback = await ctx.commandRunner.run('sh', [
+        final fallback = await _read(ctx, 'preflight.gpt.parted', 'sh', [
           '-c',
           'command -v parted >/dev/null 2>&1',
         ]);
         if (!fallback.started || fallback.exitCode != 0) return false;
       }
-      if (await const FileCopyStage().inspectSource(ctx) == null) return false;
+      if (await (ctx.observation?.span(
+                'preflight.source',
+                () => const FileCopyStage().inspectSource(ctx),
+                success: (value) => value != null,
+              ) ??
+              const FileCopyStage().inspectSource(ctx)) ==
+          null) {
+        return false;
+      }
       for (final path in FileCopyStage.requiredFiles) {
         for (final flag in ['-f', '-s', '-r']) {
-          final result = await ctx.commandRunner.run('test', [flag, path]);
+          final index = FileCopyStage.requiredFiles.indexOf(path);
+          final operation = const [
+            'preflight.file.os-release',
+            'preflight.file.systemd',
+            'preflight.file.shim',
+            'preflight.file.grub',
+          ][index];
+          final result = await _read(ctx, operation, 'test', [flag, path]);
           if (!result.started || result.exitCode != 0) return false;
         }
       }
-      final release = await ctx.commandRunner.run('cat', [
+      final release = await _read(ctx, 'preflight.metadata', 'cat', [
         '/usr/lib/ro-asd/release.json',
       ]);
       if (!release.started || release.exitCode != 0) return false;
@@ -96,7 +112,7 @@ class InstallPreflight {
           data['primary_architecture'] != 'x86_64') {
         return false;
       }
-      final capacity = await ctx.commandRunner.run('blockdev', [
+      final capacity = await _read(ctx, 'preflight.capacity', 'blockdev', [
         '--getsize64',
         ctx.state['selectedDisk'] as String,
       ]);
@@ -106,12 +122,12 @@ class InstallPreflight {
               StandardStorageLayout.minimumDiskBytes) {
         return false;
       }
-      final btrfs = await ctx.commandRunner.run('sh', [
+      final btrfs = await _read(ctx, 'preflight.btrfs', 'sh', [
         '-c',
         'grep -qw btrfs /proc/filesystems || modprobe -n -q btrfs',
       ]);
       if (!btrfs.started || btrfs.exitCode != 0) return false;
-      final kernels = await ctx.commandRunner.run('sh', [
+      final kernels = await _read(ctx, 'preflight.kernels', 'sh', [
         '-c',
         '$preparedKernelDiscoveryScript\ndiscover_prepared_kernels',
       ]);
@@ -124,5 +140,20 @@ class InstallPreflight {
     } catch (_) {
       return false; // No raw source metadata, command stderr or exception in UI errors.
     }
+  }
+
+  Future<CommandResult> _read(
+    StageContext ctx,
+    String operation,
+    String command,
+    List<String> args,
+  ) {
+    Future<CommandResult> action() => ctx.commandRunner.run(command, args);
+    return ctx.observation?.span(
+          operation,
+          action,
+          success: (r) => r.started && r.exitCode == 0,
+        ) ??
+        action();
   }
 }

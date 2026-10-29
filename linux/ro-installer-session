@@ -8,6 +8,7 @@ same kernel lock description. Dart Process.start cannot forward that lease.
 import contextlib
 import ctypes
 import fcntl
+import time
 import importlib.machinery
 import importlib.util
 import json
@@ -29,9 +30,49 @@ AUTO = ('/usr/bin/ro-installer',)
 SESSION_ENV = 'RO_INSTALLER_SESSION_SOCKET'
 ROOT_ENV = {'PATH':'/usr/sbin:/usr/bin','LC_ALL':'C','HOME':'/root'}
 AUTO_ENV = ('RO_INSTALLER_AUTO_PROFILE','RO_INSTALLER_VM_TEST_MODE',
-            'RO_INSTALLER_EXTRA_KERNEL_ARGS','RO_INSTALLER_AUTO_REBOOT','RO_INSTALLER_LOG_DIR','DISPLAY','WAYLAND_DISPLAY',
+            'RO_INSTALLER_EXTRA_KERNEL_ARGS','RO_INSTALLER_AUTO_REBOOT','DISPLAY','WAYLAND_DISPLAY',
             'XAUTHORITY','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS',
             'GDK_BACKEND','LIBGL_ALWAYS_SOFTWARE')
+
+
+def warn(code):
+    try:sys.stderr.write(code+'\n')
+    except (OSError,ValueError):pass
+
+
+def records_module():
+    loader=importlib.machinery.SourceFileLoader('ro_session_records',str(Path(__file__).with_name('ro_installer_records.py')))
+    spec=importlib.util.spec_from_loader(loader.name,loader)
+    module=importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def record_event(recorder,kind, *, stage=None, operation='session',status='running',duration=None,code=None,error=None):
+    if recorder is None:return
+    try:
+        recorder.observe({'eventType':kind,'stageId':stage,'operationId':operation,
+                          'status':status,'durationMs':duration,'exitCode':code,'errorCode':error},role='supervisor')
+    except Exception:
+        # Telemetry cannot alter admission, the engine result or resource drain.
+        pass
+
+
+def publish_report(recorder, result, mode, enabled, error=None):
+    if recorder is None:return
+    try:
+        module=records_module()
+        report=recorder.finish(result,error=error,remaining=len(descendants(os.getpid())))
+        if enabled and module.valid_report(report):
+            frame={'protocolVersion':1 if mode=='--backend' else 2,'type':'session-report','report':report}
+            if mode=='--auto':sys.stdout.write('RO_INSTALLER_SESSION_REPORT ')
+            sys.stdout.write(json.dumps(frame,separators=(',',':'))+'\n')
+            sys.stdout.flush()
+    except Exception:
+        warn('SESSION_REPORT_UNAVAILABLE')
+    finally:
+        try:recorder.close()
+        except Exception:pass
 
 
 def helper_module():
@@ -147,7 +188,8 @@ def verify_mount_target(target):
 
 
 class Supervisor:
-    def __init__(self, gate, lease, before, namespace, directory):
+    def __init__(self, gate, lease, before, namespace, directory, recorder=None):
+        self.recorder = recorder
         self.gate, self.lease = gate, lease
         self.before, self.namespace = before, namespace
         self.directory = directory
@@ -172,6 +214,12 @@ class Supervisor:
                 continue
             except OSError:
                 break
+            # Completed telemetry/control requests must not accumulate one
+            # retained Thread object per event during a long installation.
+            self.threads = [worker for worker in self.threads if worker.is_alive()]
+            if len(self.threads) >= 32:
+                connection.close()
+                continue
             thread = threading.Thread(target=self.client, args=(connection,))
             self.threads.append(thread)
             thread.start()
@@ -208,6 +256,18 @@ class Supervisor:
                         emit({'device':identity.public()})
                     elif op == 'idle' and set(request) == {'op'}:
                         emit({'idle':descendants(os.getpid()) == {self.engine.pid}})
+                    elif op == 'observe' and set(request) == {'op','event'}:
+                        recorded=False
+                        if self.recorder is not None:
+                            try:recorded=self.recorder.observe(request['event'])
+                            except Exception:pass
+                        emit({'recorded':recorded})
+                    elif op == 'outcome' and set(request) == {'op','outcome'}:
+                        recorded=False
+                        if self.recorder is not None:
+                            try:recorded=self.recorder.outcome(request['outcome'])
+                            except Exception:pass
+                        emit({'recorded':recorded})
                     elif op == 'command':
                         self.command(request, emit)
                     else:
@@ -232,11 +292,13 @@ class Supervisor:
         if command in ('mount','umount'):
             if not args:raise RuntimeError('missing mount target')
             verify_mount_target(args[-1])
+        measured=time.monotonic_ns()
         try:
             process = subprocess.Popen([command,*args], stdin=subprocess.PIPE if request['stdin'] is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ROOT_ENV, close_fds=True, pass_fds=(self.lease,),
                 text=True,encoding='utf-8',errors='replace')
         except OSError:
+            record_event(self.recorder,'command.end',operation='unclassified',status='failed',duration=0,code=-1,error='COMMAND_FAILED')
             emit({'started':False,'exitCode':-1})
             return
         errors = []
@@ -266,6 +328,11 @@ class Supervisor:
                 status=-125
             for thread in pumps:thread.join()
             if errors:raise RuntimeError('command transport lost')
+            record_event(self.recorder,'command.end',
+                stage=self.recorder.current_stage if self.recorder else None,
+                operation=self.recorder.current_operation if self.recorder else 'unclassified',
+                status='success' if status==0 else 'failed',duration=min(86400000,max(0,(time.monotonic_ns()-measured)//1000000)),
+                code=status,error=None if status==0 else 'COMMAND_FAILED')
             emit({'started':True,'exitCode':status})
         finally:
             if process.poll() is None:
@@ -301,6 +368,8 @@ class Supervisor:
 
 
 def main():
+    sys.dont_write_bytecode=True
+    started_ns=time.monotonic_ns()
     if os.geteuid()!=0 or sys.argv[1:] not in (['--backend'],['--auto']):
         return 9
     mode=sys.argv[1]
@@ -320,21 +389,50 @@ def main():
     if mode=='--auto':
         env.update({key:os.environ[key] for key in AUTO_ENV if key in os.environ})
         if not env.get('RO_INSTALLER_AUTO_PROFILE'):return 9
+    recorder=None
+    result=9
+    error=None
+    mode_report=mode=='--auto' or os.environ.get('RO_INSTALLER_SESSION_REPORT')=='2'
+    reboot=mode=='--auto' and os.environ.get('RO_INSTALLER_AUTO_REBOOT','').strip().lower() in ('1','true','yes','on')
+    if mode=='--auto':env['RO_INSTALLER_AUTO_REBOOT']='0'
     try:
         os.umask(0o077)
         if os.getpgrp()!=os.getpid():os.setsid()
         with session_lock(gate,mode) as lease:
-            before,namespace=private_namespace()
+            try:recorder=records_module().Recorder(started_ns=started_ns)
+            except Exception:pass
+            record_event(recorder,'session.start',duration=0)
+            try:
+                before,namespace=private_namespace()
+            except Exception:
+                error='NAMESPACE_FAILED'
+                raise
+            record_event(recorder,'namespace.end',operation='namespace',status='success',duration=0)
             directory=tempfile.mkdtemp(prefix='session-',dir=gate.LOCK_DIRECTORY)
             try:
-                session=Supervisor(gate,lease,before,namespace,directory)
+                session=Supervisor(gate,lease,before,namespace,directory,recorder=recorder)
                 env[SESSION_ENV]=session.path
-                return session.run(argv,env)
+                result=session.run(argv,env)
             finally:
                 shutil.rmtree(directory)
+            # Checkpoint and publish before optional reboot, with the original
+            # installation lease still held. The engine cannot reboot first.
+            publish_report(recorder,result,mode,mode_report,error)
+            recorder=None
+            if reboot and result==0:
+                try:
+                    subprocess.run(['/usr/bin/systemctl','reboot'],env=ROOT_ENV,
+                        pass_fds=(lease,),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,timeout=30,check=False)
+                except (OSError,subprocess.TimeoutExpired):
+                    warn('AUTO_REBOOT_FAILED')
+                    result=1
     except Exception:
-        sys.stderr.write('Installer session initialization/finalization failed.\n')
-        return 9
+        warn('SESSION_INITIALIZATION_FAILED')
+        result=9
+    finally:
+        publish_report(recorder,result,mode,mode_report,error)
+    return result
 
 
 if __name__=='__main__':

@@ -1,3 +1,4 @@
+import '../install_observation.dart';
 import '../command_runner.dart';
 import '../mount_session.dart';
 import '../install_localizer.dart';
@@ -21,6 +22,7 @@ class StageContext {
     this.isMock = false,
     this.beforeFirstMutation,
     this.mountSession,
+    this.observation,
   });
 
   /// Kurulum yapılandırma verisi (disk, storage layout, Installer UI language hint)
@@ -52,6 +54,7 @@ class StageContext {
   final bool isMock;
   final Future<void> Function()? beforeFirstMutation;
   final MountSession? mountSession;
+  final InstallObservation? observation;
 
   String t(
     String key,

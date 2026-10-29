@@ -82,7 +82,7 @@ class FileCopyStage {
       '/mnt/', // Hedef
     ];
 
-    if (!await _runChecked(ctx, 'rsync', rsyncArgs)) {
+    if (!await _copy(ctx, 'copy.main', rsyncArgs)) {
       return StageResult.fail(
         'Ana dosya aktarımı başarısız; eksik veya kısmi kopya kabul edilmedi.',
       );
@@ -107,7 +107,7 @@ class FileCopyStage {
     if (!await _runChecked(ctx, 'mkdir', ['-p', '/mnt$dir'])) {
       return StageResult.fail('EFI hedef dizini oluşturulamadı: $dir');
     }
-    if (!await _runChecked(ctx, 'rsync', [
+    if (!await _copy(ctx, 'copy.efi', [
       '-aA',
       '--numeric-ids',
       '--no-xattrs',
@@ -148,6 +148,20 @@ class FileCopyStage {
     } catch (_) {
       return false;
     }
+  }
+
+  Future<bool> _copy(
+    StageContext ctx,
+    String operation,
+    List<String> args,
+  ) async {
+    final observer = ctx.observation;
+    if (observer == null) return _runChecked(ctx, 'rsync', args);
+    return observer.span(
+      operation,
+      () => _runChecked(ctx, 'rsync', args),
+      success: (ok) => ok,
+    );
   }
 
   Future<bool> _runChecked(

@@ -45,6 +45,7 @@ class RecordTests(unittest.TestCase):
         self.assertTrue(r.valid_report(rec.report))
     def test_existing_unsafe_directory_refused_without_chmod(self):
         self.path.mkdir(mode=0o755)
+        self.path.chmod(0o755)
         rec=self.recorder();self.assertEqual(rec.report['logStatus'],'unavailable')
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode),0o755)
         self.assertEqual(list(self.path.iterdir()),[])
@@ -63,6 +64,12 @@ class RecordTests(unittest.TestCase):
             self.assertEqual(rec.report['logStatus'],'failed');rec.close()
             # Keep the poisoned store as evidence; next iteration uses a fresh one.
             self.path=Path(self.temp.name)/'records-next'
+    def test_fifo_summary_refused_without_blocking(self):
+        rec=self.recorder();summary=self.path/rec.sid/'summary.json';summary.unlink()
+        os.mkfifo(summary,0o600)
+        self.assertFalse(rec.checkpoint())
+        self.assertEqual(rec.report['logStatus'],'failed')
+
     def test_enospc_and_short_write_are_separate_logging_errors(self):
         for error in [OSError(errno.ENOSPC,'secret sentinel'),PermissionError('secret sentinel'),RuntimeError('secret sentinel')]:
             rec=self.recorder()

@@ -4,6 +4,7 @@ import 'install_localizer.dart';
 /// Kurulum hata verdiğinde, hatanın nedenini teşhis edebilmek için
 /// sistem durumunun (disk, mount, boot dosyaları vb.) kaydını tutan servis.
 class InstallArtifactCollector {
+  static const String structuredContractVersion = '2026-10-29.1';
   static const String diagnosticContractVersion = '2026-06-26.1';
   static const List<String> diagnosticSectionIds = [
     'disk-layout',
@@ -37,8 +38,16 @@ class InstallArtifactCollector {
   Future<void> collectDiagnostics(
     void Function(String) onLog, {
     bool isMock = false,
+    bool safeOnly = false,
     InstallLocalizer localizer = const InstallLocalizer(),
   }) async {
+    if (safeOnly) {
+      // Failure/class/cleanup details come from typed InstallOutcome and the
+      // session inventory. Do not automatically dump host journals/file content.
+      onLog('[ARTIFACT_CONTRACT] version=$diagnosticContractVersion');
+      onLog('[ARTIFACT_SECTION] id=structured-outcome');
+      return;
+    }
     String t(String key, String fallback) => localizer.t(key, fallback);
 
     onLog('');

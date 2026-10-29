@@ -16,7 +16,61 @@ const _schemaJson = r'''
     "copy.efi",
     "diagnostics",
     "cleanup",
-    "engine"
+    "engine",
+    "preflight.tool.rsync",
+    "preflight.tool.findmnt",
+    "preflight.tool.mount",
+    "preflight.tool.umount",
+    "preflight.tool.lsblk",
+    "preflight.tool.blockdev",
+    "preflight.tool.wipefs",
+    "preflight.tool.partprobe",
+    "preflight.tool.udevadm",
+    "preflight.tool.mkfs.fat",
+    "preflight.tool.mkfs.btrfs",
+    "preflight.tool.btrfs",
+    "preflight.tool.chroot",
+    "preflight.tool.blkid",
+    "preflight.tool.sh",
+    "preflight.tool.bash",
+    "preflight.tool.test",
+    "preflight.tool.mkdir",
+    "preflight.tool.rm",
+    "preflight.tool.cp",
+    "preflight.tool.cat",
+    "preflight.tool.sed",
+    "preflight.tool.awk",
+    "preflight.tool.grep",
+    "preflight.tool.find",
+    "preflight.tool.sort",
+    "preflight.tool.tee",
+    "preflight.tool.chmod",
+    "preflight.tool.readlink",
+    "preflight.tool.dirname",
+    "preflight.tool.basename",
+    "preflight.tool.sync",
+    "preflight.tool.systemd-machine-id-setup",
+    "preflight.tool.dracut",
+    "preflight.tool.kernel-install",
+    "preflight.tool.depmod",
+    "preflight.tool.modprobe",
+    "preflight.tool.grub2-mkconfig",
+    "preflight.tool.efibootmgr",
+    "preflight.gpt.sgdisk",
+    "preflight.gpt.parted",
+    "preflight.source",
+    "preflight.file.os-release",
+    "preflight.file.systemd",
+    "preflight.file.shim",
+    "preflight.file.grub",
+    "preflight.metadata",
+    "preflight.capacity",
+    "preflight.btrfs",
+    "preflight.kernels",
+    "bootloader.dracut",
+    "bootloader.kernel-install",
+    "bootloader.grub-config",
+    "cleanup.verify"
   ],
   "errors": [
     "UNSUPPORTED_MODE",
@@ -37,7 +91,9 @@ const _schemaJson = r'''
     "STAGE_6_FAILED",
     "STAGE_7_FAILED",
     "STAGE_8_FAILED",
-    "STAGE_9_FAILED"
+    "STAGE_9_FAILED",
+    "OBSERVATION_INCOMPLETE",
+    "COMMAND_OUTPUT_LIMIT"
   ],
   "limits": {
     "eventBytes": 1024,
@@ -61,7 +117,8 @@ const _schemaJson = r'''
           "span.start",
           "span.end",
           "command.end",
-          "engine.end"
+          "engine.end",
+          "capture.failed"
         ]
       ],
       "stageId": [
@@ -84,7 +141,61 @@ const _schemaJson = r'''
           "copy.efi",
           "diagnostics",
           "cleanup",
-          "engine"
+          "engine",
+          "preflight.tool.rsync",
+          "preflight.tool.findmnt",
+          "preflight.tool.mount",
+          "preflight.tool.umount",
+          "preflight.tool.lsblk",
+          "preflight.tool.blockdev",
+          "preflight.tool.wipefs",
+          "preflight.tool.partprobe",
+          "preflight.tool.udevadm",
+          "preflight.tool.mkfs.fat",
+          "preflight.tool.mkfs.btrfs",
+          "preflight.tool.btrfs",
+          "preflight.tool.chroot",
+          "preflight.tool.blkid",
+          "preflight.tool.sh",
+          "preflight.tool.bash",
+          "preflight.tool.test",
+          "preflight.tool.mkdir",
+          "preflight.tool.rm",
+          "preflight.tool.cp",
+          "preflight.tool.cat",
+          "preflight.tool.sed",
+          "preflight.tool.awk",
+          "preflight.tool.grep",
+          "preflight.tool.find",
+          "preflight.tool.sort",
+          "preflight.tool.tee",
+          "preflight.tool.chmod",
+          "preflight.tool.readlink",
+          "preflight.tool.dirname",
+          "preflight.tool.basename",
+          "preflight.tool.sync",
+          "preflight.tool.systemd-machine-id-setup",
+          "preflight.tool.dracut",
+          "preflight.tool.kernel-install",
+          "preflight.tool.depmod",
+          "preflight.tool.modprobe",
+          "preflight.tool.grub2-mkconfig",
+          "preflight.tool.efibootmgr",
+          "preflight.gpt.sgdisk",
+          "preflight.gpt.parted",
+          "preflight.source",
+          "preflight.file.os-release",
+          "preflight.file.systemd",
+          "preflight.file.shim",
+          "preflight.file.grub",
+          "preflight.metadata",
+          "preflight.capacity",
+          "preflight.btrfs",
+          "preflight.kernels",
+          "bootloader.dracut",
+          "bootloader.kernel-install",
+          "bootloader.grub-config",
+          "cleanup.verify"
         ]
       ],
       "status": [
@@ -137,7 +248,9 @@ const _schemaJson = r'''
             "STAGE_6_FAILED",
             "STAGE_7_FAILED",
             "STAGE_8_FAILED",
-            "STAGE_9_FAILED"
+            "STAGE_9_FAILED",
+            "OBSERVATION_INCOMPLETE",
+            "COMMAND_OUTPUT_LIMIT"
           ]
         ]
       ]
@@ -189,7 +302,9 @@ const _schemaJson = r'''
             "STAGE_6_FAILED",
             "STAGE_7_FAILED",
             "STAGE_8_FAILED",
-            "STAGE_9_FAILED"
+            "STAGE_9_FAILED",
+            "OBSERVATION_INCOMPLETE",
+            "COMMAND_OUTPUT_LIMIT"
           ]
         ]
       ],
@@ -254,7 +369,8 @@ const _schemaJson = r'''
           "span.start",
           "span.end",
           "command.end",
-          "engine.end"
+          "engine.end",
+          "capture.failed"
         ]
       ],
       "stageId": [
@@ -277,7 +393,61 @@ const _schemaJson = r'''
           "copy.efi",
           "diagnostics",
           "cleanup",
-          "engine"
+          "engine",
+          "preflight.tool.rsync",
+          "preflight.tool.findmnt",
+          "preflight.tool.mount",
+          "preflight.tool.umount",
+          "preflight.tool.lsblk",
+          "preflight.tool.blockdev",
+          "preflight.tool.wipefs",
+          "preflight.tool.partprobe",
+          "preflight.tool.udevadm",
+          "preflight.tool.mkfs.fat",
+          "preflight.tool.mkfs.btrfs",
+          "preflight.tool.btrfs",
+          "preflight.tool.chroot",
+          "preflight.tool.blkid",
+          "preflight.tool.sh",
+          "preflight.tool.bash",
+          "preflight.tool.test",
+          "preflight.tool.mkdir",
+          "preflight.tool.rm",
+          "preflight.tool.cp",
+          "preflight.tool.cat",
+          "preflight.tool.sed",
+          "preflight.tool.awk",
+          "preflight.tool.grep",
+          "preflight.tool.find",
+          "preflight.tool.sort",
+          "preflight.tool.tee",
+          "preflight.tool.chmod",
+          "preflight.tool.readlink",
+          "preflight.tool.dirname",
+          "preflight.tool.basename",
+          "preflight.tool.sync",
+          "preflight.tool.systemd-machine-id-setup",
+          "preflight.tool.dracut",
+          "preflight.tool.kernel-install",
+          "preflight.tool.depmod",
+          "preflight.tool.modprobe",
+          "preflight.tool.grub2-mkconfig",
+          "preflight.tool.efibootmgr",
+          "preflight.gpt.sgdisk",
+          "preflight.gpt.parted",
+          "preflight.source",
+          "preflight.file.os-release",
+          "preflight.file.systemd",
+          "preflight.file.shim",
+          "preflight.file.grub",
+          "preflight.metadata",
+          "preflight.capacity",
+          "preflight.btrfs",
+          "preflight.kernels",
+          "bootloader.dracut",
+          "bootloader.kernel-install",
+          "bootloader.grub-config",
+          "cleanup.verify"
         ]
       ],
       "status": [
@@ -330,7 +500,9 @@ const _schemaJson = r'''
             "STAGE_6_FAILED",
             "STAGE_7_FAILED",
             "STAGE_8_FAILED",
-            "STAGE_9_FAILED"
+            "STAGE_9_FAILED",
+            "OBSERVATION_INCOMPLETE",
+            "COMMAND_OUTPUT_LIMIT"
           ]
         ]
       ]
@@ -448,7 +620,9 @@ const _schemaJson = r'''
             "STAGE_6_FAILED",
             "STAGE_7_FAILED",
             "STAGE_8_FAILED",
-            "STAGE_9_FAILED"
+            "STAGE_9_FAILED",
+            "OBSERVATION_INCOMPLETE",
+            "COMMAND_OUTPUT_LIMIT"
           ]
         ]
       ],
@@ -497,7 +671,8 @@ const _schemaJson = r'''
             "LOG_STORE_FULL",
             "LOG_WRITE_FAILED",
             "LOG_LIMIT",
-            "LOG_SCHEMA_INVALID"
+            "LOG_SCHEMA_INVALID",
+            "LOG_OBSERVATION_LOST"
           ]
         ]
       ],
@@ -556,7 +731,9 @@ const _schemaJson = r'''
             "STAGE_6_FAILED",
             "STAGE_7_FAILED",
             "STAGE_8_FAILED",
-            "STAGE_9_FAILED"
+            "STAGE_9_FAILED",
+            "OBSERVATION_INCOMPLETE",
+            "COMMAND_OUTPUT_LIMIT"
           ]
         ]
       ],
@@ -566,6 +743,95 @@ const _schemaJson = r'''
           "int",
           0,
           16384
+        ]
+      ],
+      "startedAtUtc": [
+        "utc"
+      ],
+      "finishedAtUtc": [
+        "nullable",
+        [
+          "utc"
+        ]
+      ],
+      "lastFailedOperation": [
+        "nullable",
+        [
+          "enum",
+          [
+            "unclassified",
+            "stage.command",
+            "session",
+            "namespace",
+            "preflight",
+            "copy.main",
+            "copy.efi",
+            "diagnostics",
+            "cleanup",
+            "engine",
+            "preflight.tool.rsync",
+            "preflight.tool.findmnt",
+            "preflight.tool.mount",
+            "preflight.tool.umount",
+            "preflight.tool.lsblk",
+            "preflight.tool.blockdev",
+            "preflight.tool.wipefs",
+            "preflight.tool.partprobe",
+            "preflight.tool.udevadm",
+            "preflight.tool.mkfs.fat",
+            "preflight.tool.mkfs.btrfs",
+            "preflight.tool.btrfs",
+            "preflight.tool.chroot",
+            "preflight.tool.blkid",
+            "preflight.tool.sh",
+            "preflight.tool.bash",
+            "preflight.tool.test",
+            "preflight.tool.mkdir",
+            "preflight.tool.rm",
+            "preflight.tool.cp",
+            "preflight.tool.cat",
+            "preflight.tool.sed",
+            "preflight.tool.awk",
+            "preflight.tool.grep",
+            "preflight.tool.find",
+            "preflight.tool.sort",
+            "preflight.tool.tee",
+            "preflight.tool.chmod",
+            "preflight.tool.readlink",
+            "preflight.tool.dirname",
+            "preflight.tool.basename",
+            "preflight.tool.sync",
+            "preflight.tool.systemd-machine-id-setup",
+            "preflight.tool.dracut",
+            "preflight.tool.kernel-install",
+            "preflight.tool.depmod",
+            "preflight.tool.modprobe",
+            "preflight.tool.grub2-mkconfig",
+            "preflight.tool.efibootmgr",
+            "preflight.gpt.sgdisk",
+            "preflight.gpt.parted",
+            "preflight.source",
+            "preflight.file.os-release",
+            "preflight.file.systemd",
+            "preflight.file.shim",
+            "preflight.file.grub",
+            "preflight.metadata",
+            "preflight.capacity",
+            "preflight.btrfs",
+            "preflight.kernels",
+            "bootloader.dracut",
+            "bootloader.kernel-install",
+            "bootloader.grub-config",
+            "cleanup.verify"
+          ]
+        ]
+      ],
+      "lastExitCode": [
+        "nullable",
+        [
+          "int",
+          -2147483648,
+          2147483647
         ]
       ]
     }

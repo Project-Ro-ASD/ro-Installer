@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "11111111111111111111111111111111",
+  "terminalStatus": "success",
+  "startedAtUtc": "2026-10-29T12:00:00.000Z",
+  "finishedAtUtc": "2026-10-29T12:00:01.000Z",
+  "failedStage": null,
+  "lastSuccessfulStage": 9,
+  "primaryError": null,
+  "cleanupStatus": "success",
+  "remainingResources": 0,
+  "sessionError": null,
+  "remainingSessionResources": null,
+  "engineDurationMs": 900,
+  "supervisorDurationMs": 920,
+  "logStatus": "complete",
+  "logError": null,
+  "stages": [
+    {
+      "stageId": 1,
+      "status": "success",
+      "durationMs": 100
+    },
+    {
+      "stageId": 2,
+      "status": "success",
+      "durationMs": 100
+    },
+    {
+      "stageId": 3,
+      "status": "success",
+      "durationMs": 100
+    },
+    {
+      "stageId": 4,
+      "status": "success",
+      "durationMs": 100
+    },
+    {
+      "stageId": 5,
+      "status": "success",
+      "durationMs": 100
+    },
+    {
+      "stageId": 6,
+      "status": "success",
+      "durationMs": 100
+    },
+    {
+      "stageId": 7,
+      "status": "success",
+      "durationMs": 100
+    },
+    {
+      "stageId": 8,
+      "status": "success",
+      "durationMs": 100
+    },
+    {
+      "stageId": 9,
+      "status": "success",
+      "durationMs": 100
+    }
+  ],
+  "spans": [
+    {
+      "operationId": "preflight",
+      "status": "success",
+      "durationMs": 10
+    },
+    {
+      "operationId": "copy.main",
+      "status": "success",
+      "durationMs": 10
+    },
+    {
+      "operationId": "copy.efi",
+      "status": "success",
+      "durationMs": 10
+    },
+    {
+      "operationId": "diagnostics",
+      "status": "success",
+      "durationMs": 10
+    },
+    {
+      "operationId": "cleanup",
+      "status": "success",
+      "durationMs": 10
+    },
+    {
+      "operationId": "engine",
+      "status": "success",
+      "durationMs": 10
+    }
+  ],
+  "bytesTransferred": null,
+  "throughput": null,
+  "lastFailedOperation": null,
+  "lastExitCode": null
+}

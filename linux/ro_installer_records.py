@@ -8,6 +8,7 @@ import datetime
 import errno
 import fcntl
 import json
+import itertools
 import os
 from pathlib import Path
 import re
@@ -19,7 +20,7 @@ import time
 SCHEMA = json.loads(Path(__file__).with_name('ro-installer-observability.json').read_text())
 LIMITS = SCHEMA['limits']
 STORE = '/run/ro-installer/records'
-SPAN_IDS = ('preflight', 'copy.main', 'copy.efi', 'diagnostics', 'cleanup', 'engine')
+SPAN_IDS = tuple(SCHEMA['objects']['span']['operationId'][1])
 
 
 def validate(value, rule):
@@ -63,6 +64,12 @@ def valid_report(value):
     if any((s['status'] == 'notStarted') != (s['durationMs'] is None)
            for s in value['stages'] + value['spans']):
         return False
+    if value['terminalStatus']=='success' and (
+            value['failedStage'] is not None or value['primaryError'] is not None
+            or value['cleanupStatus']!='success' or value['remainingResources']!=0
+            or value['lastSuccessfulStage']!=9 or value['engineDurationMs'] is None
+            or any(s['status']!='success' for s in value['stages'])):
+        return False
     return True
 
 
@@ -74,14 +81,14 @@ def trusted(fd, uid, directory=False):
     info = os.fstat(fd)
     expected = 0o700 if directory else 0o600
     if ((not stat.S_ISDIR(info.st_mode) if directory else not stat.S_ISREG(info.st_mode))
-            or info.st_uid != uid or info.st_gid != os.getegid()
+            or info.st_uid != uid or info.st_gid != (0 if uid == 0 else os.getegid())
             or stat.S_IMODE(info.st_mode) != expected
             or not directory and info.st_nlink != 1):
         raise PermissionError('Unsafe record object')
     return info
 
 
-def open_store(path, uid):
+def open_store(path, uid, *, test_store=False):
     # Production always passes STORE. The injectable path/uid are test-only.
     current = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
@@ -108,7 +115,7 @@ def open_store(path, uid):
             elif info.st_uid not in (0, uid) or stat.S_IMODE(info.st_mode) & 0o022:
                 # /tmp is allowed only as an ancestor of a private test tree;
                 # production has no writable ancestors.
-                if not (uid != 0 and stat.S_ISVTX & info.st_mode and info.st_uid == 0):
+                if not (test_store and stat.S_ISVTX & info.st_mode and info.st_uid == 0):
                     os.close(child)
                     raise PermissionError('Unsafe ancestor')
             os.close(current)
@@ -121,23 +128,28 @@ def open_store(path, uid):
 
 class Recorder:
     def __init__(self, *, directory=STORE, owner_uid=0, limits=None,
-                 monotonic=time.monotonic_ns, write=os.write):
+                 monotonic=time.monotonic_ns, write=os.write, started_ns=None):
         self.sid = secrets.token_hex(16)
         self.limits = dict(LIMITS if limits is None else limits)
         self.monotonic, self.write = monotonic, write
-        self.started = monotonic()
+        self.started = monotonic() if started_ns is None else started_ns
         self.lock = threading.RLock()
         self.fd = self.directory_fd = None
         self.events = self.bytes = 0
         self.io_calls = 0
         self.terminal = False
+        self.observed_starts = {}
+        self.operation_stack = []
         self.current_stage = None
         self.current_operation = 'unclassified'
         self.report = {
             'schemaVersion': 1, 'sessionId': self.sid, 'terminalStatus': 'running',
+            'startedAtUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z'),
+            'finishedAtUtc': None,
             'failedStage': None, 'lastSuccessfulStage': 0, 'primaryError': None,
             'cleanupStatus': 'notRun', 'remainingResources': None,
             'sessionError': None, 'remainingSessionResources': None,
+            'lastFailedOperation': None, 'lastExitCode': None,
             'engineDurationMs': None, 'supervisorDurationMs': None,
             'logStatus': 'recording', 'logError': None,
             'stages': [{'stageId': i, 'status': 'notStarted', 'durationMs': None} for i in range(1, 10)],
@@ -146,11 +158,11 @@ class Recorder:
         }
         store = reserve = None
         try:
-            store = open_store(directory, owner_uid)
+            store = open_store(directory, owner_uid, test_store=directory != STORE)
             try:
                 reserve = os.open('.store.lock', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=store)
             except FileExistsError:
-                reserve = os.open('.store.lock', os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=store)
+                reserve = os.open('.store.lock', os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=store)
             trusted(reserve, owner_uid)
             fcntl.flock(reserve, fcntl.LOCK_EX | fcntl.LOCK_NB)
             # Reservation uses full per-session caps (including a temporary
@@ -168,13 +180,13 @@ class Recorder:
                         size = 0
                         active = False
                         with os.scandir(child) as contents:
-                            members = list(contents)
+                            members = list(itertools.islice(contents,4))
                         if len(members) > 3:
                             raise PermissionError('Unexpected session contents')
                         for member in members:
                             if member.name not in ('events.jsonl','summary.json') and not re.fullmatch(r'\.summary-[0-9a-f]{32}', member.name):
                                 raise PermissionError('Unexpected record member')
-                            item_fd = os.open(member.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=child)
+                            item_fd = os.open(member.name,os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=child)
                             try:
                                 info = trusted(item_fd,owner_uid)
                                 bound = self.limits['sessionBytes'] if member.name == 'events.jsonl' else self.limits['summaryBytes']
@@ -235,6 +247,22 @@ class Recorder:
             if self.terminal:
                 return False
             kind = value['eventType']
+            if kind.startswith('span.'):
+                if kind=='span.start':
+                    if len(self.operation_stack)>=16:
+                        self._failure('LOG_SCHEMA_INVALID')
+                        return False
+                    self.operation_stack.append(value['operationId'])
+                elif self.operation_stack and self.operation_stack[-1]==value['operationId']:
+                    self.operation_stack.pop()
+                self.current_operation=self.operation_stack[-1] if self.operation_stack else 'stage.command'
+            if kind=='command.end' and value['exitCode'] is not None and value['exitCode']!=0:
+                self.report.update(lastFailedOperation=value['operationId'],lastExitCode=value['exitCode'])
+            identity = ('stage',value['stageId']) if kind.startswith('stage.') else ('span',value['operationId'])
+            if kind.endswith('.start') and kind.startswith(('stage.','span.')):
+                self.observed_starts[identity]=self.monotonic()
+            elif kind.endswith('.end'):
+                self.observed_starts.pop(identity,None)
             stage = value['stageId']
             if kind.startswith('stage.') and stage is not None:
                 self.report['stages'][stage - 1].update(status=value['status'], durationMs=value['durationMs'])
@@ -242,7 +270,7 @@ class Recorder:
             if kind.startswith('span.') and value['operationId'] in SPAN_IDS:
                 item = self.report['spans'][SPAN_IDS.index(value['operationId'])]
                 item.update(status=value['status'], durationMs=value['durationMs'])
-                self.current_operation = value['operationId'] if kind == 'span.start' else 'stage.command'
+
             event = {'schemaVersion': 1, 'sessionId': self.sid, 'seq': self.events + 1,
                      'timestampUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
                      'processRole': role, **value}
@@ -276,7 +304,7 @@ class Recorder:
                 raise OSError(errno.EFBIG, 'Summary limit')
             # Existing summary must be our regular, singly-linked file.
             try:
-                previous = os.open('summary.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=self.directory_fd)
+                previous = os.open('summary.json', os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=self.directory_fd)
             except FileNotFoundError:
                 previous = None
             if previous is not None:
@@ -317,14 +345,27 @@ class Recorder:
         with self.lock:
             if self.terminal:
                 return self.report.copy()
-            self.report.update(sessionError=error, remainingSessionResources=remaining)
+            self.report.update(sessionError=error, remainingSessionResources=remaining,finishedAtUtc=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z'))
             if self.report['terminalStatus'] == 'running':
-                self.report.update(terminalStatus='incomplete', primaryError=error or 'ENGINE_CRASH', cleanupStatus='unknown')
+                if status==0:
+                    self.report.update(terminalStatus='unknown',primaryError=None,cleanupStatus='unknown',
+                                       sessionError='OBSERVATION_INCOMPLETE')
+                    if self.report['logStatus']=='recording':
+                        self.report.update(logStatus='incomplete',logError='LOG_OBSERVATION_LOST')
+                else:
+                    self.report.update(terminalStatus='failed' if error=='NAMESPACE_FAILED' else 'incomplete', primaryError=error or 'ENGINE_CRASH', cleanupStatus='notRun' if error=='NAMESPACE_FAILED' else 'unknown',remainingResources=0 if error=='NAMESPACE_FAILED' else None)
             elif status != 0 and self.report['terminalStatus'] == 'success':
-                self.report.update(terminalStatus='failed', primaryError=error or 'SESSION_FINALIZATION_FAILED')
+                self.report.update(terminalStatus='failed', primaryError=error or 'SESSION_FINALIZATION_FAILED',sessionError=error or 'SESSION_FINALIZATION_FAILED')
             for item in self.report['stages'] + self.report['spans']:
                 if item['status'] == 'running':
-                    item['status'] = 'interrupted'
+                    stage=item.get('stageId')
+                    operation=item.get('operationId','stage.command')
+                    key=('stage',stage) if stage is not None else ('span',operation)
+                    start=self.observed_starts.get(key,self.monotonic())
+                    duration=max(0,min(86400000,(self.monotonic()-start)//1000000))
+                    self.observe({'eventType':'stage.end' if stage is not None else 'span.end','stageId':stage,
+                                  'operationId':operation,'status':'interrupted','durationMs':duration,
+                                  'exitCode':None,'errorCode':error or 'ENGINE_CRASH'},role='supervisor')
             self.report['supervisorDurationMs'] = self.elapsed()
             self.observe({'eventType': 'session.end', 'stageId': None, 'operationId': 'session',
                           'status': 'success' if status == 0 else 'failed', 'durationMs': self.elapsed(),
