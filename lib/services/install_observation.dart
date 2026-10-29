@@ -124,7 +124,6 @@ class InstallObservation {
       await endStage(stage, false, error: primary);
     }
     final duration = _ms(_started);
-    await event('span.start', operation: 'engine', duration: 0);
     await event(
       'span.end',
       operation: 'engine',

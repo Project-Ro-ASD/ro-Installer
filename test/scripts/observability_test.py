@@ -132,6 +132,20 @@ print(x.sid,flush=True);time.sleep(60)
         rec.write=mock.Mock(side_effect=OSError(errno.ENOSPC,'fixture'))
         self.assertFalse(rec.checkpoint());self.assertEqual(path.read_bytes(),before)
         self.assertEqual(len(list(path.parent.iterdir())),2)
+    def test_crash_keeps_observed_last_success_and_interrupted_stage(self):
+        rec=self.recorder()
+        for stage,kind,status in [(1,'stage.start','running'),(1,'stage.end','success'),(2,'stage.start','running')]:
+            rec.observe({'eventType':kind,'stageId':stage,'operationId':'stage.command',
+                         'status':status,'durationMs':0,'exitCode':None,'errorCode':None})
+        report=rec.finish(-9)
+        self.assertEqual(report['lastSuccessfulStage'],1)
+        self.assertEqual(report['failedStage'],2)
+        self.assertEqual(report['stages'][0]['status'],'success')
+        self.assertEqual(report['stages'][1]['status'],'interrupted')
+        self.assertEqual(report['primaryError'],'ENGINE_CRASH')
+        self.assertTrue(all(s['status']=='notStarted' for s in report['stages'][2:]))
+        self.assertTrue(r.valid_report(report))
+
     def test_schema_generated_from_one_source(self):
         completed=subprocess.run([sys.executable,str(ROOT/'scripts/generate-observability-schema.py'),'--check'],capture_output=True,text=True)
         self.assertEqual(completed.returncode,0,completed.stderr)

@@ -188,6 +188,7 @@ class TransportLeaseTests(unittest.TestCase):
                             thread.join(5)
                 self.assertEqual(statuses,[9] if crash else [0])
                 report=recorder.finish(statuses[0],remaining=0)
+                self.assertEqual(next(s for s in report['spans'] if s['operationId']=='engine')['status'],'interrupted')
                 if crash:
                     self.assertEqual(report['terminalStatus'],'incomplete')
                     self.assertEqual(report['primaryError'],'ENGINE_CRASH')

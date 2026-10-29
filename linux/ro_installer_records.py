@@ -266,6 +266,11 @@ class Recorder:
             stage = value['stageId']
             if kind.startswith('stage.') and stage is not None:
                 self.report['stages'][stage - 1].update(status=value['status'], durationMs=value['durationMs'])
+                if kind == 'stage.end':
+                    if value['status'] == 'success':
+                        self.report['lastSuccessfulStage'] = stage
+                    elif value['status'] in ('failed', 'interrupted') and self.report['failedStage'] is None:
+                        self.report['failedStage'] = stage
                 self.current_stage = stage if kind == 'stage.start' else None
             if kind.startswith('span.') and value['operationId'] in SPAN_IDS:
                 item = self.report['spans'][SPAN_IDS.index(value['operationId'])]

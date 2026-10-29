@@ -345,6 +345,7 @@ class Supervisor:
         # Starts after namespace/private propagation; no engine-controlled env/argv from GUI.
         self.engine = subprocess.Popen(argv, stdin=sys.stdin.buffer,stdout=sys.stdout.buffer,
             stderr=sys.stderr.buffer,env=env,close_fds=True,pass_fds=(self.lease,))
+        record_event(self.recorder,'span.start',operation='engine',duration=0)
         server=threading.Thread(target=self.serve)
         server.start()
         try:
