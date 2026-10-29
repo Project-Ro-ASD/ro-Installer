@@ -182,12 +182,18 @@ Future<int> runAutoInstall(
     final line = '[DURUM] $message';
     stdout.writeln(line);
     statusHistory.add(message);
+    if (statusHistory.length > 1000) statusHistory.removeAt(0);
   }
 
   void pushLog(String message) {
-    final sanitized = _sanitizeAutoInstallLog(message);
+    final sanitized = exportSession == null
+        ? 'AUTO_DETAIL_SUPPRESSED'
+        : _sanitizeAutoInstallLog(message);
     stdout.writeln('[TEKNIK] $sanitized');
-    technicalLogs.add(sanitized);
+    if (exportSession != null) {
+      technicalLogs.add(sanitized);
+      if (technicalLogs.length > 3000) technicalLogs.removeAt(0);
+    }
   }
 
   try {
@@ -223,12 +229,12 @@ Future<int> runAutoInstall(
       stateMap['extraKernelArgs'] = extraKernelArgs;
     }
 
-    pushStatus(t('auto_profile_loaded', {'path': profilePath}));
+    pushStatus(t('auto_profile_loaded', {'path': '[profile]'}));
     pushStatus(
       t('auto_profile_summary', {
-        'disk': profile.selectedDisk,
-        'method': profile.partitionMethod,
-        'filesystem': profile.fileSystem,
+        'disk': '[target]',
+        'method': 'full',
+        'filesystem': 'btrfs',
       }),
     );
 
@@ -252,34 +258,34 @@ Future<int> runAutoInstall(
             );
 
     final finishedAt = DateTime.now();
-    try {
-      final exportResult =
-          await (exportSession ??
-              InstallLogExportService.instance.exportSession)(
-            startedAt: startedAt,
-            finishedAt: finishedAt,
-            success: success,
-            finalStatus: success
-                ? t('auto_install_success')
-                : t('auto_install_failure'),
-            statusHistory: statusHistory,
-            technicalLogs: technicalLogs,
-            installContext: {
-              ...profile.toJson(),
-              'autoInstallMode': true,
-              'vmTestMode': stateMap['vmTestMode'],
-            },
-          );
+    if (exportSession != null) {
+      try {
+        final exportResult = await exportSession(
+          startedAt: startedAt,
+          finishedAt: finishedAt,
+          success: success,
+          finalStatus: success
+              ? t('auto_install_success')
+              : t('auto_install_failure'),
+          statusHistory: statusHistory,
+          technicalLogs: technicalLogs,
+          installContext: {
+            ...profile.toJson(),
+            'autoInstallMode': true,
+            'vmTestMode': stateMap['vmTestMode'],
+          },
+        );
 
-      if (exportResult.success) {
-        pushLog('Oturum kaydi yazildi: ${exportResult.logPath}');
-        pushLog('Oturum ozeti yazildi: ${exportResult.summaryPath}');
-        pushLog('Oturum manifesti yazildi: ${exportResult.manifestPath}');
-      } else {
-        pushLog('Oturum disa aktarimi basarisiz: ${exportResult.error}');
+        if (exportResult.success) {
+          pushLog('Oturum kaydi yazildi: ${exportResult.logPath}');
+          pushLog('Oturum ozeti yazildi: ${exportResult.summaryPath}');
+          pushLog('Oturum manifesti yazildi: ${exportResult.manifestPath}');
+        } else {
+          pushLog('Oturum disa aktarimi basarisiz: ${exportResult.error}');
+        }
+      } catch (_) {
+        pushLog('Oturum disa aktarimi tamamlanamadi.');
       }
-    } catch (_) {
-      pushLog('Oturum disa aktarimi tamamlanamadi.');
     }
     if (!success) {
       pushStatus(t('auto_install_failed_done'));

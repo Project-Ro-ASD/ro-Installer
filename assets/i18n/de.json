@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "Zeitüberschreitung bei der Laufwerkserkennung. Bitte aktualisieren.",
   "disk_discovery_incompatibleJson": "Die Laufwerkserkennung lieferte eine nicht unterstützte Antwort.",
   "disk_discovery_topology": "Die Laufwerkstopologie konnte nicht sicher gelesen werden.",
-  "disk_discovery_partial": "Einige Laufwerke wurden ausgeschlossen, da sie nicht sicher gelesen werden konnten."
+  "disk_discovery_partial": "Einige Laufwerke wurden ausgeschlossen, da sie nicht sicher gelesen werden konnten.",
+  "install_backend_report_available": "Backend-Bericht ist zum Export bereit.",
+  "install_backend_report_unavailable": "Backend-Bericht ist nicht verfügbar. Das Installationsergebnis bleibt unverändert.",
+  "install_backend_report_invalid": "Backend-Bericht konnte nicht geprüft werden. Das Installationsergebnis bleibt unverändert.",
+  "install_backend_record_complete": "Geschützte Sitzungsprotokolle sind vollständig.",
+  "install_backend_record_incomplete": "Geschützte Sitzungsprotokolle sind unvollständig; der sichere Bericht kann exportiert werden."
 }

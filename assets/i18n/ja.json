@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "ディスク検出がタイムアウトしました。更新してください。",
   "disk_discovery_incompatibleJson": "ディスク検出で未対応の応答が返されました。",
   "disk_discovery_topology": "ディスク構成を安全に読み取れませんでした。",
-  "disk_discovery_partial": "安全に読み取れないディスクは一覧から除外されました。"
+  "disk_discovery_partial": "安全に読み取れないディスクは一覧から除外されました。",
+  "install_backend_report_available": "バックエンドレポートをエクスポートできます。",
+  "install_backend_report_unavailable": "バックエンドレポートは利用できません。インストール結果は変わりません。",
+  "install_backend_report_invalid": "バックエンドレポートを検証できませんでした。インストール結果は変わりません。",
+  "install_backend_record_complete": "保護されたセッション記録は完了しています。",
+  "install_backend_record_incomplete": "保護されたセッション記録は不完全です。安全なレポートをエクスポートできます。"
 }

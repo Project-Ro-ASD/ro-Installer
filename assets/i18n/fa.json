@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "مهلت شناسایی دیسک پایان یافت. فهرست را تازه‌سازی کنید.",
   "disk_discovery_incompatibleJson": "شناسایی دیسک پاسخ پشتیبانی‌نشده‌ای برگرداند.",
   "disk_discovery_topology": "ساختار دیسک‌ها به‌صورت امن خوانده نشد.",
-  "disk_discovery_partial": "برخی دیسک‌ها به دلیل ناممکن بودن خواندن امن حذف شدند."
+  "disk_discovery_partial": "برخی دیسک‌ها به دلیل ناممکن بودن خواندن امن حذف شدند.",
+  "install_backend_report_available": "گزارش بخش پشتی آمادهٔ خروجی گرفتن است.",
+  "install_backend_report_unavailable": "گزارش بخش پشتی در دسترس نیست. نتیجهٔ نصب تغییر نکرده است.",
+  "install_backend_report_invalid": "گزارش بخش پشتی تأیید نشد. نتیجهٔ نصب تغییر نکرده است.",
+  "install_backend_record_complete": "سوابق محافظت‌شدهٔ نشست کامل است.",
+  "install_backend_record_incomplete": "سوابق محافظت‌شدهٔ نشست ناقص است؛ می‌توانید گزارش امن را خروجی بگیرید."
 }

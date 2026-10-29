@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../services/command_runner.dart';
 import '../services/install_log_export_service.dart';
 import '../services/helper_client.dart';
+import '../services/session_report.dart';
 import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/nebula_ui.dart';
@@ -33,6 +34,9 @@ class _InstallingScreenState extends State<InstallingScreen>
   InstallationTerminalState _terminal = InstallationTerminalState.running;
   bool get _isFinished => _terminal != InstallationTerminalState.running;
   bool _isRebooting = false;
+  bool _isExporting = false;
+  SessionReport? _sessionReport;
+  String _reportStatus = 'unavailable';
 
   final List<String> _statusHistory = [];
   final List<String> _technicalLogs = [];
@@ -85,7 +89,7 @@ class _InstallingScreenState extends State<InstallingScreen>
     }
 
     setState(() {
-      _technicalLogs.add(logMsg);
+      _technicalLogs.add(SecretRedactor.redactText(logMsg));
       final overflow = _technicalLogs.length - _maxTechnicalLogEntries;
       if (overflow > 0) {
         _technicalLogs.removeRange(0, overflow);
@@ -187,7 +191,7 @@ class _InstallingScreenState extends State<InstallingScreen>
   }
 
   Future<void> _rebootSystem() async {
-    if (_isRebooting) {
+    if (_isRebooting || _isExporting) {
       return;
     }
 
@@ -252,10 +256,7 @@ class _InstallingScreenState extends State<InstallingScreen>
           state.fileSystem != 'btrfs') {
         throw const HelperException('MISSING_CONFIRMATION');
       }
-      await (widget.helperClient ?? HelperClient.instance).install(identity, (
-        progress,
-        messageKey,
-      ) {
+      void progressChanged(double progress, String messageKey) {
         if (!mounted) return;
         final status = state.t(messageKey);
         setState(() {
@@ -263,7 +264,21 @@ class _InstallingScreenState extends State<InstallingScreen>
           _statusText = status;
         });
         _pushStatus(status);
-      });
+      }
+
+      final client = widget.helperClient ?? HelperClient(protocolVersion: 2);
+      if (client.protocolVersion == 1) {
+        await client.install(identity, progressChanged);
+      } else {
+        await client.installWithReport(
+          identity,
+          progressChanged,
+          onReport: (report, status) {
+            _sessionReport = report;
+            _reportStatus = status;
+          },
+        );
+      }
       success = true;
     } on HelperException catch (error) {
       _pushLog('${state.t('helper_error')} (${error.code})');
@@ -272,6 +287,7 @@ class _InstallingScreenState extends State<InstallingScreen>
     }
     if (!mounted) return;
     setState(() {
+      _isExporting = true;
       _terminal = success
           ? InstallationTerminalState.succeeded
           : InstallationTerminalState.failed;
@@ -282,6 +298,16 @@ class _InstallingScreenState extends State<InstallingScreen>
       _slideTimer?.cancel();
     });
 
+    _pushLog(state.t('install_backend_report_$_reportStatus'));
+    if (_sessionReport != null) {
+      _pushLog(
+        state.t(
+          _sessionReport!.logStatus == 'complete'
+              ? 'install_backend_record_complete'
+              : 'install_backend_record_incomplete',
+        ),
+      );
+    }
     final finishedAt = DateTime.now();
     try {
       final exportResult =
@@ -294,6 +320,8 @@ class _InstallingScreenState extends State<InstallingScreen>
             statusHistory: _statusHistory,
             technicalLogs: _technicalLogs,
             installContext: {
+              if (_sessionReport != null) 'sessionReport': _sessionReport!.json,
+              'reportStatus': _reportStatus,
               'selectedDisk': state.selectedDisk,
               'partitionMethod': state.partitionMethod,
               'fileSystem': state.fileSystem,
@@ -319,6 +347,8 @@ class _InstallingScreenState extends State<InstallingScreen>
       }
     } catch (_) {
       _pushLog('[LOG] Oturum dışa aktarımı tamamlanamadı.');
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
     }
   }
 
@@ -368,7 +398,7 @@ class _InstallingScreenState extends State<InstallingScreen>
           success: success,
           isRebooting: _isRebooting,
           rebootLabel: state.t('restart'),
-          onReboot: _isFinished ? _rebootSystem : null,
+          onReboot: _isFinished && !_isExporting ? _rebootSystem : null,
           onInspectLogs: _showLogsDialog,
           slideImage: _slideImages[_currentSlide],
           slideCaption: state.t(_slideKeys[_currentSlide]),

@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "انتهت مهلة اكتشاف الأقراص. حدّث القائمة.",
   "disk_discovery_incompatibleJson": "أعاد اكتشاف الأقراص استجابة غير مدعومة.",
   "disk_discovery_topology": "تعذرت قراءة بنية الأقراص بأمان.",
-  "disk_discovery_partial": "استُبعدت بعض الأقراص لتعذر قراءتها بأمان."
+  "disk_discovery_partial": "استُبعدت بعض الأقراص لتعذر قراءتها بأمان.",
+  "install_backend_report_available": "تقرير الخلفية جاهز للتصدير.",
+  "install_backend_report_unavailable": "تقرير الخلفية غير متاح. لم تتغير نتيجة التثبيت.",
+  "install_backend_report_invalid": "تعذر التحقق من تقرير الخلفية. لم تتغير نتيجة التثبيت.",
+  "install_backend_record_complete": "سجلات الجلسة المحمية مكتملة.",
+  "install_backend_record_incomplete": "سجلات الجلسة المحمية غير مكتملة؛ يمكنك تصدير التقرير الآمن."
 }
