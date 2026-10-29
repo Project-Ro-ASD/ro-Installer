@@ -1,7 +1,60 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:ro_installer/services/session_command_runner.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ro_installer/services/command_runner.dart';
 
 void main() {
+  test('overflow observation timeout cannot hold the command result', () async {
+    final temp = Directory.systemTemp.createTempSync('p0-04-output-ipc-');
+    final path = '${temp.path}/socket';
+    final server = await ServerSocket.bind(
+      InternetAddress(path, type: InternetAddressType.unix),
+      0,
+    );
+    final clients = <Socket>[];
+    var observed = false;
+    final subscription = server.listen((socket) {
+      clients.add(socket);
+      socket
+          .cast<List<int>>()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen((line) async {
+            final request = jsonDecode(line) as Map;
+            if (request['op'] == 'command') {
+              for (var i = 0; i < 70; i++) {
+                socket.writeln(
+                  jsonEncode({'stream': 'stdout', 'data': 'x' * 16384}),
+                );
+              }
+              socket.writeln(jsonEncode({'started': true, 'exitCode': 0}));
+              await socket.flush();
+              await socket.close();
+            } else {
+              // Deliberately withhold the logging ACK, without changing the command.
+              observed = true;
+            }
+          });
+    });
+    try {
+      final result = await SessionCommandRunner(
+        path,
+      ).run('readonly-fixture', []).timeout(const Duration(seconds: 3));
+      expect(observed, isTrue);
+      expect(result.started, isTrue);
+      expect(result.exitCode, -126);
+      expect(result.stdout, isEmpty);
+      expect(result.stderr, 'COMMAND_OUTPUT_LIMIT');
+    } finally {
+      for (final socket in clients) {
+        socket.destroy();
+      }
+      await subscription.cancel();
+      await server.close();
+      temp.deleteSync(recursive: true);
+    }
+  });
   test(
     'parsed command output drains and fails closed on real child overflow',
     () async {

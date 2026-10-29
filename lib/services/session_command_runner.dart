@@ -129,7 +129,7 @@ class SessionCommandRunner extends CommandRunner {
               'exitCode': null,
               'errorCode': 'COMMAND_OUTPUT_LIMIT',
             },
-          });
+          }).timeout(const Duration(milliseconds: 500));
         } catch (_) {}
       }
       return CommandResult(
