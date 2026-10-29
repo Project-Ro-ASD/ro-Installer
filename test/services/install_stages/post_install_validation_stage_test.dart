@@ -17,6 +17,7 @@ const cleanupPaths = [
   '/usr/libexec/ro-installer-launcher.sh',
   '/usr/libexec/ro-installer-helper',
   '/usr/libexec/ro-installer-backend',
+  '/usr/libexec/ro-installer-session',
   '/usr/lib64/ro-installer',
   '/usr/lib/ro-installer',
   '/usr/share/applications/ro-installer.desktop',

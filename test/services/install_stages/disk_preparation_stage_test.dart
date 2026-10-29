@@ -31,12 +31,14 @@ StageContext makeContext(
 
 void main() {
   group('DiskPreparationStage', () {
-    test('mount edilmiş hedef partitionları tek tek ayırır', () async {
-      final fake = FakeCommandRunner(defaultSuccess: false);
-      fake.addResponse(
-        'lsblk',
-        ['-J', '-o', 'NAME,TYPE,MOUNTPOINTS', '/dev/sda'],
-        stdout: '''
+    test(
+      'mounted targets are refused without unmounting or global swapoff',
+      () async {
+        final fake = FakeCommandRunner(defaultSuccess: false);
+        fake.addResponse(
+          'lsblk',
+          ['-J', '-o', 'NAME,TYPE,MOUNTPOINTS', '/dev/sda'],
+          stdout: '''
 {
   "blockdevices": [
     {
@@ -52,25 +54,16 @@ void main() {
   ]
 }
 ''',
-      );
-      fake.addResponse('umount', ['-f', '/dev/sda3']);
-      fake.addResponse('umount', ['-f', '/dev/sda1']);
-      fake.addResponse('swapoff', ['-a']);
-      final ctx = makeContext({'selectedDisk': '/dev/sda'}, fake);
+        );
+        final result = await const DiskPreparationStage().execute(
+          makeContext({'selectedDisk': '/dev/sda'}, fake),
+        );
+        expect(result.success, isFalse);
+        expect(fake.commandNames, ['lsblk']);
+      },
+    );
 
-      final stage = const DiskPreparationStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, true);
-      expect(result.message, contains('sda'));
-
-      expect(fake.commandNames, ['lsblk', 'umount', 'umount', 'swapoff']);
-      expect(fake.wasCalledWith('umount', ['-f', '/dev/sda3']), true);
-      expect(fake.wasCalledWith('umount', ['-f', '/dev/sda1']), true);
-      expect(fake.commandLog.any((cmd) => cmd.command == 'sh'), false);
-    });
-
-    test('mount yoksa sadece lsblk ve swapoff çalışır', () async {
+    test('inactive target never disables system swap/ZRAM', () async {
       final fake = FakeCommandRunner(defaultSuccess: false);
       fake.addResponse(
         'lsblk',
@@ -96,7 +89,7 @@ void main() {
       final result = await const DiskPreparationStage().execute(ctx);
 
       expect(result.success, true);
-      expect(fake.commandNames, ['lsblk', 'swapoff']);
+      expect(fake.commandNames, ['lsblk']);
     });
 
     test('NVMe disk adıyla da çalışır', () async {
@@ -126,9 +119,8 @@ void main() {
       final stage = const DiskPreparationStage();
       final result = await stage.execute(ctx);
 
-      expect(result.success, true);
-      expect(result.message, contains('nvme0n1'));
-      expect(fake.wasCalledWith('umount', ['-f', '/dev/nvme0n1p1']), true);
+      expect(result.success, isFalse);
+      expect(fake.commandNames, ['lsblk']);
     });
   });
 }

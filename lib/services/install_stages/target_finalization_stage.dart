@@ -40,6 +40,7 @@ done <<'LIVE_PATHS'
 /usr/share/applications/ro-installer.desktop
 /usr/libexec/ro-installer-launcher.sh
 /usr/libexec/ro-installer-helper
+/usr/libexec/ro-installer-session
 /usr/libexec/ro-installer-backend
 /usr/lib64/ro-installer
 /usr/lib/ro-installer
@@ -216,7 +217,7 @@ class TargetFinalizationStage {
     ], '/dev bağı hedef sisteme aktarılamadı.');
     if (failure != null) return failure;
     failure = await _requireCommand(ctx, 'mount', [
-      '--make-rslave',
+      '--make-rprivate',
       '/mnt/dev',
     ], '/mnt/dev için rslave ayarı uygulanamadı.');
     if (failure != null) return failure;
@@ -227,7 +228,7 @@ class TargetFinalizationStage {
     ], '/proc bağı hedef sisteme aktarılamadı.');
     if (failure != null) return failure;
     failure = await _requireCommand(ctx, 'mount', [
-      '--make-rslave',
+      '--make-rprivate',
       '/mnt/proc',
     ], '/mnt/proc için rslave ayarı uygulanamadı.');
     if (failure != null) return failure;
@@ -238,7 +239,7 @@ class TargetFinalizationStage {
     ], '/sys bağı hedef sisteme aktarılamadı.');
     if (failure != null) return failure;
     failure = await _requireCommand(ctx, 'mount', [
-      '--make-rslave',
+      '--make-rprivate',
       '/mnt/sys',
     ], '/mnt/sys için rslave ayarı uygulanamadı.');
     if (failure != null) return failure;
@@ -249,7 +250,7 @@ class TargetFinalizationStage {
     ], '/run bağı hedef sisteme aktarılamadı.');
     if (failure != null) return failure;
     failure = await _requireCommand(ctx, 'mount', [
-      '--make-rslave',
+      '--make-rprivate',
       '/mnt/run',
     ], '/mnt/run için rslave ayarı uygulanamadı.');
     if (failure != null) return failure;
@@ -460,13 +461,15 @@ EOF
     String errorMessage, {
     List<int> allowedExitCodes = const [0],
   }) async {
-    final ok = await ctx.runCmd(
-      cmd,
-      args,
-      ctx.log,
-      isMock: ctx.isMock,
-      allowedExitCodes: allowedExitCodes,
-    );
+    final ok = cmd == 'mount'
+        ? await (ctx.mountSession?.mount(args) ?? Future.value(false))
+        : await ctx.runCmd(
+            cmd,
+            args,
+            ctx.log,
+            isMock: ctx.isMock,
+            allowedExitCodes: allowedExitCodes,
+          );
     if (ok) {
       return null;
     }

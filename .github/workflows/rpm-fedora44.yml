@@ -53,6 +53,7 @@ jobs:
             pkgconf-pkg-config \
             python3 \
             kmod \
+            util-linux \
             ripgrep
 
       - name: Install pinned Flutter SDK
@@ -87,6 +88,21 @@ jobs:
 
       - name: Check documentation policy in the real checkout
         run: python3 scripts/check-source-policy.py --mode checkout
+
+      - name: Real disposable namespace acceptance (explicit capability result)
+        shell: bash
+        run: |
+          mkdir -p outputs/namespace-acceptance
+          set +e
+          python3 -B test/scripts/namespace_acceptance.py > outputs/namespace-acceptance/result.json
+          result=$?
+          set -e
+          cat outputs/namespace-acceptance/result.json
+          if [ "$result" -eq 77 ]; then
+            echo "::warning::Real Linux namespace acceptance UNAVAILABLE; full P0-03 security acceptance remains NO-GO."
+          elif [ "$result" -ne 0 ]; then
+            exit "$result"
+          fi
 
       - name: Build RPM
         run: scripts/01-build-rpm.sh --source-mode git --require-clean-git
@@ -182,5 +198,6 @@ jobs:
             rpm-outputs/*.source-files.txt
             rpm-outputs/latest-rpm-path.txt
             rpm-outputs/latest-rpm-manifest.txt
+            outputs/namespace-acceptance/
             outputs/release-contract-test/
             outputs/logs/01-build-rpm-*.log

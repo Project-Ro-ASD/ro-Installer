@@ -32,6 +32,53 @@ void main() async {
     }
   }
 
+  if (isAutoInstallMode &&
+      !Platform.environment.containsKey('RO_INSTALLER_SESSION_SOCKET')) {
+    // Keep malformed/unsupported profile exit semantics before privileged setup.
+    var invalid = false;
+    try {
+      invalid = InstallProfile.fromJsonFile(
+        autoProfilePath,
+      ).validate().isNotEmpty;
+    } catch (_) {
+      invalid = true;
+    }
+    if (invalid) {
+      exit(
+        await runAutoInstall(
+          autoProfilePath,
+          commandRunner,
+          translationCatalog,
+        ),
+      );
+    }
+    // Re-enter through the fixed root supervisor before the engine starts.
+    // Profile/test environment remains root-only and is explicitly preserved.
+    try {
+      final process = await Process.start(
+        '/usr/libexec/ro-installer-session',
+        ['--auto'],
+        environment: {
+          ...Platform.environment,
+          'RO_INSTALLER_AUTO_EXECUTABLE': Platform.resolvedExecutable,
+        },
+      );
+      await process.stdin.close();
+      final streams = Future.wait([
+        stdout.addStream(process.stdout),
+        stderr.addStream(process.stderr),
+      ]);
+      final status = await process.exitCode;
+      await streams;
+      exit(status);
+    } catch (_) {
+      stderr.writeln(
+        'Isolated automatic installation session could not start.',
+      );
+      exit(9);
+    }
+  }
+
   if (isAutoInstallMode) {
     final exitCode = await runAutoInstall(
       autoProfilePath,
@@ -125,6 +172,7 @@ Future<int> runAutoInstall(
   CommandRunner commandRunner,
   InstallerTranslationCatalog translationCatalog, {
   InstallService? installService,
+  SessionExporter? exportSession,
 }) async {
   final startedAt = DateTime.now();
   final statusHistory = <String>[];
@@ -204,30 +252,35 @@ Future<int> runAutoInstall(
             );
 
     final finishedAt = DateTime.now();
-    final exportResult = await InstallLogExportService.instance.exportSession(
-      startedAt: startedAt,
-      finishedAt: finishedAt,
-      success: success,
-      finalStatus: success
-          ? t('auto_install_success')
-          : t('auto_install_failure'),
-      statusHistory: statusHistory,
-      technicalLogs: technicalLogs,
-      installContext: {
-        ...profile.toJson(),
-        'autoInstallMode': true,
-        'vmTestMode': stateMap['vmTestMode'],
-      },
-    );
+    try {
+      final exportResult =
+          await (exportSession ??
+              InstallLogExportService.instance.exportSession)(
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            success: success,
+            finalStatus: success
+                ? t('auto_install_success')
+                : t('auto_install_failure'),
+            statusHistory: statusHistory,
+            technicalLogs: technicalLogs,
+            installContext: {
+              ...profile.toJson(),
+              'autoInstallMode': true,
+              'vmTestMode': stateMap['vmTestMode'],
+            },
+          );
 
-    if (exportResult.success) {
-      pushLog('Oturum kaydi yazildi: ${exportResult.logPath}');
-      pushLog('Oturum ozeti yazildi: ${exportResult.summaryPath}');
-      pushLog('Oturum manifesti yazildi: ${exportResult.manifestPath}');
-    } else {
-      pushLog('Oturum disa aktarimi basarisiz: ${exportResult.error}');
+      if (exportResult.success) {
+        pushLog('Oturum kaydi yazildi: ${exportResult.logPath}');
+        pushLog('Oturum ozeti yazildi: ${exportResult.summaryPath}');
+        pushLog('Oturum manifesti yazildi: ${exportResult.manifestPath}');
+      } else {
+        pushLog('Oturum disa aktarimi basarisiz: ${exportResult.error}');
+      }
+    } catch (_) {
+      pushLog('Oturum disa aktarimi tamamlanamadi.');
     }
-
     if (!success) {
       pushStatus(t('auto_install_failed_done'));
       return 1;

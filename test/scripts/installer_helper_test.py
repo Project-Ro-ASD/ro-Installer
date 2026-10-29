@@ -669,7 +669,7 @@ class LauncherSessionTests(unittest.TestCase):
         self.assertNotIn("RO_INSTALLER_COMMAND_SUDO", main + runner)
         self.assertNotIn("pkexec", main)
         self.assertNotIn("InstallService.instance.runInstall", installing)
-        self.assertIn("HelperClient.instance.install", installing)
+        self.assertIn("widget.helperClient ?? HelperClient.instance", installing)
 
 
 class PackagingTests(unittest.TestCase):
@@ -765,7 +765,7 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
             self.assertEqual(call.func.attr, "Popen")
             self.assertFalse(any(keyword.arg == "shell" for keyword in call.keywords))
         self.assertEqual(helper.LSBLK_ARGV[0], "/usr/bin/lsblk")
-        self.assertEqual(helper.BACKEND_ARGV, ("/usr/libexec/ro-installer-backend", "--privileged-backend-v1"))
+        self.assertEqual(helper.BACKEND_ARGV, ("/usr/libexec/ro-installer-session", "--backend"))
         self.assertEqual(stat.S_IMODE((ROOT / "linux/ro-installer-helper").stat().st_mode), 0o755)
 
     @unittest.skipUnless(all(shutil.which(tool) for tool in ("rpmbuild", "rpm2cpio", "cpio")), "RPM tools unavailable")
@@ -777,6 +777,7 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
                 (top / directory).mkdir()
             (top / "SOURCES/backend").write_bytes(b"\x7fELFpayload-fixture")
             shutil.copy2(ROOT / "linux/ro-installer-helper", top / "SOURCES/helper")
+            shutil.copy2(ROOT / "linux/ro-installer-session", top / "SOURCES/session")
             shutil.copy2(ROOT / "linux/org.roasd.installer.helper.policy", top / "SOURCES/policy")
             for release, mode in (("1", "0755"), ("2", "0777")):
                 spec = top / "SPECS/fixture.spec"
@@ -789,10 +790,12 @@ BuildArch: noarch
 %description
 Non-product package fixture.
 %install
+install -Dm755 %{{_sourcedir}}/session %{{buildroot}}{package.SESSION}
 install -Dm755 %{{_sourcedir}}/helper %{{buildroot}}{package.HELPER}
 install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
 install -Dm644 %{{_sourcedir}}/policy %{{buildroot}}{package.POLICY}
 %files
+%attr(0755,root,root) {package.SESSION}
 %attr({mode},root,root) {package.HELPER}
 %attr(0755,root,root) {package.BACKEND}
 %attr(0644,root,root) {package.POLICY}

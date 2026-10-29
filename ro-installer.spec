@@ -81,6 +81,9 @@ install -Dm755 linux/ro-installer-launcher.sh \
 install -Dm755 ro-installer-backend \
     %{buildroot}%{_libexecdir}/ro-installer-backend
 
+install -Dm755 linux/ro-installer-session \
+    %{buildroot}%{_libexecdir}/ro-installer-session
+
 install -Dm755 linux/ro-installer-helper \
     %{buildroot}%{_libexecdir}/ro-installer-helper
 
@@ -96,6 +99,7 @@ install -Dm644 linux/org.roasd.installer.helper.policy \
 %{_datadir}/applications/ro-installer.desktop
 %{_libexecdir}/ro-installer-launcher.sh
 %attr(0755,root,root) %{_libexecdir}/ro-installer-backend
+%attr(0755,root,root) %{_libexecdir}/ro-installer-session
 %attr(0755,root,root) %{_libexecdir}/ro-installer-helper
 %attr(0644,root,root) %{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy
 

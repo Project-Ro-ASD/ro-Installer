@@ -11,8 +11,12 @@ import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/nebula_ui.dart';
 
+enum InstallationTerminalState { running, succeeded, failed }
+
 class InstallingScreen extends StatefulWidget {
-  const InstallingScreen({super.key});
+  const InstallingScreen({super.key, this.helperClient, this.exportSession});
+  final HelperClient? helperClient;
+  final SessionExporter? exportSession;
 
   @override
   State<InstallingScreen> createState() => _InstallingScreenState();
@@ -26,7 +30,8 @@ class _InstallingScreenState extends State<InstallingScreen>
 
   double _progress = 0.0;
   String _statusText = '';
-  bool _isFinished = false;
+  InstallationTerminalState _terminal = InstallationTerminalState.running;
+  bool get _isFinished => _terminal != InstallationTerminalState.running;
   bool _isRebooting = false;
 
   final List<String> _statusHistory = [];
@@ -247,7 +252,10 @@ class _InstallingScreenState extends State<InstallingScreen>
           state.fileSystem != 'btrfs') {
         throw const HelperException('MISSING_CONFIRMATION');
       }
-      await HelperClient.instance.install(identity, (progress, messageKey) {
+      await (widget.helperClient ?? HelperClient.instance).install(identity, (
+        progress,
+        messageKey,
+      ) {
         if (!mounted) return;
         final status = state.t(messageKey);
         setState(() {
@@ -259,56 +267,58 @@ class _InstallingScreenState extends State<InstallingScreen>
       success = true;
     } on HelperException catch (error) {
       _pushLog('${state.t('helper_error')} (${error.code})');
+    } catch (_) {
+      _pushLog(state.t('helper_error'));
     }
+    if (!mounted) return;
+    setState(() {
+      _terminal = success
+          ? InstallationTerminalState.succeeded
+          : InstallationTerminalState.failed;
+      if (success) _progress = 1.0;
+      _statusText = state.t(
+        success ? 'install_ready_reboot_status' : 'install_failed_log_hint',
+      );
+      _slideTimer?.cancel();
+    });
 
     final finishedAt = DateTime.now();
-    final exportResult = await InstallLogExportService.instance.exportSession(
-      startedAt: startedAt,
-      finishedAt: finishedAt,
-      success: success,
-      finalStatus: _statusText,
-      statusHistory: _statusHistory,
-      technicalLogs: _technicalLogs,
-      installContext: {
-        'selectedDisk': state.selectedDisk,
-        'partitionMethod': state.partitionMethod,
-        'fileSystem': state.fileSystem,
-        'selectedFreeSpace': state.selectedFreeSpace,
-        'selectedLanguage': state.selectedLanguage,
-        'linuxDiskSizeGB': state.linuxDiskSizeGB,
-        'hasExistingEfi': state.hasExistingEfi,
-        'shrinkCandidatePartition': state.shrinkCandidatePartition,
-        'shrinkCandidateFs': state.shrinkCandidateFs,
-        'unsupportedStorageBlockers': state.unsupportedStorageBlockers,
-        'unsupportedStorageDetails': state.unsupportedStorageDetails,
-      },
-    );
+    try {
+      final exportResult =
+          await (widget.exportSession ??
+              InstallLogExportService.instance.exportSession)(
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            success: success,
+            finalStatus: _statusText,
+            statusHistory: _statusHistory,
+            technicalLogs: _technicalLogs,
+            installContext: {
+              'selectedDisk': state.selectedDisk,
+              'partitionMethod': state.partitionMethod,
+              'fileSystem': state.fileSystem,
+              'selectedFreeSpace': state.selectedFreeSpace,
+              'selectedLanguage': state.selectedLanguage,
+              'linuxDiskSizeGB': state.linuxDiskSizeGB,
+              'hasExistingEfi': state.hasExistingEfi,
+              'shrinkCandidatePartition': state.shrinkCandidatePartition,
+              'shrinkCandidateFs': state.shrinkCandidateFs,
+              'unsupportedStorageBlockers': state.unsupportedStorageBlockers,
+              'unsupportedStorageDetails': state.unsupportedStorageDetails,
+            },
+          );
 
-    if (exportResult.success) {
-      _pushLog('[LOG] Oturum kaydı yazıldı: ${exportResult.logPath}');
-      _pushLog('[LOG] Oturum özeti yazıldı: ${exportResult.summaryPath}');
-      _pushLog('[LOG] Oturum manifesti yazıldı: ${exportResult.manifestPath}');
-    } else {
-      _pushLog('[LOG] Oturum dışa aktarımı başarısız: ${exportResult.error}');
-    }
-
-    if (!mounted) {
-      return;
-    }
-
-    if (success) {
-      setState(() {
-        _progress = 1.0;
-        _isFinished = true;
-        _statusText = state.t('install_ready_reboot_status');
-        _slideTimer?.cancel();
-      });
-    } else {
-      setState(() {
-        _statusText = state.t('install_failed_log_hint');
-        _isFinished = true;
-        _slideTimer?.cancel();
-      });
+      if (exportResult.success) {
+        _pushLog('[LOG] Oturum kaydı yazıldı: ${exportResult.logPath}');
+        _pushLog('[LOG] Oturum özeti yazıldı: ${exportResult.summaryPath}');
+        _pushLog(
+          '[LOG] Oturum manifesti yazıldı: ${exportResult.manifestPath}',
+        );
+      } else {
+        _pushLog('[LOG] Oturum dışa aktarımı başarısız: ${exportResult.error}');
+      }
+    } catch (_) {
+      _pushLog('[LOG] Oturum dışa aktarımı tamamlanamadı.');
     }
   }
 
@@ -319,7 +329,7 @@ class _InstallingScreenState extends State<InstallingScreen>
     final visibleStatusText = _statusText.isEmpty
         ? state.t('install_progress_initial')
         : _statusText;
-    final success = _isFinished && _progress >= 1.0;
+    final success = _terminal == InstallationTerminalState.succeeded;
     final failed = _isFinished && !success;
     final statusColor = failed
         ? Colors.redAccent

@@ -20,6 +20,17 @@ class InstallLogExportResult {
   final String? error;
 }
 
+typedef SessionExporter =
+    Future<InstallLogExportResult> Function({
+      required DateTime startedAt,
+      required DateTime finishedAt,
+      required bool success,
+      required String finalStatus,
+      required List<String> statusHistory,
+      required List<String> technicalLogs,
+      required Map<String, dynamic> installContext,
+    });
+
 class InstallLogExportService {
   InstallLogExportService._();
 
