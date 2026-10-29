@@ -4,6 +4,8 @@
 import dataclasses
 import fcntl
 import json
+import importlib.machinery
+import importlib.util
 import os
 from pathlib import Path
 import platform
@@ -92,9 +94,10 @@ class Request:
     operation: str
     disk: str | None = None
     expected_device: dict | None = None
+    protocol_version: int = 1
 
 
-def parse_request(raw):
+def parse_request(raw, version=1):
     if len(raw) > MAX_REQUEST_BYTES:
         fail("REQUEST_TOO_LARGE", "Request exceeds the protocol size limit.")
     try:
@@ -104,7 +107,7 @@ def parse_request(raw):
         fail("INVALID_REQUEST", "Request must be one UTF-8 JSON object.")
     if not isinstance(data, dict):
         fail("INVALID_REQUEST", "Request must be one JSON object.")
-    if type(data.get("protocolVersion")) is not int or data["protocolVersion"] != 1:
+    if type(data.get("protocolVersion")) is not int or data["protocolVersion"] != version:
         fail("INVALID_REQUEST", "Unsupported protocol version.")
     operation = data.get("operation")
     if not isinstance(operation, str) or operation not in OPERATIONS:
@@ -117,7 +120,7 @@ def parse_request(raw):
     if set(data) != allowed:
         fail("INVALID_REQUEST", "Missing or unknown request fields.")
     if operation == "audit-live":
-        return Request(operation)
+        return Request(operation, protocol_version=version)
     disk = data["disk"]
     # Canonical /dev names only. The authoritative checks below use stat/sysfs.
     if not isinstance(disk, str) or not re.fullmatch(r"/dev/[A-Za-z0-9_-]{1,128}", disk):
@@ -138,7 +141,7 @@ def parse_request(raw):
         except HelperError:
             fail("INVALID_REQUEST", "Invalid expected device identity.")
         expected = dict(expected, majorMinor=number)
-    return Request(operation, disk, expected)
+    return Request(operation, disk, expected, version)
 
 
 def read_request(fd):
@@ -542,13 +545,28 @@ class InstallerLock:
         self.fd = None
 
 
-def backend_message(raw):
+def safe_session_report(value):
+    try:
+        loader=importlib.machinery.SourceFileLoader('ro_helper_records',str(Path(__file__).with_name('ro_installer_records.py')))
+        spec=importlib.util.spec_from_loader(loader.name,loader)
+        module=importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        return value if module.valid_report(value) else None
+    except Exception:
+        return None
+
+
+def backend_message(raw, *, allow_report=False):
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object,
                            parse_constant=lambda _: fail("BACKEND_ERROR", "Invalid backend number."))
         if not isinstance(value, dict) or type(value.get("protocolVersion")) is not int or value["protocolVersion"] != 1:
             raise ValueError()
         kind = value.get("type")
+        if kind == "session-report" and allow_report:
+            if set(value) != {'protocolVersion','type','report'}:
+                raise ValueError()
+            return value
         if kind == "progress":
             if (set(value) != {"protocolVersion", "type", "stage", "progress", "messageKey"}
                     or type(value["stage"]) is not int or not 0 <= value["stage"] <= 9
@@ -582,14 +600,19 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
     # No caller executable, argv, environment or engine configuration is used.
     # Inherit the locked descriptor: the kernel lease survives helper SIGKILL
     # until the independent backend (and its synchronous children) exits.
+    reports = request.protocol_version == 2
+    child_env = dict(CHILD_ENV, RO_INSTALLER_SESSION_REPORT='2') if reports else CHILD_ENV
     try:
         process = subprocess.Popen(BACKEND_ARGV, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   env=CHILD_ENV, close_fds=True, start_new_session=True,
+                                   env=child_env, close_fds=True, start_new_session=True,
                                    pass_fds=() if lock_fd is None else (lock_fd,))
     except OSError:
         fail("BACKEND_ERROR", "Privileged backend could not start.")
     authorized = False
+    report_seen = False
+    report_status = "unavailable"
+    report = None
     final = None
     failure = None
     streams = [process.stdout, process.stderr]
@@ -628,9 +651,16 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
                         raw, _, rest = pending.partition(b"\n")
                         pending = bytearray(rest)
                         messages += 1
-                        if len(raw) > MAX_MESSAGE_BYTES or messages > 16384 or final is not None:
+                        if len(raw) > MAX_MESSAGE_BYTES or messages > 16384 or report_seen:
                             fail("BACKEND_ERROR", "Invalid backend stream framing.")
-                        message = backend_message(raw)
+                        message = backend_message(raw, allow_report=reports)
+                        if message['type'] == 'session-report':
+                            report_seen = True
+                            report = safe_session_report(message['report'])
+                            report_status = 'available' if report is not None else 'invalid'
+                            continue
+                        if final is not None:
+                            fail('BACKEND_ERROR','Unexpected message after terminal result.')
                         if message["type"] == "ready":
                             if authorized:
                                 fail("BACKEND_ERROR", "Repeated backend mutation gate.")
@@ -676,6 +706,8 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
         for stream in (process.stdin, process.stdout, process.stderr):
             if not stream.closed:
                 stream.close()
+        if reports:
+            emit({'protocolVersion':1,'type':'session-report','status':report_status,'report':report})
 
 
 def handle(request, system, emit=lambda _: None):
@@ -702,25 +734,41 @@ def handle(request, system, emit=lambda _: None):
         return run_backend(request, after, system, emit, lock_fd=lock.fd)
 
 
+def emit_message(message, version, fd):
+    """Bounded nonblocking public output; a lost GUI never cancels mutation."""
+    try:
+        raw=json.dumps(dict(message,protocolVersion=version),separators=(',',':')).encode()+b'\n'
+        if len(raw)>MAX_MESSAGE_BYTES:return False
+        os.set_blocking(fd,False)
+        while raw:
+            count=os.write(fd,raw)
+            if count<=0:return False
+            raw=raw[count:]
+        return True
+    except (OSError,ValueError):
+        return False
+
+
 def main():
+    sys.dont_write_bytecode=True
     # The isolated shebang ignores Python import/environment injection before this.
     os.environ.clear()
     os.environ.update(CHILD_ENV)
     os.umask(0o077)
     operation = None
+    version = 1
+    output_available = True
     try:
         os.chdir("/")
-        if sys.argv[1:] not in ([], ["--protocol=1"]):
-            fail("INVALID_REQUEST", "Only protocol v1 on stdin is supported.")
-        request = parse_request(read_request(sys.stdin.fileno()))
+        if sys.argv[1:] not in ([], ["--protocol=1"], ["--protocol=2"]):
+            fail("INVALID_REQUEST", "Unsupported explicit helper protocol.")
+        version = 2 if sys.argv[1:] == ['--protocol=2'] else 1
+        request = parse_request(read_request(sys.stdin.fileno()), version=version)
         operation = request.operation
         def emit(message):
-            try:
-                sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
-                sys.stdout.flush()
-            except BrokenPipeError:
-                # Losing the GUI is not a request to interrupt formatting.
-                pass
+            nonlocal output_available
+            if output_available:
+                output_available=emit_message(message,version,sys.stdout.fileno())
         if request.operation == "install-full-disk":
             for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                 signal.signal(sig, signal.SIG_IGN)
@@ -737,12 +785,10 @@ def main():
         output = {"protocolVersion": 1, "operation": operation, "ok": False,
                   "error": {"code": "SYSTEM_ERROR", "message": "Helper operation failed safely."}}
         status = 7
+    output["protocolVersion"] = version
     output["type"] = "result"
-    try:
-        sys.stdout.write(json.dumps(output, separators=(",", ":")) + "\n")
-        sys.stdout.flush()
-    except BrokenPipeError:
-        pass
+    if output_available:
+        emit_message(output,version,sys.stdout.fileno())
     return status
 
 

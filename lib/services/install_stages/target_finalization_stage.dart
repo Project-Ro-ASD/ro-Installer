@@ -41,6 +41,9 @@ done <<'LIVE_PATHS'
 /usr/libexec/ro-installer-launcher.sh
 /usr/libexec/ro-installer-helper
 /usr/libexec/ro-installer-session
+/usr/libexec/ro-installer-export
+/usr/libexec/ro_installer_records.py
+/usr/libexec/ro-installer-observability.json
 /usr/libexec/ro-installer-backend
 /usr/lib64/ro-installer
 /usr/lib/ro-installer

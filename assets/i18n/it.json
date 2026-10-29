@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "Tempo di rilevamento dischi scaduto. Aggiornare.",
   "disk_discovery_incompatibleJson": "Il rilevamento dischi ha restituito una risposta non supportata.",
   "disk_discovery_topology": "Impossibile leggere in sicurezza la topologia dei dischi.",
-  "disk_discovery_partial": "Alcuni dischi sono stati esclusi perché non leggibili in sicurezza."
+  "disk_discovery_partial": "Alcuni dischi sono stati esclusi perché non leggibili in sicurezza.",
+  "install_backend_report_available": "Il rapporto del backend è pronto per l’esportazione.",
+  "install_backend_report_unavailable": "Il rapporto del backend non è disponibile. Il risultato dell’installazione resta invariato.",
+  "install_backend_report_invalid": "Impossibile verificare il rapporto del backend. Il risultato dell’installazione resta invariato.",
+  "install_backend_record_complete": "I registri protetti della sessione sono completi.",
+  "install_backend_record_incomplete": "I registri protetti della sessione sono incompleti; puoi esportare il rapporto sicuro."
 }

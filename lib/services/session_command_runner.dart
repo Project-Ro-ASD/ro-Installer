@@ -62,8 +62,9 @@ class SessionCommandRunner extends CommandRunner {
     if (isMock) {
       throw StateError('Production session cannot execute mock requests');
     }
-    final output = {'stdout': StringBuffer(), 'stderr': StringBuffer()};
-    final pending = {'stdout': '', 'stderr': ''};
+    final captured = BoundedCommandOutput(
+      rsync: command.split('/').last == 'rsync',
+    );
     void log(String stream, String text) {
       final value = text.trim();
       if (value.isEmpty) return;
@@ -100,16 +101,11 @@ class SessionCommandRunner extends CommandRunner {
           throw const FormatException('Events after completion');
         }
         if (event['stream'] is String &&
-            output.containsKey(event['stream']) &&
+            const ['stdout', 'stderr'].contains(event['stream']) &&
             event['data'] is String) {
           final name = event['stream'] as String;
           final data = event['data'] as String;
-          output[name]!.write(data);
-          final lines = '${pending[name]}$data'.split(RegExp(r'[\r\n]'));
-          pending[name] = lines.removeLast();
-          for (final line in lines) {
-            log(name, line);
-          }
+          captured.add(name, data, log);
         } else if (event['started'] is bool && event['exitCode'] is int) {
           result = event;
         } else {
@@ -117,16 +113,34 @@ class SessionCommandRunner extends CommandRunner {
         }
       }
       if (result == null) throw const FormatException('Missing command result');
-      for (final name in pending.keys) {
-        log(name, pending[name]!);
+      captured.finish(log);
+      if (captured.overflow) {
+        // Functional transport overflow is a fail-closed input error, not a
+        // telemetry failure. Actual subprocess exit stays in supervisor events.
+        try {
+          await control({
+            'op': 'observe',
+            'event': {
+              'eventType': 'capture.failed',
+              'stageId': null,
+              'operationId': 'unclassified',
+              'status': 'failed',
+              'durationMs': 0,
+              'exitCode': null,
+              'errorCode': 'COMMAND_OUTPUT_LIMIT',
+            },
+          }).timeout(const Duration(milliseconds: 500));
+        } catch (_) {}
       }
       return CommandResult(
         command: command,
         args: List.unmodifiable(args),
         started: result['started'],
-        exitCode: result['exitCode'],
-        stdout: output['stdout'].toString().trim(),
-        stderr: output['stderr'].toString().trim(),
+        exitCode: captured.overflow ? -126 : result['exitCode'],
+        stdout: captured.overflow ? '' : captured.value('stdout'),
+        stderr: captured.overflow
+            ? 'COMMAND_OUTPUT_LIMIT'
+            : captured.value('stderr'),
       );
     } catch (_) {
       return CommandResult(

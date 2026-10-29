@@ -1,0 +1,131 @@
+#!/usr/bin/python3 -I
+"""Unprivileged atomic export. Intentionally refuses root, including root-auto.
+
+The only input is a bounded user-side export package. No polkit action, root
+record reader or access to privileged session storage is provided here.
+"""
+import ctypes
+import hashlib
+import json
+import os
+from pathlib import Path
+import secrets
+import stat
+import sys
+
+MAX_INPUT = 512 * 1024
+
+
+def target_directory(path):
+    if not os.path.isabs(path) or os.path.normpath(path) != path:
+        raise ValueError('target')
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for part in Path(path).parts[1:]:
+            try:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            except FileNotFoundError:
+                os.mkdir(part, 0o700, dir_fd=fd)
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            info = os.fstat(child)
+            sticky_tmp = info.st_uid == 0 and bool(info.st_mode & stat.S_ISVTX)
+            if info.st_uid not in (0, os.geteuid()) or (stat.S_IMODE(info.st_mode) & 0o022 and not sticky_tmp):
+                os.close(child)
+                raise PermissionError('unsafe target')
+            os.close(fd)
+            fd = child
+        if os.fstat(fd).st_uid != os.geteuid():
+            raise PermissionError('target is not user-owned')
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def export_package(request, *, token=secrets.token_hex, write=os.write, sync=os.fsync):
+    if os.geteuid() == 0:
+        return {'success': False, 'error': 'EXPORT_ROOT_DENIED'}
+    parent = bundle = None
+    pending = None
+    published = False
+    created_bundle = False
+    created = []
+    try:
+        if (type(request) is not dict or set(request) != {'target', 'files'}
+                or type(request['target']) is not str or len(request['target']) > 4096
+                or type(request['files']) is not dict or set(request['files']) != {'install.log', 'summary.json'}
+                or any(type(v) is not str for v in request['files'].values())
+                or len(json.dumps(request,ensure_ascii=False).encode()) > MAX_INPUT):
+            return {'success': False, 'error': 'EXPORT_INPUT_INVALID'}
+        parent = target_directory(request['target'])
+        identity = token(16)
+        if len(identity) != 32 or any(c not in '0123456789abcdef' for c in identity):
+            raise ValueError('identity')
+        pending = '.install-' + identity
+        final = 'install-' + identity
+        os.mkdir(pending, 0o700, dir_fd=parent)
+        created_bundle = True
+        bundle = os.open(pending, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        info = os.fstat(bundle)
+        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise PermissionError('bundle mode')
+        files = {k: v.encode() for k, v in request['files'].items()}
+        files['manifest.json'] = json.dumps({'schemaVersion': 2, 'complete': True,
+            'files': {k: {'sha256': hashlib.sha256(v).hexdigest(), 'bytes': len(v)} for k, v in files.items()}}, separators=(',', ':')).encode()
+        for name, data in files.items():
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=bundle)
+            created.append(name)
+            try:
+                info = os.fstat(fd)
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                        or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600):
+                    raise PermissionError('file mode')
+                while data:
+                    count = write(fd, data)
+                    if count <= 0:
+                        raise OSError('short export write')
+                    data = data[count:]
+                sync(fd)
+            finally:
+                os.close(fd)
+        sync(bundle)
+        # Linux atomic no-replace directory publication. Never overwrite an
+        # existing destination (file, symlink, hardlink or directory).
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.renameat2(parent, pending.encode(), parent, final.encode(), 1) != 0:
+            raise OSError(ctypes.get_errno(), 'publish failed')
+        published = True
+        sync(parent)
+        base = str(Path(request['target']) / final)
+        return {'success': True, 'logPath': base + '/install.log',
+                'summaryPath': base + '/summary.json', 'manifestPath': base + '/manifest.json'}
+    except Exception:
+        return {'success': False, 'error': 'EXPORT_PUBLISH_UNCONFIRMED' if published else 'EXPORT_FAILED'}
+    finally:
+        if not published and bundle is not None:
+            for name in created:
+                try:os.unlink(name, dir_fd=bundle)
+                except OSError:pass  # Own unpublished bundle only; never user files.
+        if bundle is not None:os.close(bundle)
+        if created_bundle and pending and not published and parent is not None:
+            try:os.rmdir(pending, dir_fd=parent)
+            except OSError:pass
+        if parent is not None:os.close(parent)
+
+
+def main():
+    sys.dont_write_bytecode=True
+    if os.geteuid() == 0:
+        result = {'success': False, 'error': 'EXPORT_ROOT_DENIED'}
+    else:
+        try:
+            raw = sys.stdin.buffer.read(MAX_INPUT + 1)
+            result = export_package(json.loads(raw)) if len(raw) <= MAX_INPUT else {'success': False, 'error': 'EXPORT_INPUT_INVALID'}
+        except Exception:
+            result = {'success': False, 'error': 'EXPORT_INPUT_INVALID'}
+    print(json.dumps(result, separators=(',', ':')))
+    return 0 if result['success'] else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

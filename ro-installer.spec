@@ -90,6 +90,13 @@ install -Dm755 linux/ro-installer-helper \
 install -Dm644 linux/org.roasd.installer.helper.policy \
     %{buildroot}%{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy
 
+install -Dm644 linux/ro_installer_records.py \
+    %{buildroot}%{_libexecdir}/ro_installer_records.py
+install -Dm644 linux/ro-installer-observability.json \
+    %{buildroot}%{_libexecdir}/ro-installer-observability.json
+install -Dm755 linux/ro-installer-export \
+    %{buildroot}%{_libexecdir}/ro-installer-export
+
 %files
 %license LICENSE
 %doc README.md
@@ -100,6 +107,9 @@ install -Dm644 linux/org.roasd.installer.helper.policy \
 %{_libexecdir}/ro-installer-launcher.sh
 %attr(0755,root,root) %{_libexecdir}/ro-installer-backend
 %attr(0755,root,root) %{_libexecdir}/ro-installer-session
+%attr(0755,root,root) %{_libexecdir}/ro-installer-export
+%attr(0644,root,root) %{_libexecdir}/ro_installer_records.py
+%attr(0644,root,root) %{_libexecdir}/ro-installer-observability.json
 %attr(0755,root,root) %{_libexecdir}/ro-installer-helper
 %attr(0644,root,root) %{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy
 

@@ -104,6 +104,12 @@ jobs:
             exit "$result"
           fi
 
+      - name: Measure bounded observability overhead (synthetic)
+        run: |
+          mkdir -p outputs/observability
+          python3 -B test/fixtures/observability_benchmark.py --runs 5 > outputs/observability/benchmark.json
+          cat outputs/observability/benchmark.json
+
       - name: Build RPM
         run: scripts/01-build-rpm.sh --source-mode git --require-clean-git
 
@@ -198,6 +204,7 @@ jobs:
             rpm-outputs/*.source-files.txt
             rpm-outputs/latest-rpm-path.txt
             rpm-outputs/latest-rpm-manifest.txt
+            outputs/observability/
             outputs/namespace-acceptance/
             outputs/release-contract-test/
             outputs/logs/01-build-rpm-*.log

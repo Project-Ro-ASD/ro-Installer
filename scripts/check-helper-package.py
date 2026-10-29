@@ -13,6 +13,9 @@ import xml.etree.ElementTree as ET
 HELPER = "/usr/libexec/ro-installer-helper"
 BACKEND = "/usr/libexec/ro-installer-backend"
 SESSION = "/usr/libexec/ro-installer-session"
+EXPORT = "/usr/libexec/ro-installer-export"
+RECORDS = "/usr/libexec/ro_installer_records.py"
+SCHEMA = "/usr/libexec/ro-installer-observability.json"
 POLICY = "/usr/share/polkit-1/actions/org.roasd.installer.helper.policy"
 
 
@@ -67,7 +70,7 @@ def check_package(rpm):
         if (path.startswith("/etc/sudoers") or path.startswith("/etc/polkit-1/rules.d/")
                 or path.startswith("/usr/share/polkit-1/rules.d/")):
             raise ValueError("installer RPM must not ship sudoers or live-only allow rules")
-    for path, permissions in ((HELPER, 0o755), (BACKEND, 0o755), (SESSION, 0o755), (POLICY, 0o644)):
+    for path, permissions in ((HELPER, 0o755), (BACKEND, 0o755), (SESSION, 0o755), (EXPORT, 0o755), (RECORDS, 0o644), (SCHEMA, 0o644), (POLICY, 0o644)):
         mode, user, group = files[path]
         if not stat.S_ISREG(mode) or stat.S_IMODE(mode) != permissions or (user, group) != ("root", "root"):
             raise ValueError("helper payload ownership, type or mode is incorrect")
@@ -76,6 +79,13 @@ def check_package(rpm):
     backend = extract_member(rpm, BACKEND)
     if not backend.startswith(b"\x7fELF"):
         raise ValueError("backend must be the compiled Dart executable")
+    exporter = extract_member(rpm, EXPORT)
+    if not exporter.startswith(b"#!/usr/bin/python3 -I\n"):
+        raise ValueError("user exporter must use isolated Python")
+    schema=json.loads(extract_member(rpm,SCHEMA))
+    if schema['version'] != 1 or schema['limits']['reportBytes'] != 4096:
+        raise ValueError("unexpected observability contract")
+    extract_member(rpm,RECORDS)
     session = extract_member(rpm, SESSION)
     if not session.startswith(b"#!/usr/bin/python3 -I\n"):
         raise ValueError("session must use isolated system Python")

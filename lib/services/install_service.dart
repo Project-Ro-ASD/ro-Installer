@@ -1,3 +1,5 @@
+import 'install_observation.dart';
+import 'session_command_runner.dart';
 import 'dart:async';
 import 'mount_session.dart';
 import 'install_preflight.dart';
@@ -27,12 +29,15 @@ class InstallService {
   final CommandRunner _commandRunner;
   final Future<MountSession> Function(CommandRunner)? _sessionFactory;
   InstallOutcome? lastOutcome;
+  final InstallObservation Function()? _observationFactory;
   late final InstallArtifactCollector _artifactCollector;
 
   InstallService({
     CommandRunner? commandRunner,
+    InstallObservation Function()? observationFactory,
     Future<MountSession> Function(CommandRunner)? sessionFactory,
-  }) : _sessionFactory = sessionFactory,
+  }) : _observationFactory = observationFactory,
+       _sessionFactory = sessionFactory,
        _commandRunner = commandRunner ?? CommandRunner.instance {
     _artifactCollector = InstallArtifactCollector(
       commandRunner: _commandRunner,
@@ -119,10 +124,11 @@ class InstallService {
 
   Duration? _stageElapsed(Map<String, dynamic> state, int index) {
     final startedAt = state['_stage_${index}_startedAt'];
-    if (startedAt is! DateTime) {
+    if (startedAt is! Stopwatch) {
       return null;
     }
-    return DateTime.now().difference(startedAt);
+    startedAt.stop();
+    return startedAt.elapsed;
   }
 
   // Ana kurulum motoru (Orkestratör)
@@ -136,6 +142,20 @@ class InstallService {
     void Function(int stage)? onStage,
   }) async {
     lastOutcome = null;
+    InstallObservation observation;
+    try {
+      observation =
+          _observationFactory?.call() ??
+          InstallObservation(
+            sink: _commandRunner is SessionCommandRunner
+                ? (request) async {
+                    await _commandRunner.control(request);
+                  }
+                : null,
+          );
+    } catch (_) {
+      observation = InstallObservation();
+    }
     void log(String msg) {
       try {
         onTechnicalLog(msg);
@@ -168,6 +188,12 @@ class InstallService {
         primaryFailure: 'UNSUPPORTED_MODE',
         cleanup: const CleanupReport(true),
       );
+      await observation.finish(
+        success: false,
+        primary: 'UNSUPPORTED_MODE',
+        cleanup: true,
+        remaining: 0,
+      );
       return false;
     }
     try {
@@ -189,6 +215,12 @@ class InstallService {
             primaryFailure: 'UNSUPPORTED_PLATFORM',
             cleanup: const CleanupReport(true),
           );
+          await observation.finish(
+            success: false,
+            primary: 'UNSUPPORTED_PLATFORM',
+            cleanup: true,
+            remaining: 0,
+          );
           return false;
         }
       }
@@ -198,6 +230,12 @@ class InstallService {
         cleanup: const CleanupReport(true),
       );
       log('Temel ortam kontrolleri tamamlanamadı; disk değiştirilmedi.');
+      await observation.finish(
+        success: false,
+        primary: 'PLATFORM_CHECK_FAILED',
+        cleanup: true,
+        remaining: 0,
+      );
       return false;
     }
     final localizer = InstallLocalizer(translate: translate);
@@ -212,7 +250,7 @@ class InstallService {
 
     void stageBanner(int index, String key, String fallback) {
       onStage?.call(index);
-      state['_stage_${index}_startedAt'] = DateTime.now();
+      state['_stage_${index}_startedAt'] = Stopwatch()..start();
       final stageName = t(key, fallback);
       log('');
       log(
@@ -252,13 +290,18 @@ class InstallService {
 
     MountSession? mountSession;
     var stagesSucceeded = false;
+    var cleanupStageEntered = false;
     String? primaryFailure;
     Future<void> diagnostics() async {
       try {
-        await _artifactCollector.collectDiagnostics(
-          log,
-          isMock: isMock,
-          localizer: localizer,
+        await observation.span(
+          'diagnostics',
+          () => _artifactCollector.collectDiagnostics(
+            log,
+            isMock: isMock,
+            localizer: localizer,
+            safeOnly: !isMock,
+          ),
         );
       } catch (_) {
         log('Tanılama tamamlanamadı; oturum temizliği yine uygulanacak.');
@@ -280,17 +323,47 @@ class InstallService {
         log: log,
         onProgress: onProgress,
         commandRunner: _commandRunner,
-        runCmd: runCmd,
+        runCmd:
+            (
+              cmd,
+              args,
+              onLog, {
+              bool isMock = false,
+              List<int> allowedExitCodes = const [0],
+            }) {
+              final String? operation = args.contains(bootloaderDracutScript)
+                  ? 'bootloader.dracut'
+                  : args.contains(bootloaderKernelInstallScript)
+                  ? 'bootloader.kernel-install'
+                  : args.contains('grub2-mkconfig')
+                  ? 'bootloader.grub-config'
+                  : null;
+              Future<bool> action() => runCmd(
+                cmd,
+                args,
+                onLog,
+                isMock: isMock,
+                allowedExitCodes: allowedExitCodes,
+              );
+              return operation == null
+                  ? action()
+                  : observation.span(operation, action, success: (ok) => ok);
+            },
         localizer: localizer,
         isMock: isMock,
         mountSession: mountSession,
+        observation: observation,
         beforeFirstMutation: () async {
           await mountSession!.validateTarget(disk, commit: true);
           await beforeFirstMutation?.call();
         },
       );
 
-      if (!await const InstallPreflight().check(ctx)) {
+      if (!await observation.span(
+        'preflight',
+        () => const InstallPreflight().check(ctx),
+        success: (ok) => ok,
+      )) {
         primaryFailure = 'PREFLIGHT_FAILED';
         log(
           'Kurulum öncesi güvenlik kontrolleri başarısız; disk değiştirilmedi.',
@@ -298,126 +371,112 @@ class InstallService {
         return false;
       }
 
-      // ══════════════════════════════════════════════
-      //  AŞAMA 1: Disk Hazırlığı
-      // ══════════════════════════════════════════════
-      stageBanner(1, 'install_stage_disk_preparation', 'Disk Hazırlığı');
-      final stage1 = await _diskPreparation.execute(ctx);
-      if (!stage1.success) {
-        primaryFailure = 'STAGE_1_FAILED';
-        stageFailed(1, stage1);
-        await diagnostics();
+      // The same nine stages and admission handshake, in the same order.
+      Future<bool> executeStage(
+        int index,
+        String key,
+        String fallback,
+        Future<StageResult> Function() execute,
+      ) async {
+        stageBanner(index, key, fallback);
+        await observation.beginStage(index);
+        StageResult result;
+        try {
+          result = await execute();
+        } catch (_) {
+          primaryFailure = 'INSTALL_EXCEPTION';
+          await observation.endStage(index, false, error: primaryFailure);
+          rethrow;
+        }
+        await observation.endStage(
+          index,
+          result.success,
+          error: result.success ? null : 'STAGE_${index}_FAILED',
+        );
+        if (!result.success) {
+          primaryFailure = 'STAGE_${index}_FAILED';
+          stageFailed(index, result);
+          await diagnostics();
+          return false;
+        }
+        stageDone(index, result);
+        return true;
+      }
+
+      if (!await executeStage(
+        1,
+        'install_stage_disk_preparation',
+        'Disk Hazırlığı',
+        () => _diskPreparation.execute(ctx),
+      )) {
         return false;
       }
-      stageDone(1, stage1);
-
-      // ══════════════════════════════════════════════
-      //  AŞAMA 2: Bölümleme
-      // ══════════════════════════════════════════════
-      stageBanner(2, 'install_stage_partitioning', 'Bölümleme');
-      final stage2 = await _partitioning.execute(ctx);
-      if (!stage2.success) {
-        primaryFailure = 'STAGE_2_FAILED';
-        stageFailed(2, stage2);
-        await diagnostics();
+      if (!await executeStage(
+        2,
+        'install_stage_partitioning',
+        'Bölümleme',
+        () => _partitioning.execute(ctx),
+      )) {
         return false;
       }
-      stageDone(2, stage2);
-
-      // ══════════════════════════════════════════════
-      //  AŞAMA 3: Biçimlendirme
-      // ══════════════════════════════════════════════
-      stageBanner(3, 'install_stage_formatting', 'Biçimlendirme');
-      final stage3 = await _formatting.execute(ctx);
-      if (!stage3.success) {
-        primaryFailure = 'STAGE_3_FAILED';
-        stageFailed(3, stage3);
-        await diagnostics();
+      if (!await executeStage(
+        3,
+        'install_stage_formatting',
+        'Biçimlendirme',
+        () => _formatting.execute(ctx),
+      )) {
         return false;
       }
-      stageDone(3, stage3);
-
-      // ══════════════════════════════════════════════
-      //  AŞAMA 4: Bağlama
-      // ══════════════════════════════════════════════
-      stageBanner(4, 'install_stage_mounting', 'Bağlama');
-      final stage4 = await _mounting.execute(ctx);
-      if (!stage4.success) {
-        primaryFailure = 'STAGE_4_FAILED';
-        stageFailed(4, stage4);
-        await diagnostics();
+      if (!await executeStage(
+        4,
+        'install_stage_mounting',
+        'Bağlama',
+        () => _mounting.execute(ctx),
+      )) {
         return false;
       }
-      stageDone(4, stage4);
-
-      // ══════════════════════════════════════════════
-      //  AŞAMA 5: Dosya Kopyalama
-      // ══════════════════════════════════════════════
-      stageBanner(5, 'install_stage_file_copy', 'Dosya Kopyalama');
-      final stage5 = await _fileCopy.execute(ctx);
-      if (!stage5.success) {
-        primaryFailure = 'STAGE_5_FAILED';
-        stageFailed(5, stage5);
-        await diagnostics();
+      if (!await executeStage(
+        5,
+        'install_stage_file_copy',
+        'Dosya Kopyalama',
+        () => _fileCopy.execute(ctx),
+      )) {
         return false;
       }
-      stageDone(5, stage5);
-
-      // ══════════════════════════════════════════════
-      //  AŞAMA 6: Hedef Sonlandırma
-      // ══════════════════════════════════════════════
-      stageBanner(6, 'install_stage_target_finalization', 'Hedef Sonlandırma');
-      final stage6 = await _targetFinalization.execute(ctx);
-      if (!stage6.success) {
-        primaryFailure = 'STAGE_6_FAILED';
-        stageFailed(6, stage6);
-        await diagnostics();
+      if (!await executeStage(
+        6,
+        'install_stage_target_finalization',
+        'Hedef Sonlandırma',
+        () => _targetFinalization.execute(ctx),
+      )) {
         return false;
       }
-      stageDone(6, stage6);
-
-      // ══════════════════════════════════════════════
-      //  AŞAMA 7: Bootloader Kurulumu
-      // ══════════════════════════════════════════════
-      stageBanner(7, 'install_stage_bootloader', 'Bootloader Kurulumu');
-      final stage7 = await _bootloader.execute(ctx);
-      if (!stage7.success) {
-        primaryFailure = 'STAGE_7_FAILED';
-        stageFailed(7, stage7);
-        await diagnostics();
+      if (!await executeStage(
+        7,
+        'install_stage_bootloader',
+        'Bootloader Kurulumu',
+        () => _bootloader.execute(ctx),
+      )) {
         return false;
       }
-      stageDone(7, stage7);
-
-      // ══════════════════════════════════════════════
-      //  AŞAMA 8: Kurulum Sonrası Doğrulama
-      // ══════════════════════════════════════════════
-      stageBanner(
+      if (!await executeStage(
         8,
         'install_stage_post_validation',
         'Kurulum Sonrası Doğrulama',
-      );
-      final stage8 = await _postInstallValidation.execute(ctx);
-      if (!stage8.success) {
-        primaryFailure = 'STAGE_8_FAILED';
-        stageFailed(8, stage8);
-        await diagnostics();
+        () => _postInstallValidation.execute(ctx),
+      )) {
         return false;
       }
-      stageDone(8, stage8);
-
-      // ══════════════════════════════════════════════
-      //  AŞAMA 9: Temizlik
-      // ══════════════════════════════════════════════
-      stageBanner(9, 'install_stage_cleanup', 'Temizlik');
-      final stage9 = await _cleanup.execute(ctx);
-      if (!stage9.success) {
-        primaryFailure = 'STAGE_9_FAILED';
-        stageFailed(9, stage9);
-        await diagnostics();
+      if (!await executeStage(9, 'install_stage_cleanup', 'Temizlik', () {
+        cleanupStageEntered = true;
+        return observation.span(
+          'cleanup',
+          () => _cleanup.execute(ctx),
+          success: (result) => result.success,
+        );
+      })) {
         return false;
       }
-      stageDone(9, stage9);
 
       stagesSucceeded = true;
     } catch (_) {
@@ -427,7 +486,12 @@ class InstallService {
     } finally {
       CleanupReport cleanup;
       try {
-        cleanup = await mountSession?.cleanup() ?? const CleanupReport(true);
+        cleanup = await observation.span(
+          cleanupStageEntered ? 'cleanup.verify' : 'cleanup',
+          () async =>
+              await mountSession?.cleanup() ?? const CleanupReport(true),
+          success: (report) => report.success,
+        );
       } catch (_) {
         cleanup = const CleanupReport(false, reason: 'Cleanup exception');
       }
@@ -435,6 +499,16 @@ class InstallService {
         primaryFailure:
             primaryFailure ?? (stagesSucceeded ? null : 'SESSION_REJECTED'),
         cleanup: cleanup,
+      );
+      await observation.finish(
+        success: stagesSucceeded && lastOutcome!.success,
+        primary: lastOutcome!.primaryFailure,
+        cleanup: cleanup.success,
+        remaining: cleanup.success
+            ? 0
+            : cleanup.remaining.isEmpty
+            ? null
+            : cleanup.remaining.length,
       );
       if (!cleanup.success) {
         log('Kurulum oturumu temizliği doğrulanamadı; sonuç başarısız.');

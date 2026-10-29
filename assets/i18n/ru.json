@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "Истекло время поиска дисков. Обновите список.",
   "disk_discovery_incompatibleJson": "Получен неподдерживаемый ответ при поиске дисков.",
   "disk_discovery_topology": "Не удалось безопасно прочитать топологию дисков.",
-  "disk_discovery_partial": "Некоторые диски исключены: безопасное чтение невозможно."
+  "disk_discovery_partial": "Некоторые диски исключены: безопасное чтение невозможно.",
+  "install_backend_report_available": "Отчёт backend готов к экспорту.",
+  "install_backend_report_unavailable": "Отчёт backend недоступен. Результат установки не изменился.",
+  "install_backend_report_invalid": "Не удалось проверить отчёт backend. Результат установки не изменился.",
+  "install_backend_record_complete": "Защищённые записи сеанса завершены.",
+  "install_backend_record_incomplete": "Защищённые записи сеанса неполны; можно экспортировать безопасный отчёт."
 }

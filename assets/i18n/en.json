@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "Disk discovery timed out. Try Refresh.",
   "disk_discovery_incompatibleJson": "Disk discovery returned an unsupported response.",
   "disk_discovery_topology": "Disk topology could not be safely read.",
-  "disk_discovery_partial": "Some disks could not be safely read and were excluded."
+  "disk_discovery_partial": "Some disks could not be safely read and were excluded.",
+  "install_backend_report_available": "Backend report is ready to export.",
+  "install_backend_report_unavailable": "Backend report is unavailable. Installation result is unchanged.",
+  "install_backend_report_invalid": "Backend report could not be verified. Installation result is unchanged.",
+  "install_backend_record_complete": "Protected session records are complete.",
+  "install_backend_record_incomplete": "Protected session records are incomplete; you can export the safe report."
 }

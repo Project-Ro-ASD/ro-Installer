@@ -125,7 +125,7 @@ class DeviceIdentity {
   };
 }
 
-void validateProgress(Map<String, dynamic> data) {
+void validateProgress(Map<String, dynamic> data, {int expectedVersion = 1}) {
   if (!exactFields(data, {
         'protocolVersion',
         'type',
@@ -134,7 +134,8 @@ void validateProgress(Map<String, dynamic> data) {
         'messageKey',
       }) ||
       data['protocolVersion'] is! int ||
-      data['protocolVersion'] != 1 ||
+      !const [1, 2].contains(expectedVersion) ||
+      data['protocolVersion'] != expectedVersion ||
       data['type'] != 'progress' ||
       data['stage'] is! int ||
       data['stage'] < 0 ||

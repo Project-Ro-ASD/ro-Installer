@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "Disk keşfi zaman aşımına uğradı. Yenile düğmesini deneyin.",
   "disk_discovery_incompatibleJson": "Disk keşfi desteklenmeyen bir yanıt döndürdü.",
   "disk_discovery_topology": "Disk topolojisi güvenli biçimde okunamadı.",
-  "disk_discovery_partial": "Bazı diskler güvenli biçimde okunamadığı için listeden çıkarıldı."
+  "disk_discovery_partial": "Bazı diskler güvenli biçimde okunamadığı için listeden çıkarıldı.",
+  "install_backend_report_available": "Backend raporu dışa aktarmaya hazır.",
+  "install_backend_report_unavailable": "Backend raporu oluşturulamadı. Kurulum sonucu değişmedi.",
+  "install_backend_report_invalid": "Backend raporu doğrulanamadı. Kurulum sonucu değişmedi.",
+  "install_backend_record_complete": "Korumalı oturum kayıtları tamamlandı.",
+  "install_backend_record_incomplete": "Korumalı oturum kayıtları eksik; güvenli raporu dışa aktarabilirsiniz."
 }

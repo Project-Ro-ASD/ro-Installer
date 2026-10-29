@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "磁盘检测超时。请刷新。",
   "disk_discovery_incompatibleJson": "磁盘检测返回了不支持的响应。",
   "disk_discovery_topology": "无法安全读取磁盘拓扑。",
-  "disk_discovery_partial": "部分磁盘无法安全读取，已从列表中排除。"
+  "disk_discovery_partial": "部分磁盘无法安全读取，已从列表中排除。",
+  "install_backend_report_available": "后端报告已可导出。",
+  "install_backend_report_unavailable": "后端报告不可用。安装结果未改变。",
+  "install_backend_report_invalid": "无法验证后端报告。安装结果未改变。",
+  "install_backend_record_complete": "受保护的会话记录已完成。",
+  "install_backend_record_incomplete": "受保护的会话记录不完整；您可以导出安全报告。"
 }

@@ -88,6 +88,15 @@ run_check "isolated session and inherited child lease regressions" \
 run_check "explicit real-namespace acceptance status regressions" \
   python3 -B test/scripts/namespace_acceptance_test.py
 
+run_check "P0-04 secure records, native transport, user export and v2 protocol" \
+  python3 -B -m unittest discover -s test/scripts -p '*observability*test.py'
+run_check "P0-04 unprivileged export attacks" \
+  python3 -B test/scripts/export_security_test.py
+run_check "P0-04 helper v1/v2 compatibility and framing" \
+  python3 -B test/scripts/helper_v2_test.py
+run_check "P0-04 generated schema is current" \
+  python3 scripts/generate-observability-schema.py --check
+
 run_check "source policy checkout/archive regressions" \
   python3 -B test/scripts/source_policy_test.py
 

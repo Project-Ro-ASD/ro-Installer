@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "La détection des disques a dépassé le délai. Actualisez.",
   "disk_discovery_incompatibleJson": "La détection des disques a renvoyé une réponse non prise en charge.",
   "disk_discovery_topology": "La topologie des disques n’a pas pu être lue en toute sécurité.",
-  "disk_discovery_partial": "Certains disques ont été exclus car leur lecture sûre était impossible."
+  "disk_discovery_partial": "Certains disques ont été exclus car leur lecture sûre était impossible.",
+  "install_backend_report_available": "Le rapport du backend est prêt à être exporté.",
+  "install_backend_report_unavailable": "Le rapport du backend est indisponible. Le résultat de l’installation reste inchangé.",
+  "install_backend_report_invalid": "Le rapport du backend n’a pas pu être vérifié. Le résultat de l’installation reste inchangé.",
+  "install_backend_record_complete": "Les journaux protégés de la session sont complets.",
+  "install_backend_record_incomplete": "Les journaux protégés de la session sont incomplets ; vous pouvez exporter le rapport sécurisé."
 }

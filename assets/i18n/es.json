@@ -478,5 +478,10 @@
   "disk_discovery_timeout": "Se agotó el tiempo de detección de discos. Actualice.",
   "disk_discovery_incompatibleJson": "La detección de discos devolvió una respuesta no compatible.",
   "disk_discovery_topology": "No se pudo leer la topología de discos de forma segura.",
-  "disk_discovery_partial": "Se excluyeron algunos discos porque no pudieron leerse de forma segura."
+  "disk_discovery_partial": "Se excluyeron algunos discos porque no pudieron leerse de forma segura.",
+  "install_backend_report_available": "El informe del backend está listo para exportar.",
+  "install_backend_report_unavailable": "El informe del backend no está disponible. El resultado de la instalación no cambia.",
+  "install_backend_report_invalid": "No se pudo verificar el informe del backend. El resultado de la instalación no cambia.",
+  "install_backend_record_complete": "Los registros protegidos de la sesión están completos.",
+  "install_backend_record_incomplete": "Los registros protegidos de la sesión están incompletos; puede exportar el informe seguro."
 }
