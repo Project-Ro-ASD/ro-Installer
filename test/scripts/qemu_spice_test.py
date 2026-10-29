@@ -320,9 +320,8 @@ if 'exec' in args:
 [ "$WAYLAND_DISPLAY" = wayland-0 ] || exit 98
 [ "$GDK_BACKEND" = wayland ] || exit 97
 [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ] || exit 96
-printf '{"success":true}' > "$RO_INSTALLER_LOG_DIR/install-test.summary.json"
-echo log > "$RO_INSTALLER_LOG_DIR/install-test.log"
-echo manifest > "$RO_INSTALLER_LOG_DIR/install-test.manifest.json"
+[ -z "${RO_INSTALLER_LOG_DIR:-}" ] || exit 95
+printf 'RO_INSTALLER_SESSION_REPORT {"protocolVersion":2,"type":"session-report","report":{"terminalStatus":"success"}}\n'
 exit "${INSTALL_STATUS:-0}"
 """)
         binary.chmod(0o755)
@@ -351,7 +350,7 @@ exit "${INSTALL_STATUS:-0}"
             self.assertTrue((logs / f'runner-install-exited-{status}').exists())
             self.assertEqual((logs / f'runner-logs-copied-{status}').exists(), copy_failure == '0')
             if copy_failure == '0':
-                self.assertTrue((logs / 'install-test.summary.json').exists())
+                self.assertIn('RO_INSTALLER_SESSION_REPORT', (logs / 'backend-output.log').read_text())
                 self.assertIn(f'state=logs-copied-{status}', (logs / 'runner-state.txt').read_text())
 
     def test_qga_guest_runner_display_timeout_fails_closed(self):

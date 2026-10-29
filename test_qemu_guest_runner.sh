@@ -128,13 +128,13 @@ if $ROOT_PREFIX env \
   RO_INSTALLER_AUTO_PROFILE="$PROFILE_PATH" \
   RO_INSTALLER_AUTO_REBOOT="${RO_INSTALLER_AUTO_REBOOT:-1}" \
   RO_INSTALLER_VM_TEST_MODE="${RO_INSTALLER_VM_TEST_MODE:-1}" \
-  RO_INSTALLER_LOG_DIR="$LOCAL_LOG_DIR" \
   RO_INSTALLER_EXTRA_KERNEL_ARGS="${RO_INSTALLER_EXTRA_KERNEL_ARGS:-}" \
-  "$BINARY_PATH"; then
+  "$BINARY_PATH" > "$LOCAL_LOG_DIR/backend-output.log" 2>&1; then
   status=0
 else
   status=$?
 fi
+cat "$LOCAL_LOG_DIR/backend-output.log"
 write_runner_state "install-exited-${status}"
 serial_marker "RO_INSTALLER_GUEST_RUNNER_INSTALL_EXIT status=$status"
 

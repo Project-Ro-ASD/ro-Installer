@@ -492,8 +492,9 @@ fail closed; compositor permissions are unchanged. Execution/status polling is
 bounded by `AUTO_TEST_TIMEOUT_SECONDS` (default 1800); unexpected agent loss
 or a nonzero runner exit fails without reboot, retaining available diagnostics.
 
-Before reboot the host requires `runner-install-exited-0`, `runner-logs-copied-0`,
-a successful Installer summary and matching log/manifest. Copy failures fail the
+Before reboot the host requires `runner-install-exited-0`, `runner-logs-copied-0`
+and the fixed success markers. The guest runner captures root-auto's sanitized
+output as `backend-output.log`; copying that file is part of acceptance. Copy failures fail the
 E2E. QGA acknowledges the reboot shell's PID before the host returns to serial
 monitoring; a short guest delay lets that acknowledgement arrive before
 `systemctl reboot` disconnects the agent. Serial boot monitoring has its own
@@ -518,6 +519,78 @@ no ISO action. `scripts/refresh-local-paths.sh` repairs local RPM pointers only.
 Storage, bootloader, RPM, and QEMU changes should include the relevant artifact
 or log evidence in the pull request. The existing RPM workflow publishes RPM
 artifacts for review when it runs in GitHub Actions.
+
+## Session records and diagnostic exports
+
+Both GUI and root-auto use the existing root session supervisor. It writes
+typed JSONL and atomic summary checkpoints beneath the fixed
+`/run/ro-installer/records/<128-bit-random-id>/` location, using root-owned 0700
+directories and 0600 regular, singly linked files. Paths are opened relative to
+validated directory descriptors without following symlinks. No environment or
+GUI parameter selects this privileged destination. `RO_INSTALLER_LOG_DIR` no
+longer controls root-auto output. No historical-session reader is exposed.
+
+The single contract is `linux/ro-installer-observability.json`; run
+`python3 scripts/generate-observability-schema.py --check` to verify the Dart
+validator's generated copy. Events accept only fixed operation/error identifiers,
+stage numbers, status, UTC timestamps and bounded numeric measurements. They
+exclude command lines, profiles, environment, stream output and exceptions.
+Limits are 1 KiB/event, 20,000 events and 4 MiB/event file, 8 KiB/summary,
+32 sessions and a 64 MiB logical store budget (including active reservations).
+Filesystem allocation and tmpfs bookkeeping are additional. A full store never
+silently deletes records; unavailable, failed, truncated and incomplete logging
+remain independent of the installation result and cleanup result.
+
+Engine timings use `Stopwatch`; supervisor/command timings use
+`time.monotonic_ns()`. Process-local epochs are never subtracted across processes.
+Nine stage measurements and preflight, main/EFI copy, diagnostics, cleanup and
+engine spans overlap: do not sum them together. Unstarted stages have null
+duration; interrupted operations retain partial duration when observable.
+Transferred bytes and throughput are null because they are not measured.
+Functional command capture is separately bounded: parsed stdout retains at most
+1 Mi characters, stderr and unparsed rsync streams 64 Ki characters each, and
+log lines 8 Ki characters. Oversized parsed stdout is drained, then fails closed
+with `-126/COMMAND_OUTPUT_LIMIT`, without parsing a truncated prefix. Rsync's
+actual exit status and flags remain authoritative. Logging limits never change
+command exit status. This bounds retained data, not total stream traffic.
+
+GUI explicitly selects helper `--protocol=2`. The existing operations and v1
+strict request/terminal checks are preserved. V2 adds exactly one bounded
+`session-report` response for the current install, before the helper terminal
+result. A missing/invalid report body is reported separately; malformed framing,
+duplicates, ordering errors or unauthenticated terminal results still fail
+closed. V1 has no report response or silent downgrade. Root-auto emits the same
+safe report in a `RO_INSTALLER_SESSION_REPORT` stdout frame. Reboot, when already
+requested, is delegated to the supervisor after record finalization while its
+session lease remains held.
+
+`/run` is transient: reboot or power loss removes these root records. The GUI
+exports its validated report before reboot with its own user privileges and
+disables reboot while export is pending. The separate
+`/usr/libexec/ro-installer-export` refuses root. It publishes a 0700 bundle with
+0600 `install.log`, `summary.json` and a hash `manifest.json`, using exclusive
+creation, fsync and Linux atomic no-replace directory rename. Consumers accept
+published `install-*` directories with a complete verified manifest; `.install-*`
+directories are unpublished. Failure before publication leaves no valid partial
+bundle. `EXPORT_PUBLISH_UNCONFIRMED` means publication happened but parent fsync
+failed: a complete package may exist, without a durability claim. Filesystems
+without the required rename primitive return a safe error. Existing files are
+never replaced. Default exports use XDG state or `~/.local/state/ro-installer/exports`;
+user-side `RO_INSTALLER_LOG_DIR` overrides do not grant root access.
+
+Free-text exports redact known secret aliases, argv values, nested JSON,
+URL credentials/query tokens and final status; errors use fixed codes. Regex
+redaction cannot recognize every unknown secret. The structured report's safety
+comes from excluding free text. Automatic privileged journal/dmesg/file dumps
+are replaced by structured diagnostics metadata. No logs are automatically
+copied to the installed target or sent to a server.
+
+Security regressions use disposable directories, fake disk commands and real
+process/IPC faults. The synthetic benchmark
+`python3 -B test/fixtures/observability_benchmark.py --runs 5` reports independent
+process samples, retained memory, bytes and file operations; it is not physical
+installation performance evidence. CI's namespace result remains separately
+PASS/FAIL/UNAVAILABLE; UNAVAILABLE leaves full security acceptance **NO-GO**.
 
 ## Contributing
 

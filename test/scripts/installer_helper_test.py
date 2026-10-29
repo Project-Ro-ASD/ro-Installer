@@ -669,7 +669,7 @@ class LauncherSessionTests(unittest.TestCase):
         self.assertNotIn("RO_INSTALLER_COMMAND_SUDO", main + runner)
         self.assertNotIn("pkexec", main)
         self.assertNotIn("InstallService.instance.runInstall", installing)
-        self.assertIn("widget.helperClient ?? HelperClient.instance", installing)
+        self.assertIn("client.installWithReport", installing)
 
 
 class PackagingTests(unittest.TestCase):
@@ -778,6 +778,9 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
             (top / "SOURCES/backend").write_bytes(b"\x7fELFpayload-fixture")
             shutil.copy2(ROOT / "linux/ro-installer-helper", top / "SOURCES/helper")
             shutil.copy2(ROOT / "linux/ro-installer-session", top / "SOURCES/session")
+            shutil.copy2(ROOT / "linux/ro-installer-export", top / "SOURCES/export")
+            shutil.copy2(ROOT / "linux/ro_installer_records.py", top / "SOURCES/records")
+            shutil.copy2(ROOT / "linux/ro-installer-observability.json", top / "SOURCES/schema")
             shutil.copy2(ROOT / "linux/org.roasd.installer.helper.policy", top / "SOURCES/policy")
             for release, mode in (("1", "0755"), ("2", "0777")):
                 spec = top / "SPECS/fixture.spec"
@@ -790,11 +793,17 @@ BuildArch: noarch
 %description
 Non-product package fixture.
 %install
+install -Dm755 %{{_sourcedir}}/export %{{buildroot}}{package.EXPORT}
+install -Dm644 %{{_sourcedir}}/records %{{buildroot}}{package.RECORDS}
+install -Dm644 %{{_sourcedir}}/schema %{{buildroot}}{package.SCHEMA}
 install -Dm755 %{{_sourcedir}}/session %{{buildroot}}{package.SESSION}
 install -Dm755 %{{_sourcedir}}/helper %{{buildroot}}{package.HELPER}
 install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
 install -Dm644 %{{_sourcedir}}/policy %{{buildroot}}{package.POLICY}
 %files
+%attr(0755,root,root) {package.EXPORT}
+%attr(0644,root,root) {package.RECORDS}
+%attr(0644,root,root) {package.SCHEMA}
 %attr(0755,root,root) {package.SESSION}
 %attr({mode},root,root) {package.HELPER}
 %attr(0755,root,root) {package.BACKEND}
