@@ -522,7 +522,28 @@ class LockAndGateTests(ErrorAssertions, unittest.TestCase):
             self.error("UNSUPPORTED_PLATFORM", helper.handle, helper.parse_request(json.dumps(install_request()).encode()), system)
 
 
+def child_gone_or_zombie(proc):
+    """One /proc read: a reaped child can disappear without a failed cleanup."""
+    try:
+        return proc.read_text().split()[2] == "Z"
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+
+
 class BackendBridgeTests(ErrorAssertions, unittest.TestCase):
+    def test_child_status_accepts_only_missing_or_zombie(self):
+        proc = mock.Mock()
+        for missing in (FileNotFoundError, ProcessLookupError):
+            proc.read_text.side_effect = missing
+            self.assertTrue(child_gone_or_zombie(proc))
+        proc.read_text.side_effect = None
+        for state, expected in (("Z", True), ("R", False), ("S", False)):
+            proc.read_text.return_value = f"42 (fixture) {state} 1 2"
+            self.assertEqual(child_gone_or_zombie(proc), expected)
+        proc.read_text.side_effect = PermissionError
+        with self.assertRaises(PermissionError):
+            child_gone_or_zombie(proc)
+
     prefix = "import json,sys\nrequest=json.loads(sys.stdin.readline())\n"
     ready = 'print(json.dumps({"protocolVersion":1,"type":"ready"}),flush=True)\ngate=json.loads(sys.stdin.readline())\n'
     success = 'print(json.dumps({"protocolVersion":1,"type":"result","ok":True,"code":"OK"}),flush=True)\n'
@@ -583,10 +604,11 @@ print(json.dumps({"protocolVersion":1,"type":"progress","stage":2,"progress":0.2
             # A reparented zombie is stopped and cannot continue disk writes.
             proc = Path("/proc", str(pid), "stat")
             for _ in range(100):
-                if not proc.exists() or proc.read_text().split()[2] == "Z": break
+                if child_gone_or_zombie(proc):
+                    break
                 import time
                 time.sleep(0.01)
-            self.assertTrue(not proc.exists() or proc.read_text().split()[2] == "Z")
+            self.assertTrue(child_gone_or_zombie(proc))
 
     def test_missing_backend_fails_closed(self):
         with mock.patch.object(helper, "BACKEND_ARGV", ("/nonexistent/ro-backend",)):
