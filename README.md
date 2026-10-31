@@ -4,14 +4,19 @@ Ro-Installer is the system installer for Ro-ASD, a Fedora KDE based Linux
 distribution. It installs the prepared Ro-Compose filesystem onto a target disk
 and validates the resulting system. Ro-Installer is not a distro builder.
 
-## 2.4.5 release preparation
+## Release identity and integration readiness
 
-The candidate version is `2.4.5+1`, producing
+The source version remains `2.4.5+1`, producing
 `ro-installer-2.4.5-1.fc44.x86_64.rpm` and
-`ro-installer-2.4.5-1.fc44.src.rpm`. Published `v2.4.4` stays immutable;
-preparing or merging this change does not publish a release.
+`ro-installer-2.4.5-1.fc44.src.rpm` in CI. Published `v2.4.5` binds commit
+`a402892ad5380bc7b26e4b66ce748d3a911b2446` and predates P0-01 through P0-04.
+Current main includes those changes, so its CI RPM has different content under
+the same NEVRA. CI artifacts are review fixtures and must not replace that
+release or enter a repository as another `2.4.5-1.fc44` build. Published tags,
+releases and artifacts stay immutable. A new version requires an explicit
+operator decision; this readiness work does not select or publish one.
 
-This candidate includes PR #22–24 (privileged helper, user-session GUI and
+The released baseline includes PR #22–24 (privileged helper, user-session GUI and
 fail-closed live/root topology checks) and PR #25, merged on 2026-10-09.
 PR #25 target finalization removes the copied `/etc/plasma-setup-done` marker
 and only the Live user's autologin keys in `/etc/plasmalogin.conf`. It preserves
@@ -34,15 +39,23 @@ Acceptance evidence has three separate levels:
    Ro-image-compose stage. Green package CI does not prove Plasma Setup runs on
    a physical computer. No ISO build or QEMU install is required for this PR.
 
-After operator approval, merge the reviewed PR, confirm the accepted commit and
-version, then create and push `v2.4.5` on that commit. The tag-triggered
-`.github/workflows/release.yml` builds the exact RPM/SRPM pair, binds the
+After operator approval of a new, unused version and the accepted source commit,
+update pubspec, spec defaults, displayed UI versions and these instructions
+together. Do not recreate or move `v2.4.5`. A future approved tag triggers
+`.github/workflows/release.yml`, which builds the exact RPM/SRPM pair, binds the
 manifest to the real release ID and run, attests both RPMs, `SHA256SUMS` and
 `component-artifact-manifest-v1.json`, and verifies the four immutable assets.
 The workflow publishes automatically after its checks; pushing the tag is the
 publication action and requires operator approval. Verify that workflow's
 attestations and exact asset digests before Ro-Repo V2 admission. Never reuse
-`v2.4.4` or substitute PR fixture metadata for release provenance.
+an existing version or substitute PR fixture metadata for release provenance.
+
+Integration requires admission of the exact approved release artifact into
+Ro-Repo, a signed immutable snapshot and an ISO input pinned to that snapshot's
+digest and exact NEVRA. A newer Installer checkout cannot update an older ISO.
+Before physical acceptance, verify the installed Live RPM against that chain
+and record namespace acceptance separately. Local namespace PASS does not turn
+CI UNAVAILABLE or an untested ISO/firstboot chain into acceptance.
 
 ## Architecture and Ownership
 
@@ -362,7 +375,8 @@ The stable gate runs helper protocol/storage/locking/backend/launcher/RPM tests
 and the full Flutter suite. Package CI additionally checks the compiled backend,
 helper ownership/modes and exact helper policy in the actual Fedora 44 product
 RPM, rejects old root-GUI policy/sudoers/allow rules, and verifies installability.
-The helper and storage protections are retained in the 2.4.5 release candidate.
+Current sources retain these helper and storage protections; deploying the
+P0 changes requires a newly approved release identity and exact artifacts.
 
 For ISO acceptance, run a real Compose ISO with an active graphical polkit agent,
 validate its live/root topology and authorization, then perform full install and

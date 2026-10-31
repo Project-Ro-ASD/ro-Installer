@@ -3,6 +3,7 @@ import 'package:test/test.dart';
 import 'package:ro_installer/services/install_observation.dart';
 import 'package:ro_installer/services/install_service.dart';
 import 'package:ro_installer/services/session_report.dart';
+import 'package:ro_installer/services/install_stages/bootloader_stage.dart';
 import 'install_service_finalization_test.dart'
     show PipelineGraph, state, empty, noMutation;
 
@@ -25,7 +26,12 @@ void main() {
           graph.addResponseForCommand('wipefs', exitCode: 1);
         }
         if (fault == 'bootloader') {
-          graph.addResponseForCommand('chroot', exitCode: 1);
+          graph.addResponse('chroot', [
+            '/mnt',
+            'sh',
+            '-c',
+            bootloaderDracutScript,
+          ], exitCode: 1);
         }
         if (fault == 'cleanup') graph.busy.add('/mnt/boot/efi');
         if (fault == 'preflight') {
@@ -82,6 +88,13 @@ void main() {
         }
         if (fault == 'partition') expect(outcome['failedStage'], 2);
         if (fault == 'exception') expect(outcome['failedStage'], 4);
+        if (fault == 'bootloader') {
+          expect(outcome['failedStage'], 7);
+          expect(outcome['primaryError'], 'STAGE_7_FAILED');
+          expect(ended.last['stageId'], 7);
+          expect(ended.last['status'], 'failed');
+          expect(outcome['cleanupStatus'], 'success');
+        }
         if (!const ['cleanup'].contains(fault)) empty(graph);
         expect(jsonEncode(events), isNot(contains('/dev/vda')));
         expect(
