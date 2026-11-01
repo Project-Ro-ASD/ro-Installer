@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'helper_protocol.dart';
 import 'install_service.dart';
+import '../models/approved_full_disk_plan.dart';
 
 /// A strict, non-GUI adapter around the existing nine-stage Dart engine.
 /// Only helper-generated values enter the engine state; no profile/path/env API.
@@ -49,6 +50,7 @@ Future<int> runPrivilegedBackend(
           'expectedDevice',
           if (request.containsKey('uiLanguage')) 'uiLanguage',
           if (request.containsKey('includeCopyProgress')) 'includeCopyProgress',
+          if (request.containsKey('confirmedPlan')) 'confirmedPlan',
         }) ||
         request['protocolVersion'] is! int ||
         request['protocolVersion'] != 1 ||
@@ -69,6 +71,12 @@ Future<int> runPrivilegedBackend(
       'path': request['disk'],
       ...request['expectedDevice'] as Map<String, dynamic>,
     });
+    final plan = request.containsKey('confirmedPlan')
+        ? ApprovedFullDiskPlan.fromJson(request['confirmedPlan'])
+        : null;
+    if (plan != null && !samePlanValue(plan.device.json, identity.json)) {
+      throw const FormatException('Plan identity mismatch');
+    }
     // Fixed full/Btrfs configuration. No GUI state, sources, targets, test flags,
     // chroots, boot arguments or environment overrides cross this boundary.
     final state = <String, dynamic>{
@@ -76,6 +84,7 @@ Future<int> runPrivilegedBackend(
       'partitionMethod': 'full',
       'fileSystem': 'btrfs',
       'selectedLanguage': request['uiLanguage'] ?? 'en',
+      if (plan != null) '_approvedFullDiskPlan': plan.json,
     };
     publish();
     heartbeat = Timer.periodic(const Duration(seconds: 5), (_) => publish());
@@ -102,15 +111,29 @@ Future<int> runPrivilegedBackend(
       },
       beforeFirstMutation: () async {
         if (authorized) throw const FormatException('Repeated mutation gate');
+        if (!matchesApprovedPlan(state, expected: plan)) {
+          throw const FormatException('Stale plan');
+        }
         final authorizationLines = lines!;
-        emit({'protocolVersion': 1, 'type': 'ready'});
+        emit({
+          'protocolVersion': 1,
+          'type': 'ready',
+          if (plan != null) 'confirmedPlan': plan.json,
+        });
         if (!await authorizationLines.moveNext().timeout(
           const Duration(seconds: 15),
         )) {
           throw const FormatException('Missing authorization');
         }
         final gate = decodeProtocolObject(authorizationLines.current);
-        if (!exactFields(gate, {'protocolVersion', 'type', 'device'}) ||
+        if (!exactFields(gate, {
+              'protocolVersion',
+              'type',
+              'device',
+              if (plan != null) 'confirmedPlan',
+            }) ||
+            (plan != null &&
+                !samePlanValue(gate['confirmedPlan'], plan.json)) ||
             gate['protocolVersion'] is! int ||
             gate['protocolVersion'] != 1 ||
             gate['type'] != 'continue' ||

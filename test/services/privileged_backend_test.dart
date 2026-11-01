@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:ro_installer/services/copy_progress.dart';
+import 'package:ro_installer/models/approved_full_disk_plan.dart';
 import 'package:test/test.dart';
 import 'package:ro_installer/services/privileged_backend.dart';
 import 'package:ro_installer/services/helper_protocol.dart';
@@ -31,7 +32,13 @@ Stream<List<int>> input(List<Map<String, dynamic>> data) =>
     Stream.value(utf8.encode('${data.map(jsonEncode).join('\n')}\n'));
 
 class BridgeEngine extends InstallService {
-  BridgeEngine({this.success = true, this.useGate = true, this.copy});
+  BridgeEngine({
+    this.success = true,
+    this.useGate = true,
+    this.copy,
+    this.mutateBeforeGate,
+  });
+  final void Function(Map<String, dynamic>)? mutateBeforeGate;
   final CopyProgress? copy;
   final bool success;
   final bool useGate;
@@ -48,6 +55,7 @@ class BridgeEngine extends InstallService {
     void Function(CopyProgress)? onCopyProgress,
   }) async {
     this.state = Map.of(state);
+    mutateBeforeGate?.call(state);
     if (useGate) await beforeFirstMutation!();
     onStage?.call(5);
     if (copy != null) onCopyProgress?.call(copy!);
@@ -58,6 +66,108 @@ class BridgeEngine extends InstallService {
 }
 
 void main() {
+  test(
+    'approved plan is bound through backend request and mutation handshake',
+    () async {
+      final plan = ApprovedFullDiskPlan(identity);
+      final events = <Map<String, dynamic>>[];
+      final engine = BridgeEngine();
+      expect(
+        await runPrivilegedBackend(
+          input([
+            {...request, 'confirmedPlan': plan.json},
+            {...gate, 'confirmedPlan': plan.json},
+          ]),
+          events.add,
+          service: engine,
+          rootCheck: () async => true,
+        ),
+        0,
+      );
+      expect(
+        events.singleWhere((v) => v['type'] == 'ready')['confirmedPlan'],
+        plan.json,
+      );
+      expect(engine.state!['_approvedFullDiskPlan'], plan.json);
+      for (final wrong in [
+        null,
+        {...plan.json, 'espBytes': 1},
+        {
+          ...plan.json,
+          'device': {...identity.json, 'diskSequence': 99},
+        },
+      ]) {
+        final engine = BridgeEngine();
+        expect(
+          await runPrivilegedBackend(
+            input([
+              {...request, 'confirmedPlan': wrong},
+              gate,
+            ]),
+            (_) {},
+            service: engine,
+            rootCheck: () async => true,
+          ),
+          9,
+        );
+        expect(engine.state, isNull);
+      }
+      for (final wrongGate in [
+        gate,
+        {...gate, 'confirmedPlan': null},
+        {
+          ...gate,
+          'confirmedPlan': {...plan.json, 'diskSwap': true},
+        },
+      ]) {
+        final events = <Map<String, dynamic>>[];
+        expect(
+          await runPrivilegedBackend(
+            input([
+              {...request, 'confirmedPlan': plan.json},
+              wrongGate,
+            ]),
+            events.add,
+            service: BridgeEngine(),
+            rootCheck: () async => true,
+          ),
+          9,
+        );
+        expect(events.last['ok'], false);
+      }
+    },
+  );
+  test(
+    'backend retained approval rejects a deleted or changed engine plan before ready',
+    () async {
+      final plan = ApprovedFullDiskPlan(identity);
+      for (final remove in [false, true]) {
+        final events = <Map<String, dynamic>>[];
+        final engine = BridgeEngine(
+          mutateBeforeGate: (state) {
+            if (remove) {
+              state.remove('_approvedFullDiskPlan');
+            } else {
+              state['selectedDisk'] = '/dev/vdb';
+            }
+          },
+        );
+        expect(
+          await runPrivilegedBackend(
+            input([
+              {...request, 'confirmedPlan': plan.json},
+              {...gate, 'confirmedPlan': plan.json},
+            ]),
+            events.add,
+            service: engine,
+            rootCheck: () async => true,
+          ),
+          9,
+        );
+        expect(events.where((v) => v['type'] == 'ready'), isEmpty);
+      }
+    },
+  );
   test(
     'backend copy telemetry requires opt-in and cannot replace terminal authorization',
     () async {

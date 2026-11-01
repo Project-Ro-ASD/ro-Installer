@@ -290,6 +290,42 @@ conversation timeout; disk enumeration's timeout is separate.
 | 8 | INSTALL_FAILED |
 | 9 | BACKEND_ERROR |
 
+### Confirmed full-disk plan (GUI v2)
+
+The production GUI snapshots the freshly probed disk identity and the fixed
+full-disk/Btrfs plan before displaying the destructive confirmation. The dialog
+shows that all data will be erased, with a 512 MiB FAT32 ESP, Btrfs in the
+remaining space and no disk swap. Disk selection/configuration changes and
+back navigation invalidate the approval; selection revisions also reject a
+dialog whose disk was changed away and back while it was open. Language changes
+do not alter disk approval. Production GUI v2 refuses identity-only confirmation.
+
+Its install request includes `confirmedPlan` (schema version 1). The exact
+data-only shape is demonstrated in
+`test/fixtures/approved_full_disk_plan_v1.json`: disk path/major-minor/size/disk
+sequence, GPT/ESP/filesystem/layout/subvolume contract, and the five fixed
+destructive storage operations. Both helper and backend recompute and strictly
+compare the supported plan, including nested JSON types, unknown fields and
+operation order. The ready/continue exchange echoes that same plan alongside
+the existing disk identity gate under the installation lock. No GUI-supplied
+command, partition path override or arbitrary operation is accepted.
+
+The engine retains a separate typed approval; deleting or replacing its state
+copy cannot downgrade execution to the legacy path. It checks the approval
+before the first mutation and rechecks the partitioning/formatting stages.
+Rsync, partition geometry, format argv, mount ownership and cleanup contracts
+are unchanged. This binds the supported full-disk intent, not a snapshot of
+the disk's existing partition contents. Manual/free-space/alongside approval
+requires a separate plan design. The plan is not a signature, authorization
+token or proof of a human click; polkit and authoritative device checks remain
+the privilege boundary.
+
+Public v1 rejects `confirmedPlan`; old v2 callers may omit it and retain the
+existing fixed-mode contract. Root-auto remains on its existing profile and
+supervisor admission path. The new GUI-plan guarantee applies only when this
+capability is present, and the production GUI always supplies it. No supported
+installation mode is added by this feature.
+
 ### Live copy measurements (explicit helper v2 capability)
 
 A v2 `install-full-disk` request can opt in with `includeCopyProgress: true`.

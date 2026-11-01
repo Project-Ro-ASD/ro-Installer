@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "layoutVersion": 1,
+  "device": {
+    "path": "/dev/vda",
+    "majorMinor": "252:0",
+    "size": 68719476736,
+    "diskSequence": 11
+  },
+  "partitionTable": "gpt",
+  "espBytes": 536870912,
+  "espFileSystem": "fat32",
+  "diskSwap": false,
+  "subvolumes": {
+    "root": "/",
+    "home": "/home",
+    "var_log": "/var/log",
+    "var_cache": "/var/cache",
+    "var_tmp": "/var/tmp"
+  },
+  "storagePlan": {
+    "planId": "full-_dev_vda",
+    "mode": "full",
+    "targetDisk": "/dev/vda",
+    "fileSystem": "btrfs",
+    "operations": [
+      {
+        "type": "wipe_disk",
+        "target": "/dev/vda",
+        "destructive": true
+      },
+      {
+        "type": "create_efi",
+        "target": "/dev/vda",
+        "destructive": true
+      },
+      {
+        "type": "create_btrfs_root",
+        "target": "/dev/vda",
+        "destructive": true
+      },
+      {
+        "type": "format_efi",
+        "target": "/dev/vda1",
+        "destructive": true
+      },
+      {
+        "type": "format_btrfs_root",
+        "target": "/dev/vda2",
+        "destructive": true
+      }
+    ],
+    "destructiveOperations": [
+      {
+        "type": "wipe_disk",
+        "target": "/dev/vda",
+        "destructive": true
+      },
+      {
+        "type": "create_efi",
+        "target": "/dev/vda",
+        "destructive": true
+      },
+      {
+        "type": "create_btrfs_root",
+        "target": "/dev/vda",
+        "destructive": true
+      },
+      {
+        "type": "format_efi",
+        "target": "/dev/vda1",
+        "destructive": true
+      },
+      {
+        "type": "format_btrfs_root",
+        "target": "/dev/vda2",
+        "destructive": true
+      }
+    ]
+  }
+}

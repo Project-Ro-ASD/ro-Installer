@@ -8,6 +8,7 @@ import '../services/command_runner.dart';
 import '../services/install_log_export_service.dart';
 import '../services/helper_client.dart';
 import '../services/copy_progress.dart';
+import '../models/approved_full_disk_plan.dart';
 import '../services/session_report.dart';
 import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
@@ -275,6 +276,17 @@ class _InstallingScreenState extends State<InstallingScreen>
       }
 
       final client = widget.helperClient ?? HelperClient(protocolVersion: 2);
+      final plan = state.confirmedPlan;
+      if (client.protocolVersion == 2 &&
+          (plan == null ||
+              !plan.matchesState({
+                'selectedDisk': state.selectedDisk,
+                'partitionMethod': state.partitionMethod,
+                'fileSystem': state.fileSystem,
+              }) ||
+              !samePlanValue(plan.device.json, identity.json))) {
+        throw const HelperException('MISSING_CONFIRMATION');
+      }
       if (client.protocolVersion == 1) {
         await client.install(identity, progressChanged);
       } else {
@@ -282,6 +294,7 @@ class _InstallingScreenState extends State<InstallingScreen>
           identity,
           progressChanged,
           uiLanguage: state.selectedLanguage,
+          confirmedPlan: plan,
           onCopyProgress: (value) {
             if (!mounted || _isFinished) return;
             _copyExpiry?.cancel();

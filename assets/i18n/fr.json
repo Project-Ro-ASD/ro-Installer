@@ -486,5 +486,6 @@
   "install_backend_record_incomplete": "Les journaux protégés de la session sont incomplets ; vous pouvez exporter le rapport sécurisé.",
   "install_copy_measurement": "Données copiées ({phase}) : {bytes} · {rate} · Durée de copie estimée : {eta}",
   "install_copy_main": "Système",
-  "install_copy_efi": "EFI"
+  "install_copy_efi": "EFI",
+  "disk_full_plan_summary": "Disque entier : effacer toutes les données ; créer une partition EFI FAT32 de 512 MiB et Btrfs dans l’espace restant. Aucune partition swap."
 }

@@ -486,5 +486,6 @@
   "install_backend_record_incomplete": "Os registros protegidos da sessão estão incompletos; você pode exportar o relatório seguro.",
   "install_copy_measurement": "Dados copiados ({phase}): {bytes} · {rate} · Estimativa da cópia: {eta}",
   "install_copy_main": "Principal",
-  "install_copy_efi": "EFI"
+  "install_copy_efi": "EFI",
+  "disk_full_plan_summary": "Disco inteiro: apagar todos os dados; criar EFI FAT32 de 512 MiB e Btrfs no espaço restante. Sem partição swap."
 }

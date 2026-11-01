@@ -81,6 +81,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(client.paths, ['/dev/vda']);
       expect(find.textContaining('/dev/vda (64.0 GiB)'), findsOneWidget);
+      expect(
+        find.textContaining(state.t('disk_full_plan_summary')),
+        findsOneWidget,
+      );
       expect(state.confirmedDevice, isNull);
       await tester.tap(find.text(state.t('cancel')));
       await tester.pumpAndSettle();
@@ -91,12 +95,66 @@ void main() {
       await tester.tap(find.text(state.t('disk_danger_confirm_action')));
       await tester.pumpAndSettle();
       expect(client.paths, ['/dev/vda', '/dev/vda']);
-      expect(state.confirmedDevice, same(client.identity));
+      expect(state.confirmedDevice!.json, client.identity.json);
+      expect(state.confirmedPlan!.device.json, client.identity.json);
       expect(state.currentStep, 2);
       await tester.pumpWidget(const SizedBox.shrink());
       state.dispose();
     },
   );
+  testWidgets('a dialog cannot approve a selection changed away and back', (
+    tester,
+  ) async {
+    final runner = FakeCommandRunner();
+    runner.addResponseForCommand(
+      'lsblk',
+      stdout: jsonEncode({
+        'blockdevices': [
+          {
+            'name': 'vda',
+            'type': 'disk',
+            'size': 68719476736,
+            'rm': false,
+            'mountpoints': [null],
+          },
+        ],
+      }),
+    );
+    CommandRunner.setInstance(runner);
+    addTearDown(CommandRunner.resetInstance);
+    final client = ProbeClient();
+    final state = InstallerState(translations: catalog)..nextStep();
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: state,
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: Scaffold(
+            body: DiskSelectionScreen(
+              diskService: DiskService(commandRunner: runner),
+              helperClient: client,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(state.t('next')));
+    await tester.pumpAndSettle();
+    state.updateDiskParams('/dev/vdb', 'btrfs', 'full');
+    state.updateDiskParams('/dev/vda', 'btrfs', 'full');
+    await tester.tap(find.text(state.t('disk_danger_confirm_action')));
+    await tester.pumpAndSettle();
+    expect(state.currentStep, 1);
+    expect(state.confirmedPlan, isNull);
+    expect(state.confirmedDevice, isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    state.dispose();
+  });
   for (final failure in [false, true]) {
     testWidgets(
       'discovery error=$failure is distinct from successful empty inventory',

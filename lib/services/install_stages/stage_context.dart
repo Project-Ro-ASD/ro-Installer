@@ -1,5 +1,6 @@
 import '../install_observation.dart';
 import '../copy_progress.dart';
+import '../../models/approved_full_disk_plan.dart';
 import '../command_runner.dart';
 import '../mount_session.dart';
 import '../install_localizer.dart';
@@ -25,6 +26,7 @@ class StageContext {
     this.mountSession,
     this.observation,
     this.onCopyProgress,
+    this.approvedPlan,
   });
 
   /// Kurulum yapılandırma verisi (disk, storage layout, Installer UI language hint)
@@ -58,6 +60,7 @@ class StageContext {
   final MountSession? mountSession;
   final InstallObservation? observation;
   final void Function(CopyProgress)? onCopyProgress;
+  final ApprovedFullDiskPlan? approvedPlan;
 
   String t(
     String key,

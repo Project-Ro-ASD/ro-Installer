@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../models/storage_plan.dart';
+import '../../models/approved_full_disk_plan.dart';
 import '../storage_topology_guard.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
@@ -16,6 +17,9 @@ class FormattingStage {
   const FormattingStage();
 
   Future<StageResult> execute(StageContext ctx) async {
+    if (!matchesApprovedPlan(ctx.state, expected: ctx.approvedPlan)) {
+      return StageResult.fail('Onaylanan disk planı değişti.');
+    }
     final selectedDisk = ctx.state['selectedDisk'] as String;
     final partitionMethod = ctx.state['partitionMethod'] as String;
     final String rootFs = ctx.state['fileSystem'] ?? 'btrfs';

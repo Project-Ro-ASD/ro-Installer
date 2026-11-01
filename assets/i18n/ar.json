@@ -486,5 +486,6 @@
   "install_backend_record_incomplete": "سجلات الجلسة المحمية غير مكتملة؛ يمكنك تصدير التقرير الآمن.",
   "install_copy_measurement": "البيانات المنسوخة ({phase}): {bytes} · {rate} · وقت النسخ المتوقع: {eta}",
   "install_copy_main": "النظام",
-  "install_copy_efi": "EFI"
+  "install_copy_efi": "EFI",
+  "disk_full_plan_summary": "خطة القرص بالكامل: مسح جميع البيانات؛ إنشاء قسم EFI بنظام FAT32 بحجم 512 MiB وBtrfs في المساحة المتبقية. دون قسم مبادلة."
 }

@@ -21,16 +21,44 @@ class V2Tests(legacy.ErrorAssertions,unittest.TestCase):
             try:return rec.finish(8)
             finally:rec.close()
     def frame(self,report):return 'print('+repr(json.dumps({'protocolVersion':1,'type':'session-report','report':report}))+',flush=True)\n'
-    def run_stub(self,body,version=2,events=None,language=None,copy_progress=False):
+    def run_stub(self,body,version=2,events=None,language=None,copy_progress=False,confirmed_plan=None):
         data=legacy.install_request();data['protocolVersion']=version
         if language is not None:data['uiLanguage']=language
         if copy_progress:data['includeCopyProgress']=True
+        if confirmed_plan is not None:data['confirmedPlan']=confirmed_plan
         request=helper.parse_request(json.dumps(data).encode(),version=version)
         system=legacy.FakeSystem();confirmed=helper.validate_device(system,request.disk)
         with tempfile.TemporaryDirectory(prefix='p0-04-v2-') as td:
             path=Path(td)/'engine.py';path.write_text(legacy.BackendBridgeTests.prefix+body)
             with mock.patch.object(helper,'BACKEND_ARGV',(sys.executable,'-I',str(path))):
                 return helper.run_backend(request,confirmed,system,emit=(events.append if events is not None else lambda _:None))
+    def test_confirmed_plan_cross_language_fixture_and_strict_request_scope(self):
+        plan=json.loads((legacy.ROOT/'test/fixtures/approved_full_disk_plan_v1.json').read_text())
+        self.assertEqual(plan,helper.full_disk_plan({'path':'/dev/vda',**legacy.install_request()['expectedDevice']}))
+        data={**legacy.install_request(),'protocolVersion':2,'confirmedPlan':plan}
+        self.assertEqual(helper.parse_request(json.dumps(data).encode(),2).confirmed_plan,plan)
+        for version in [1]:
+            self.error('INVALID_REQUEST',helper.parse_request,json.dumps({**data,'protocolVersion':version}).encode(),version=version)
+        for wrong in [None,{},True,{**plan,'schemaVersion':1.0},{**plan,'diskSwap':0},{**plan,'espBytes':1},{**plan,'extra':'sh'},
+                      {**plan,'device':{**plan['device'],'diskSequence':99}},
+                      {**plan,'storagePlan':{**plan['storagePlan'],'operations':plan['storagePlan']['operations'][:-1]}}]:
+            self.error('INVALID_REQUEST',helper.parse_request,json.dumps({**data,'confirmedPlan':wrong}).encode(),version=2)
+        for op in ['audit-live','probe-disk']:
+            data={'protocolVersion':2,'operation':op,'confirmedPlan':plan}
+            if op=='probe-disk':data['disk']='/dev/vda'
+            self.error('INVALID_REQUEST',helper.parse_request,json.dumps(data).encode(),version=2)
+
+    def test_plan_ready_gate_real_pipe_and_mismatch_rejection(self):
+        plan=helper.full_disk_plan({'path':'/dev/vda',**legacy.install_request()['expectedDevice']})
+        ready='print(json.dumps({"protocolVersion":1,"type":"ready","confirmedPlan":request["confirmedPlan"]}),flush=True)\ngate=json.loads(sys.stdin.readline())\nassert gate["confirmedPlan"]==request["confirmedPlan"]\n'
+        body=ready+legacy.BackendBridgeTests.success
+        self.assertEqual(self.run_stub(body,confirmed_plan=plan),{'installed':True})
+        for invalid in [None,{**plan,'diskSwap':True}]:
+            frame={'protocolVersion':1,'type':'ready','confirmedPlan':invalid}
+            wrong='print('+repr(json.dumps(frame))+',flush=True)\n'
+            self.error('BACKEND_ERROR',self.run_stub,wrong+legacy.BackendBridgeTests.success,confirmed_plan=plan)
+        self.error('BACKEND_ERROR',self.run_stub,legacy.BackendBridgeTests.ready+legacy.BackendBridgeTests.success,confirmed_plan=plan)
+        self.error('BACKEND_ERROR',helper.backend_message,json.dumps({'protocolVersion':1,'type':'ready','confirmedPlan':plan}).encode())
     def test_copy_progress_opt_in_is_v2_install_only_and_strict_boolean(self):
         data={**legacy.install_request(),'protocolVersion':2,'includeCopyProgress':True}
         self.assertTrue(helper.parse_request(json.dumps(data).encode(),2).include_copy_progress)

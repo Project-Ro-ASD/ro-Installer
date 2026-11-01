@@ -7,6 +7,7 @@ import 'package:ro_installer/l10n/installer_translation_catalog.dart';
 import 'package:ro_installer/screens/installing_screen.dart';
 import 'package:ro_installer/services/helper_client.dart';
 import 'package:ro_installer/services/copy_progress.dart';
+import 'package:ro_installer/models/approved_full_disk_plan.dart';
 import 'package:ro_installer/services/install_log_export_service.dart';
 import 'package:ro_installer/state/installer_state.dart';
 import 'package:ro_installer/theme/app_theme.dart';
@@ -21,6 +22,61 @@ void main() {
     catalog = await InstallerTranslationCatalog.loadBundled();
   });
   testWidgets(
+    'production v2 refuses identity-only confirmation before helper starts',
+    (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final state = InstallerState(translations: catalog)
+        ..selectedDisk = '/dev/vda'
+        ..confirmedDevice = f.identity;
+      var starts = 0;
+      var exported = false;
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: state,
+          child: MaterialApp(
+            theme: AppTheme.darkTheme,
+            home: Scaffold(
+              body: InstallingScreen(
+                helperClient: HelperClient(
+                  protocolVersion: 2,
+                  start: (_, _) async {
+                    starts++;
+                    return f.FakeHelperProcess(f.messages([v2.terminal()]));
+                  },
+                ),
+                exportSession:
+                    ({
+                      required startedAt,
+                      required finishedAt,
+                      required success,
+                      required finalStatus,
+                      required statusHistory,
+                      required technicalLogs,
+                      required installContext,
+                    }) async {
+                      exported = true;
+                      expect(success, false);
+                      return const InstallLogExportResult(success: false);
+                    },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      expect(starts, 0);
+      expect(exported, true);
+      expect(find.text(state.t('install_badge_failure')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+  testWidgets(
     'live copy measurement expires, clears by stage and never marks success',
     (tester) async {
       tester.view.physicalSize = const Size(1600, 1000);
@@ -31,6 +87,10 @@ void main() {
         ..selectedDisk = '/dev/vda'
         ..confirmedDevice = f.identity
         ..selectedLanguage = 'en';
+      state.confirmPlan(
+        ApprovedFullDiskPlan(f.identity),
+        state.diskSelectionRevision,
+      );
       final stream = StreamController<List<int>>();
       final process = f.FakeHelperProcess(stream.stream);
       await tester.pumpWidget(
@@ -146,6 +206,10 @@ void main() {
         ..selectedDisk = '/dev/vda'
         ..selectedLanguage = mode == 'complete' ? 'en' : 'tr'
         ..confirmedDevice = f.identity;
+      state.confirmPlan(
+        ApprovedFullDiskPlan(f.identity),
+        state.diskSelectionRevision,
+      );
       final report = v2.fixture();
       if (const ['failed', 'unavailable', 'truncated'].contains(mode)) {
         report['logStatus'] = mode;

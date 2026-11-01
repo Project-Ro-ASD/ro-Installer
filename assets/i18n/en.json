@@ -486,5 +486,6 @@
   "install_backend_record_incomplete": "Protected session records are incomplete; you can export the safe report.",
   "install_copy_measurement": "Copied data ({phase}): {bytes} · {rate} · Copy estimate: {eta}",
   "install_copy_main": "Main",
-  "install_copy_efi": "EFI"
+  "install_copy_efi": "EFI",
+  "disk_full_plan_summary": "Full-disk plan: erase all data; create a 512 MiB FAT32 EFI partition and Btrfs in the remaining space. No disk swap partition."
 }

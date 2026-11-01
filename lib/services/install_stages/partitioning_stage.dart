@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../models/storage_plan.dart';
+import '../../models/approved_full_disk_plan.dart';
 import '../../models/standard_storage_layout.dart';
 import '../storage_topology_guard.dart';
 import '../../utils/manual_partition_sizing.dart';
@@ -38,6 +39,9 @@ class PartitioningStage {
   }
 
   Future<StageResult> execute(StageContext ctx) async {
+    if (!matchesApprovedPlan(ctx.state, expected: ctx.approvedPlan)) {
+      return StageResult.fail('Onaylanan disk planı değişti.');
+    }
     final selectedDisk = ctx.state['selectedDisk'] as String;
     final partitionMethod = ctx.state['partitionMethod'] as String;
 
@@ -126,6 +130,9 @@ class PartitioningStage {
     // All read-only planning/tool checks are complete. The helper revalidates
     // the confirmed disk under its installation lock at this exact boundary.
     await ctx.beforeFirstMutation?.call();
+    if (!matchesApprovedPlan(ctx.state, expected: ctx.approvedPlan)) {
+      return StageResult.fail('Onaylanan disk planı değişti.');
+    }
     if (!await ctx.runCmd(
       'wipefs',
       ['-a', selectedDisk],

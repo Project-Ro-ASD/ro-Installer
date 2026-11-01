@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/disk_service.dart';
 import '../services/helper_protocol.dart';
+import '../models/approved_full_disk_plan.dart';
 import '../l10n/installer_translation_catalog.dart';
 
 class InstallerState extends ChangeNotifier {
@@ -42,7 +43,39 @@ class InstallerState extends ChangeNotifier {
 
   // ---- 7. Disk ----
   String selectedDisk = '';
-  DeviceIdentity? confirmedDevice;
+  DeviceIdentity? _confirmedDevice;
+  DeviceIdentity? get confirmedDevice => _confirmedDevice;
+  set confirmedDevice(DeviceIdentity? value) {
+    _diskSelectionRevision++;
+    _confirmedDevice = value;
+    _confirmedPlan = null;
+  }
+
+  ApprovedFullDiskPlan? _confirmedPlan;
+  ApprovedFullDiskPlan? get confirmedPlan => _confirmedPlan;
+  int _diskSelectionRevision = 0;
+  int get diskSelectionRevision => _diskSelectionRevision;
+  void clearConfirmation() {
+    _diskSelectionRevision++;
+    _confirmedDevice = null;
+    _confirmedPlan = null;
+  }
+
+  bool confirmPlan(ApprovedFullDiskPlan plan, int revision) {
+    if (installationActive ||
+        revision != _diskSelectionRevision ||
+        !plan.matchesState({
+          'selectedDisk': selectedDisk,
+          'partitionMethod': partitionMethod,
+          'fileSystem': fileSystem,
+        })) {
+      return false;
+    }
+    _confirmedDevice = plan.device;
+    _confirmedPlan = plan;
+    return true;
+  }
+
   bool installationActive = false;
   void beginInstallation() {
     installationActive = true;
@@ -51,7 +84,7 @@ class InstallerState extends ChangeNotifier {
 
   void clearDiskSelection() {
     if (installationActive) return;
-    confirmedDevice = null;
+    clearConfirmation();
     selectedDisk = '';
     selectedDiskDetails = null;
     notifyListeners();
@@ -97,6 +130,7 @@ class InstallerState extends ChangeNotifier {
     if (installationActive) return;
     if (_currentStep > 0) {
       _currentStep--;
+      if (_currentStep <= 1) clearConfirmation();
       notifyListeners();
     }
   }
@@ -108,6 +142,7 @@ class InstallerState extends ChangeNotifier {
         stepIndex <= _currentStep) {
       // Sadece ilerlediği adımlara veya geriye dönebilir
       _currentStep = stepIndex;
+      if (_currentStep <= 1) clearConfirmation();
       notifyListeners();
     }
   }
@@ -131,7 +166,7 @@ class InstallerState extends ChangeNotifier {
 
   void updateDiskParams(String disk, String fs, String partition) {
     if (installationActive) return;
-    confirmedDevice = null;
+    clearConfirmation();
     selectedDisk = disk;
     fileSystem = 'btrfs';
     partitionMethod = partition;
@@ -139,11 +174,15 @@ class InstallerState extends ChangeNotifier {
   }
 
   void updateFileSystem(String fs) {
+    if (installationActive) return;
+    clearConfirmation();
     fileSystem = 'btrfs';
     notifyListeners();
   }
 
   void updatePartitionMethod(String method) {
+    if (installationActive) return;
+    clearConfirmation();
     selectedFreeSpace = {};
     if (method != 'full') {
       notifyListeners();
@@ -154,6 +193,8 @@ class InstallerState extends ChangeNotifier {
   }
 
   void updateLinuxDiskSize(double sizeGb) {
+    if (installationActive) return;
+    clearConfirmation();
     final maxGb = alongsideMaxLinuxSizeBytes > 0
         ? alongsideMaxLinuxSizeBytes / (1024 * 1024 * 1024)
         : totalDiskSizeGB;
@@ -162,6 +203,8 @@ class InstallerState extends ChangeNotifier {
   }
 
   void updateFreeSpaceSelection(Map<String, dynamic>? freeSpace) {
+    if (installationActive) return;
+    clearConfirmation();
     selectedFreeSpace = freeSpace == null
         ? {}
         : Map<String, dynamic>.from(freeSpace);
@@ -170,7 +213,7 @@ class InstallerState extends ChangeNotifier {
 
   void selectDisk(Map<String, dynamic> diskObj) {
     if (installationActive) return;
-    confirmedDevice = null;
+    clearConfirmation();
     final newDisk = diskObj['name'] as String;
     // Eğer önceden seçilen disk ile yenisi farklıysa eski disk bölümlerini iptal et (Sıfırla)
     if (selectedDisk != newDisk) {

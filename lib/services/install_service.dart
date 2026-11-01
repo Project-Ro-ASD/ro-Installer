@@ -1,5 +1,6 @@
 import 'install_observation.dart';
 import 'copy_progress.dart';
+import '../models/approved_full_disk_plan.dart';
 import 'session_command_runner.dart';
 import 'dart:async';
 import 'mount_session.dart';
@@ -198,6 +199,29 @@ class InstallService {
       );
       return false;
     }
+    ApprovedFullDiskPlan? approvedPlan;
+    try {
+      if (state.containsKey('_approvedFullDiskPlan')) {
+        approvedPlan = ApprovedFullDiskPlan.fromJson(
+          state['_approvedFullDiskPlan'],
+        );
+        if (!approvedPlan.matchesState(state)) {
+          throw const FormatException('Stale plan');
+        }
+      }
+    } catch (_) {
+      lastOutcome = InstallOutcome(
+        primaryFailure: 'PREFLIGHT_FAILED',
+        cleanup: const CleanupReport(true),
+      );
+      await observation.finish(
+        success: false,
+        primary: 'PREFLIGHT_FAILED',
+        cleanup: true,
+        remaining: 0,
+      );
+      return false;
+    }
     try {
       if (!isMock) {
         final arch = await _commandRunner.run('uname', ['-m']);
@@ -356,7 +380,11 @@ class InstallService {
         mountSession: mountSession,
         observation: observation,
         onCopyProgress: onCopyProgress,
+        approvedPlan: approvedPlan,
         beforeFirstMutation: () async {
+          if (!matchesApprovedPlan(state, expected: approvedPlan)) {
+            throw const FormatException('Stale plan');
+          }
           await mountSession!.validateTarget(disk, commit: true);
           await beforeFirstMutation?.call();
         },

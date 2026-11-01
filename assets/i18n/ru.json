@@ -486,5 +486,6 @@
   "install_backend_record_incomplete": "Защищённые записи сеанса неполны; можно экспортировать безопасный отчёт.",
   "install_copy_measurement": "Скопировано ({phase}): {bytes} · {rate} · Оценка копирования: {eta}",
   "install_copy_main": "Система",
-  "install_copy_efi": "EFI"
+  "install_copy_efi": "EFI",
+  "disk_full_plan_summary": "Весь диск: удалить все данные; создать EFI FAT32 512 MiB и Btrfs на оставшемся месте. Без раздела подкачки."
 }
