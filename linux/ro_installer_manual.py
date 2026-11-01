@@ -14,6 +14,8 @@ import sys
 import time
 
 FILESYSTEM_TIMEOUT = 2
+EFI_SOURCE = '/boot/efi/EFI/fedora'
+ESP_MOUNT_TARGETS = {'/mnt/.ro-installer-esp-probe', '/mnt/.ro-installer-esp-stage'}
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location('ro_manual_gpt', Path(__file__).with_name('ro_installer_gpt.py'))
 gpt = importlib.util.module_from_spec(spec)
@@ -127,11 +129,92 @@ def probe_layout(path, expected, slots):
     return gpt.probe_device(path,expected,preserve_slots=slots)
 
 
+def source_budget(path, cluster):
+    if type(cluster) is not int or not 512 <= cluster <= 1048576 or cluster & (cluster - 1):
+        raise ValueError('Unsupported filesystem allocation size')
+    count = files = source_bytes = allocated = 0
+    required_files = set()
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    def walk(fd, depth):
+        nonlocal count, files, source_bytes, allocated
+        if depth > 8:
+            raise ValueError('EFI source exceeds depth limit')
+        names = set()
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                count += 1
+                if count > 4096 or not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]{0,254}', entry.name) or entry.name.endswith('.'):
+                    raise ValueError('Unsupported EFI source inventory')
+                lower = entry.name.lower()
+                if lower in names:
+                    raise ValueError('Case-colliding EFI source names')
+                names.add(lower)
+                info = entry.stat(follow_symlinks=False)
+                if info.st_dev != root_device:
+                    raise ValueError('EFI source crosses a mount boundary')
+                if stat.S_ISDIR(info.st_mode):
+                    child = os.open(entry.name, flags, dir_fd=fd)
+                    try:
+                        opened = os.fstat(child)
+                        if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                            raise ValueError('EFI source changed during traversal')
+                        walk(child, depth + 1)
+                    finally:
+                        os.close(child)
+                elif stat.S_ISREG(info.st_mode):
+                    files += 1
+                    source_bytes += info.st_size
+                    if info.st_size < 0 or source_bytes > 1024**3:
+                        raise ValueError('EFI source exceeds byte limit')
+                    allocated += (info.st_size + cluster - 1) // cluster * cluster
+                    if depth == 0 and lower in {'shimx64.efi', 'grubx64.efi'} and info.st_size > 0:
+                        required_files.add(lower)
+                else:
+                    raise ValueError('EFI source symlink or special file')
+    fd = os.open(path, flags)
+    try:
+        root_device = os.fstat(fd).st_dev
+        walk(fd, 0)
+    finally:
+        os.close(fd)
+    if len(required_files) != 2:
+        raise ValueError('Required EFI source binaries missing')
+    # Per-entry directory slack and parent growth plus fixed operational headroom.
+    return {'requiredBytes': allocated + (2 * count + 4) * cluster + 16 * 1048576,
+            'sourceBytes': source_bytes, 'fileCount': files, 'clusterBytes': cluster}
+
+
+def mounted_esp_budget(path, device):
+    if path not in ESP_MOUNT_TARGETS or not isinstance(device, str) or not re.fullmatch(r'(0|[1-9][0-9]*):(0|[1-9][0-9]*)', device):
+        raise ValueError('Invalid inspected ESP target')
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if f'{os.major(info.st_dev)}:{os.minor(info.st_dev)}' != device:
+            raise ValueError('Inspected ESP mount changed')
+        fs = os.fstatvfs(fd)
+        # Linux fat_statfs reports the cluster allocation unit in f_bsize.
+        if fs.f_frsize != fs.f_bsize or not 0 <= fs.f_bavail <= fs.f_blocks:
+            raise ValueError('Invalid ESP allocation counters')
+        result = source_budget(EFI_SOURCE, fs.f_bsize)
+        current = os.fstatvfs(fd)
+        if current.f_bsize != fs.f_bsize or current.f_frsize != fs.f_frsize or not 0 <= current.f_bavail <= current.f_blocks:
+            raise ValueError('ESP allocation geometry changed')
+        available = current.f_bavail * current.f_frsize
+        if not 0 <= available <= gpt.MAX_BYTES:
+            raise ValueError('ESP capacity exceeds safety limit')
+        return {**result, 'availableBytes': available, 'sufficient': available >= result['requiredBytes']}
+    finally:
+        os.close(fd)
+
+
 def main():
     try:
         if os.geteuid() != 0:
             return 2
-        if len(sys.argv)==5 and sys.argv[1]=='--layout':
+        if len(sys.argv)==4 and sys.argv[1]=='--efi-budget':
+            result=mounted_esp_budget(sys.argv[2],sys.argv[3])
+        elif len(sys.argv)==5 and sys.argv[1]=='--layout':
             result=probe_layout(sys.argv[2],json.loads(sys.argv[3]),json.loads(sys.argv[4]))
         elif len(sys.argv)==4:
             result=probe_manual(sys.argv[1],json.loads(sys.argv[2]),json.loads(sys.argv[3]))
