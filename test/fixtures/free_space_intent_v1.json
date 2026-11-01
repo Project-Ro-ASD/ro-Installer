@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "mode": "free_space",
+  "device": {
+    "path": "/dev/vda",
+    "majorMinor": "252:0",
+    "size": 274877906944,
+    "diskSequence": 11
+  },
+  "tableFingerprint": "0ab5dfde72dba1dcec690c906fd54b74dd88474ed578040180f820a284c1dee4",
+  "selectedExtent": {
+    "startSector": 167772160,
+    "endSector": 335544319
+  },
+  "fileSystem": "btrfs",
+  "diskSwap": false,
+  "esp": {
+    "number": 3,
+    "startSector": 167772160,
+    "endSector": 168820735
+  },
+  "root": {
+    "number": 4,
+    "startSector": 168820736,
+    "endSector": 335544319
+  }
+}

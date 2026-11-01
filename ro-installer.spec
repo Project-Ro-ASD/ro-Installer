@@ -24,6 +24,7 @@ BuildRequires:  git
 BuildRequires:  kmod
 BuildRequires:  rsync
 BuildRequires:  acl
+BuildRequires:  util-linux
 
 Requires:       gtk3
 Requires:       libX11
@@ -92,6 +93,8 @@ install -Dm644 linux/org.roasd.installer.helper.policy \
 
 install -Dm644 linux/ro_installer_records.py \
     %{buildroot}%{_libexecdir}/ro_installer_records.py
+install -Dm644 linux/ro_installer_gpt.py \
+    %{buildroot}%{_libexecdir}/ro_installer_gpt.py
 install -Dm644 linux/ro-installer-observability.json \
     %{buildroot}%{_libexecdir}/ro-installer-observability.json
 install -Dm755 linux/ro-installer-export \
@@ -109,6 +112,7 @@ install -Dm755 linux/ro-installer-export \
 %attr(0755,root,root) %{_libexecdir}/ro-installer-session
 %attr(0755,root,root) %{_libexecdir}/ro-installer-export
 %attr(0644,root,root) %{_libexecdir}/ro_installer_records.py
+%attr(0644,root,root) %{_libexecdir}/ro_installer_gpt.py
 %attr(0644,root,root) %{_libexecdir}/ro-installer-observability.json
 %attr(0755,root,root) %{_libexecdir}/ro-installer-helper
 %attr(0644,root,root) %{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy

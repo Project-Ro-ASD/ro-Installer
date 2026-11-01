@@ -95,6 +95,7 @@ jobs:
             pkgconf-pkg-config \
             python3 \
             kmod \
+            util-linux \
             ripgrep
 
       - name: Install pinned Flutter SDK

@@ -145,7 +145,9 @@ final class GptDiskSnapshot {
     if (!const [128, 256, 512, 1024].contains(entryBytes)) {
       throw const FormatException('Unsupported GPT entry size');
     }
-    final reserved = (count * entryBytes + sector - 1) ~/ sector;
+    final arrayBytes = count * entryBytes;
+    final reserved =
+        ((arrayBytes < 16384 ? 16384 : arrayBytes) + sector - 1) ~/ sector;
     final total = device.size ~/ sector;
     final first = snapshotInteger(
       input['firstUsableSector'],

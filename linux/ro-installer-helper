@@ -41,6 +41,9 @@ STAGE_KEYS = (
     "install_stage_post_validation", "install_stage_cleanup",
 )
 OPERATIONS = frozenset({"audit-live", "probe-disk", "install-full-disk"})
+V2_READ_OPERATIONS = frozenset({'probe-free-space','validate-free-space-plan'})
+GPT_ARGV = ('/usr/bin/python3','-I','/usr/libexec/ro_installer_gpt.py','--probe')
+GPT_TIMEOUT = 10
 INSTALLER_UI_LANGUAGES = frozenset({
     "tr", "en", "es", "de", "fr", "pt_BR", "it", "ru", "ar", "fa", "zh_CN", "ja",
 })
@@ -101,6 +104,8 @@ class Request:
     ui_language: str | None = None
     include_copy_progress: bool = False
     confirmed_plan: dict | None = None
+    table_fingerprint: str | None = None
+    selected_extent: dict | None = None
 
 
 def full_disk_plan(device):
@@ -134,11 +139,13 @@ def parse_request(raw, version=1):
     if type(data.get("protocolVersion")) is not int or data["protocolVersion"] != version:
         fail("INVALID_REQUEST", "Unsupported protocol version.")
     operation = data.get("operation")
-    if not isinstance(operation, str) or operation not in OPERATIONS:
+    if not isinstance(operation, str) or operation not in (OPERATIONS | V2_READ_OPERATIONS if version == 2 else OPERATIONS):
         fail("INVALID_REQUEST", "Unsupported operation.")
     allowed = {"protocolVersion", "operation"}
     if operation != "audit-live":
         allowed.add("disk")
+    if operation == 'validate-free-space-plan':
+        allowed.update({'expectedDevice','tableFingerprint','selectedExtent'})
     if operation == "install-full-disk":
         allowed.update({"partitionMethod", "fileSystem", "confirmDestructive", "expectedDevice"})
         if version == 2 and 'confirmedPlan' in data:
@@ -165,6 +172,7 @@ def parse_request(raw, version=1):
         if (data["partitionMethod"] != "full" or data["fileSystem"] != "btrfs"
                 or data["confirmDestructive"] is not True):
             fail("INVALID_REQUEST", "Only explicitly confirmed full/Btrfs installation is supported.")
+    if operation in ('install-full-disk','validate-free-space-plan'):
         expected = data["expectedDevice"]
         if (not isinstance(expected, dict)
                 or set(expected) != {"majorMinor", "size", "diskSequence"}
@@ -181,7 +189,22 @@ def parse_request(raw, version=1):
         plan=full_disk_plan({'path':disk,**expected})
         if not same_plan_value(data['confirmedPlan'],plan):
             fail('INVALID_REQUEST','Confirmed plan does not match the fixed full-disk contract.')
-    return Request(operation, disk, expected, version, data.get("uiLanguage"), data.get("includeCopyProgress", False), plan)
+    fingerprint=extent=None
+    if operation == 'validate-free-space-plan':
+        fingerprint=data['tableFingerprint'];extent=data['selectedExtent']
+        if (not isinstance(fingerprint,str) or not re.fullmatch('[0-9a-f]{64}',fingerprint)
+                or not isinstance(extent,dict) or set(extent)!={'startSector','endSector'}
+                or type(extent['startSector']) is not int or type(extent['endSector']) is not int
+                or not 0<=extent['startSector']<=extent['endSector']<=9007199254740991):
+            fail('INVALID_REQUEST','Invalid free-space intent.')
+    return Request(operation, disk, expected, version, data.get("uiLanguage"), data.get("includeCopyProgress", False), plan,fingerprint,extent)
+
+
+def gpt_module():
+    loader=importlib.machinery.SourceFileLoader('ro_helper_gpt',str(Path(__file__).with_name('ro_installer_gpt.py')))
+    spec=importlib.util.spec_from_loader(loader.name,loader)
+    module=importlib.util.module_from_spec(spec);loader.exec_module(module)
+    return module
 
 
 def read_request(fd):
@@ -272,6 +295,39 @@ class System:
 
     def mounts(self):
         return Path("/proc/self/mountinfo").read_text()
+
+    def gpt_snapshot(self, device):
+        gpt_args=(*GPT_ARGV,device.path,json.dumps(device.public(),separators=(',',':')))
+        process=subprocess.Popen(gpt_args,
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=CHILD_ENV,close_fds=True,
+            pass_fds=() if getattr(self,'lease_fd',None) is None else (self.lease_fd,))
+        output=bytearray();total=0;streams=[process.stdout,process.stderr];deadline=time.monotonic()+GPT_TIMEOUT
+        try:
+            while streams:
+                remaining=deadline-time.monotonic()
+                ready=select.select(streams,[],[],max(0,remaining))[0]
+                if remaining<=0 or not ready:fail('SYSTEM_ERROR','GPT probe exceeded its deadline.')
+                for stream in ready:
+                    chunk=os.read(stream.fileno(),4096);total+=len(chunk)
+                    if total>8192:fail('AMBIGUOUS_TOPOLOGY','GPT probe output exceeded its safety limit.')
+                    if not chunk:streams.remove(stream)
+                    elif stream is process.stdout:output.extend(chunk)
+            if process.wait(timeout=max(0.01,deadline-time.monotonic()))!=0:
+                fail('AMBIGUOUS_TOPOLOGY','GPT metadata could not be verified.')
+            try:
+                value=json.loads(output,object_pairs_hook=unique_object,parse_constant=lambda _:fail('AMBIGUOUS_TOPOLOGY','Invalid GPT number.'))
+                return gpt_module().normalize_snapshot(value,device.public())
+            except (ValueError,UnicodeError,TypeError,KeyError,RecursionError):
+                fail('AMBIGUOUS_TOPOLOGY','Invalid normalized GPT snapshot.')
+        except subprocess.TimeoutExpired:
+            fail('SYSTEM_ERROR','GPT probe exceeded its deadline.')
+        finally:
+            if process.poll() is None:
+                try:process.kill()
+                except ProcessLookupError:pass
+            try:process.wait(timeout=1)
+            except subprocess.TimeoutExpired:pass  # An uninterruptible reader retains the inherited lease.
+            process.stdout.close();process.stderr.close()
 
     def swaps(self):
         return Path("/proc/swaps").read_text()
@@ -786,6 +842,24 @@ def handle(request, system, emit=lambda _: None):
         return {"audit": system.audit()}
     if request.operation == "probe-disk":
         return {"device": validate_device(system, request.disk).public()}
+    if request.operation in V2_READ_OPERATIONS:
+        if request.protocol_version!=2:fail('INVALID_REQUEST','GPT planning requires helper v2.')
+        if not system.platform_supported():fail('UNSUPPORTED_PLATFORM','GPT planning requires x86_64 UEFI.')
+        with InstallerLock() as lock:
+            system.lease_fd=lock.fd
+            try:
+                before=validate_device(system,request.disk)
+                if request.expected_device is not None and before.public()!={'path':request.disk,**request.expected_device}:
+                    fail('DEVICE_CHANGED','Target no longer matches the selected device.')
+                snapshot=system.gpt_snapshot(before)
+                if validate_device(system,request.disk)!=before:fail('DEVICE_CHANGED','Device changed during GPT planning.')
+                try:snapshot=gpt_module().normalize_snapshot(snapshot,before.public())
+                except (ValueError,TypeError,KeyError):fail('AMBIGUOUS_TOPOLOGY','Invalid GPT snapshot.')
+                if request.operation=='probe-free-space':return {'snapshot':snapshot}
+                if snapshot['tableFingerprint']!=request.table_fingerprint:fail('DEVICE_CHANGED','Partition table changed since selection.')
+                try:return {'plan':gpt_module().compact_plan(snapshot,request.selected_extent)}
+                except (ValueError,TypeError,KeyError):fail('INVALID_REQUEST','Selected free-space plan is no longer valid.')
+            finally:del system.lease_fd
     if request.operation != "install-full-disk":
         fail("INVALID_REQUEST", "Unsupported operation.")
     if not system.platform_supported():

@@ -4,6 +4,8 @@ import 'dart:io';
 import 'helper_protocol.dart';
 import 'copy_progress.dart';
 import '../models/approved_full_disk_plan.dart';
+import '../models/gpt_disk_snapshot.dart';
+import '../models/free_space_installation_plan.dart';
 import 'session_report.dart';
 
 abstract class HelperProcess {
@@ -99,6 +101,60 @@ class HelperClient {
     DeviceIdentity identity,
     void Function(double, String) onProgress,
   ) => installWithReport(identity, onProgress);
+
+  Future<GptDiskSnapshot> probeFreeSpace(String disk) async {
+    if (protocolVersion != 2 || !DeviceIdentity.pathPattern.hasMatch(disk)) {
+      throw const HelperException('INVALID_REQUEST');
+    }
+    final result = await _call({
+      'protocolVersion': 2,
+      'operation': 'probe-free-space',
+      'disk': disk,
+    });
+    try {
+      if (!exactFields(result, {
+        'protocolVersion',
+        'type',
+        'operation',
+        'ok',
+        'snapshot',
+      })) {
+        throw const FormatException();
+      }
+      final snapshot = GptDiskSnapshot.fromJson(result['snapshot']);
+      if (snapshot.device.path != disk || snapshot.partitions.length > 32) {
+        throw const FormatException();
+      }
+      return snapshot;
+    } on FormatException {
+      throw const HelperException('PROTOCOL_ERROR');
+    }
+  }
+
+  Future<FreeSpaceInstallationPlan> validateFreeSpacePlan(
+    FreeSpaceInstallationPlan proposed,
+  ) async {
+    if (protocolVersion != 2) throw const HelperException('INVALID_REQUEST');
+    final result = await _call({
+      'protocolVersion': 2,
+      'operation': 'validate-free-space-plan',
+      'disk': proposed.snapshot.device.path,
+      'expectedDevice': proposed.snapshot.device.expected,
+      'tableFingerprint': proposed.snapshot.tableFingerprint,
+      'selectedExtent': proposed.selectedExtent.json,
+    });
+    if (!exactFields(result, {
+          'protocolVersion',
+          'type',
+          'operation',
+          'ok',
+          'plan',
+        }) ||
+        !samePlanValue(result['plan'], proposed.intentJson)) {
+      throw const HelperException('PROTOCOL_ERROR');
+    }
+    return proposed;
+  }
 
   Future<void> installWithReport(
     DeviceIdentity identity,
