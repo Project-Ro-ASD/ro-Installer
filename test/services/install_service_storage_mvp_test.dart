@@ -16,7 +16,7 @@ void main() {
       expect(success, isFalse);
       expect(runner.commandLog, isEmpty);
       expect(state['partitionMethod'], mode);
-      expect(logs.join('\n'), contains('full-disk erase'));
+      expect(logs.join('\n'), contains('Desteklenmeyen kurulum modu'));
     });
   }
 

@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import '../../models/storage_plan.dart';
 import '../../models/approved_full_disk_plan.dart';
+import '../../models/free_space_installation_plan.dart';
+import '../../models/gpt_disk_snapshot.dart';
 import '../../models/standard_storage_layout.dart';
 import '../storage_topology_guard.dart';
 import '../../utils/manual_partition_sizing.dart';
@@ -39,7 +41,7 @@ class PartitioningStage {
   }
 
   Future<StageResult> execute(StageContext ctx) async {
-    if (!matchesApprovedPlan(ctx.state, expected: ctx.approvedPlan)) {
+    if (!ctx.approvedStateMatches) {
       return StageResult.fail('Onaylanan disk planı değişti.');
     }
     final selectedDisk = ctx.state['selectedDisk'] as String;
@@ -62,6 +64,9 @@ class PartitioningStage {
     if (topologyFailure != null) {
       return topologyFailure;
     }
+    if (partitionMethod == 'free_space') {
+      return _freeSpacePartition(ctx, selectedDisk);
+    }
     late final StoragePlan storagePlan;
     try {
       storagePlan = StoragePlanBuilder.fromState(ctx.state);
@@ -77,8 +82,6 @@ class PartitioningStage {
         return _fullDiskPartition(ctx, selectedDisk, storagePlan);
       case 'alongside':
         return _alongsidePartition(ctx, selectedDisk, storagePlan);
-      case 'free_space':
-        return _freeSpacePartition(ctx, selectedDisk, storagePlan);
       case 'manual':
         return _manualPartition(ctx, selectedDisk, storagePlan);
       default:
@@ -628,187 +631,70 @@ class PartitioningStage {
   Future<StageResult> _freeSpacePartition(
     StageContext ctx,
     String selectedDisk,
-    StoragePlan storagePlan,
   ) async {
-    if (!await _hasCommand(ctx, 'sgdisk')) {
-      return StageResult.fail(
-        'sgdisk bulunamadi. Ayrilmis alana kurulum icin gdisk/sgdisk paketi kurulu olmali.',
-      );
+    final approved = ctx.approvedFreeSpacePlan;
+    if (approved == null || !approved.matchesState(ctx.state)) {
+      return StageResult.fail('Doğrulanmış boş alan onayı gerekli.');
     }
-
-    final hasExistingEfi = ctx.state['hasExistingEfi'] == true;
-    final existingEfiPart = (ctx.state['existingEfiPartition'] ?? '')
-        .toString();
-    if (!hasExistingEfi || existingEfiPart.isEmpty) {
-      return StageResult.fail(
-        'Ayrilmis alana kurulum icin mevcut ve kullanilabilir bir EFI bolumu gerekli.',
-      );
+    ctx.state['_storagePlan'] = jsonEncode(approved.plan.intentJson);
+    if (!await _hasCommand(ctx, 'sfdisk')) {
+      return StageResult.fail('sfdisk bulunamadı.');
     }
-    final partitionTable = (ctx.state['diskPartitionTable'] ?? '').toString();
-    if (partitionTable.isNotEmpty &&
-        partitionTable != 'unknown' &&
-        partitionTable != 'gpt') {
-      return StageResult.fail(
-        'Ayrilmis alana kurulum yalnizca GPT disklerde desteklenir.',
-      );
-    }
-
-    if (!ctx.isMock) {
-      final uefiResult = await ctx.commandRunner.run('test', [
-        '-d',
-        '/sys/firmware/efi',
-      ]);
-      if (uefiResult.exitCode != 0) {
-        return StageResult.fail(
-          'Ayrilmis alana kurulum yalnizca UEFI modunda desteklenir.',
+    try {
+      final before = await ctx.probeFreeSpaceMetadata();
+      if (!samePlanValue(before['snapshot'], approved.plan.snapshot.json) ||
+          before['preservationFingerprint'] !=
+              approved.preservationFingerprint) {
+        return StageResult.fail('Boş alan planı değişti.');
+      }
+      await ctx.beforeFirstMutation?.call();
+      if (!ctx.approvedStateMatches) {
+        return StageResult.fail('Onaylanan boş alan planı değişti.');
+      }
+      final lines = <String>[];
+      for (final role in ['esp', 'root']) {
+        final spec = approved.plan.intentJson[role] as Map;
+        final type = role == 'esp'
+            ? FreeSpaceInstallationPlan.espTypeGuid
+            : FreeSpaceInstallationPlan.linuxTypeGuid;
+        final guid = role == 'esp' ? approved.espGuid : approved.rootGuid;
+        final name = role == 'esp' ? 'RoASD_EFI' : 'RoASD_Root';
+        lines.add(
+          '${spec['number']} : start=${spec['startSector']}, size=${(spec['endSector'] as int) - (spec['startSector'] as int) + 1}, type=$type, uuid=$guid, name="$name"',
         );
       }
-    }
-
-    final selectedFreeSpace =
-        ctx.state['selectedFreeSpace'] as Map<String, dynamic>? ?? const {};
-    final freeStart = selectedFreeSpace['startSector'] as int?;
-    final freeEnd = selectedFreeSpace['endSector'] as int?;
-    if (freeStart == null || freeEnd == null || freeEnd <= freeStart) {
-      return StageResult.fail(
-        'Ayrilmis alana kurulum icin gecerli bir bos alan secilmedi.',
+      final result = await ctx.commandRunner.run(
+        'sfdisk',
+        [
+          '--append',
+          '--no-reread',
+          '--no-tell-kernel',
+          '--wipe',
+          'never',
+          '--wipe-partitions',
+          'never',
+          selectedDisk,
+        ],
+        stdinText: '${lines.join('\n')}\n',
+        isMock: ctx.isMock,
       );
-    }
-    final allocationPlanFailure = _requirePlannedDestructiveOperation(
-      storagePlan,
-      type: 'allocate_selected_free_space',
-      target: selectedDisk,
-      details: {'startSector': freeStart, 'endSector': freeEnd},
-    );
-    if (allocationPlanFailure != null) return allocationPlanFailure;
-
-    ctx.progress(
-      0.05,
-      'stage_progress_partition_backup_table',
-      'Güvenlik: Mevcut bölüm tablosu yedekleniyor...',
-    );
-    final backupPath = _gptBackupPath(ctx, 'free-space', selectedDisk);
-    if (!await ctx.runCmd(
-      'sgdisk',
-      ['--backup=$backupPath', selectedDisk],
-      ctx.log,
-      isMock: ctx.isMock,
-    )) {
-      return StageResult.fail(
-        'GPT yedegi alinamadi. Ayrilmis alana kurulum baslatilamiyor.',
+      if (!result.started || result.exitCode != 0) {
+        return StageResult.fail('Boş alanda bölüm oluşturulamadı.');
+      }
+      final rescan = await _rescanDisk(ctx, selectedDisk);
+      if (rescan != null) return rescan;
+      final after = await ctx.probeFreeSpaceMetadata();
+      final layout = approved.verifyCreated(
+        GptDiskSnapshot.fromJson(after['snapshot']),
+        after['preservationFingerprint'] as String,
       );
+      ctx.bindCreatedFreeSpaceLayout(layout);
+      ctx.state['_resolvedRootPart'] = layout.rootPath;
+      ctx.state['_resolvedEfiPart'] = layout.espPath;
+      return StageResult.ok('Boş alanda EFI ve Btrfs bölümleri doğrulandı.');
+    } catch (_) {
+      return StageResult.fail('GPT koruma ve bölüm kimliği doğrulanamadı.');
     }
-
-    final int ramMB = await _getSystemRamMB(ctx);
-    final int swapMB = _calculateSwapMB(ramMB);
-    final int swapBytes = swapMB * 1024 * 1024;
-    final int sectorSize = await _readSectorSize(ctx, selectedDisk);
-    final int freeBytes = _sectorsToBytes(freeEnd - freeStart + 1, sectorSize);
-    final int requiredBytes = swapBytes + _minRootBytes;
-    ctx.log(
-      'Ayrilmis alan: ${_bytesToGiB(freeBytes)} GB, RAM: ${ramMB}MB → SWAP: ${swapMB}MB',
-    );
-    if (freeBytes < requiredBytes) {
-      return StageResult.fail(
-        'Secilen bos alan hibernate uyumlu SWAP ve en az 40 GB root icin yeterli degil. '
-        'Gereken minimum: ${_bytesToGiB(requiredBytes)} GB.',
-      );
-    }
-
-    final alignSectors = ((1024 * 1024) / sectorSize).ceil();
-    final swapSectors = _bytesToSectors(swapBytes, sectorSize);
-    final swapStart = _alignUp(freeStart, alignSectors);
-    final swapEnd = swapStart + swapSectors - 1;
-    final rootStart = _alignUp(swapEnd + 1, alignSectors);
-    final rootEnd = freeEnd;
-    final rootBytes = _sectorsToBytes(rootEnd - rootStart + 1, sectorSize);
-    final layout = rootStart <= rootEnd && rootBytes >= _minRootBytes
-        ? _AlongsideLayout(
-            swapStartSector: swapStart,
-            swapEndSector: swapEnd,
-            rootStartSector: rootStart,
-            rootEndSector: rootEnd,
-          )
-        : null;
-    if (layout == null) {
-      return StageResult.fail(
-        'Secilen bos alanda hizalama sonrasi SWAP + Root yerlesimi hesaplanamadi.',
-      );
-    }
-
-    ctx.progress(
-      0.12,
-      'stage_progress_partition_create_swap',
-      'Ayrılmış alanda yeni SWAP bölümü oluşturuluyor...',
-    );
-    final createSwapPlanFailure = _requirePlannedDestructiveOperation(
-      storagePlan,
-      type: 'create_swap',
-      target: selectedDisk,
-    );
-    if (createSwapPlanFailure != null) return createSwapPlanFailure;
-    if (!await ctx.runCmd(
-      'sgdisk',
-      [
-        '-n',
-        '0:${layout.swapStartSector}:${layout.swapEndSector}',
-        '-t',
-        '0:8200',
-        '-c',
-        '0:RoASD_Swap',
-        selectedDisk,
-      ],
-      ctx.log,
-      isMock: ctx.isMock,
-    )) {
-      await _restoreAlongsideBackup(ctx, selectedDisk, backupPath: backupPath);
-      return StageResult.fail('SWAP bolumu olusturulamadi.');
-    }
-
-    ctx.progress(
-      0.18,
-      'stage_progress_partition_create_root',
-      'Ayrılmış alanda yeni kök dizin bölümü oluşturuluyor...',
-    );
-    final createRootPlanFailure = _requirePlannedDestructiveOperation(
-      storagePlan,
-      type: 'create_btrfs_root',
-      target: selectedDisk,
-    );
-    if (createRootPlanFailure != null) return createRootPlanFailure;
-    if (!await ctx.runCmd(
-      'sgdisk',
-      [
-        '-n',
-        '0:${layout.rootStartSector}:${layout.rootEndSector}',
-        '-t',
-        '0:8300',
-        '-c',
-        '0:RoASD_Root',
-        selectedDisk,
-      ],
-      ctx.log,
-      isMock: ctx.isMock,
-    )) {
-      await _restoreAlongsideBackup(ctx, selectedDisk, backupPath: backupPath);
-      return StageResult.fail('Root bölümü oluşturulamadı.');
-    }
-
-    final rescanFailure = await _rescanDisk(ctx, selectedDisk);
-    if (rescanFailure != null) return rescanFailure;
-
-    ctx.state['_resolvedSwapStartSector'] = layout.swapStartSector;
-    ctx.state['_resolvedRootStartSector'] = layout.rootStartSector;
-    ctx.log(
-      'Ayrilmis alan yerlesimi → SWAP: ${layout.swapStartSector}-${layout.swapEndSector}, ROOT: ${layout.rootStartSector}-${layout.rootEndSector}',
-    );
-    ctx.log('[AŞAMA 2] Ayrılmış alana kurulum bölümleme tamamlandı.');
-    return StageResult.ok(
-      ctx.t(
-        'stage_result_partition_free_space_done',
-        'Ayrılmış alana kurulum bölümleme tamamlandı: SWAP + Root',
-      ),
-    );
   }
 
   /// UI üzerinden oluşturulmuş 'manualPartitions' listesini fiziksel diske uygular

@@ -82,7 +82,7 @@ def normalize_snapshot(value, expected=None):
     return result
 
 
-def read_snapshot(read, device, sector):
+def read_snapshot(read, device, sector, preserve_slots=None):
     device=identity(device)
     if sector not in (512,4096) or device['size'] % sector:raise ValueError('Unsupported sector geometry')
     total=device['size']//sector
@@ -128,13 +128,25 @@ def read_snapshot(read, device, sector):
         if len(parts)>MAX_PARTITIONS:raise ValueError('Too many occupied GPT entries')
     digest=hashlib.sha256(b'ro-gpt-snapshot-v1\0'+struct.pack('<QQQQ',device['size'],sector,p_lba,b_lba))
     for raw in (mbr,ph,p_array,b_array,bh):digest.update(struct.pack('<Q',len(raw)));digest.update(raw)
-    return normalize_snapshot({'schemaVersion':1,'device':device,'logicalSectorBytes':sector,'firstUsableSector':first,
+    snapshot=normalize_snapshot({'schemaVersion':1,'device':device,'logicalSectorBytes':sector,'firstUsableSector':first,
         'lastUsableSector':last,'entryCount':count,'entryBytes':entry,'primaryEntriesLba':p_lba,'backupEntriesLba':b_lba,
         'diskGuid':str(uuid.UUID(bytes_le=primary[9])),'tableFingerprint':digest.hexdigest(),'partitions':parts},device)
+    if preserve_slots is None:return snapshot
+    if (not isinstance(preserve_slots,list) or len(preserve_slots)!=2
+            or any(type(n) is not int or not 1<=n<=count for n in preserve_slots) or len(set(preserve_slots))!=2):
+        raise ValueError('Invalid preservation slots')
+    masked=[]
+    for raw in (mbr,ph,p_array,b_array,bh):masked.append(bytearray(raw))
+    for raw in (masked[1],masked[4]):raw[16:20]=bytes(4);raw[88:92]=bytes(4)
+    for raw in (masked[2],masked[3]):
+        for n in preserve_slots:raw[(n-1)*entry:n*entry]=bytes(entry)
+    proof=hashlib.sha256(b'ro-gpt-preservation-v1\0'+struct.pack('<QQQQ',device['size'],sector,p_lba,b_lba))
+    for raw in masked:proof.update(struct.pack('<Q',len(raw)));proof.update(raw)
+    return {'snapshot':snapshot,'preservationFingerprint':proof.hexdigest()}
 
 
-def verified_snapshot(read, device, sector):
-    first=read_snapshot(read,device,sector);second=read_snapshot(read,device,sector)
+def verified_snapshot(read, device, sector, preserve_slots=None):
+    first=read_snapshot(read,device,sector,preserve_slots);second=read_snapshot(read,device,sector,preserve_slots)
     if first!=second:raise ValueError('GPT changed during probe')
     return second
 
@@ -187,14 +199,14 @@ def verify_kernel_layout(snapshot):
     if actual!=expected:raise ValueError('Kernel and GPT partitions disagree')
 
 
-def probe_device(path, expected):
+def probe_device(path, expected, preserve_slots=None):
     expected=identity(expected)
     if path!=expected['path']:raise ValueError('Device path mismatch')
     fd=os.open(path,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_EXCL)
     try:
         sector=fd_geometry(fd,expected)
-        snapshot=verified_snapshot(lambda offset,length:os.pread(fd,length,offset),expected,sector)
-        verify_kernel_layout(snapshot)
+        snapshot=verified_snapshot(lambda offset,length:os.pread(fd,length,offset),expected,sector,preserve_slots)
+        verify_kernel_layout(snapshot if preserve_slots is None else snapshot['snapshot'])
         if fd_geometry(fd,expected)!=sector:raise ValueError('Sector geometry changed')
         return snapshot
     finally:os.close(fd)
@@ -202,10 +214,15 @@ def probe_device(path, expected):
 
 def main():
     try:
-        if os.geteuid()!=0 or len(sys.argv)!=4 or sys.argv[1]!='--probe':return 2
-        snapshot=probe_device(sys.argv[2],json.loads(sys.argv[3]))
+        if os.geteuid()!=0 or len(sys.argv) not in (4,6) or sys.argv[1]!='--probe':return 2
+        slots=None
+        if len(sys.argv)==6:
+            if sys.argv[4]!='--preserve-slots':return 2
+            slots=json.loads(sys.argv[5])
+            if not isinstance(slots,list) or len(slots)!=2 or any(type(n) is not int or not 1<=n<=4096 for n in slots):return 2
+        snapshot=probe_device(sys.argv[2],json.loads(sys.argv[3]),slots)
         raw=json.dumps(snapshot,separators=(',',':'))
-        if len(raw.encode())>MAX_JSON:return 2
+        if len(raw.encode())>(MAX_JSON if slots is None else 8191):return 2
         sys.stdout.write(raw+'\n');return 0
     except Exception:
         return 2  # No raw disk metadata, filenames or exception text on stderr.

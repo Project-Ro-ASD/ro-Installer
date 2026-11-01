@@ -96,6 +96,8 @@ run_check "P0-04 helper v1/v2 compatibility and framing" \
   python3 -B test/scripts/helper_v2_test.py
 run_check "read-only GPT worker and helper admission" \
   python3 -B test/scripts/gpt_probe_test.py
+run_check "create-only free-space admission and metadata preservation" \
+  python3 -B test/scripts/free_space_install_test.py
 run_check "P0-04 generated schema is current" \
   python3 scripts/generate-observability-schema.py --check
 

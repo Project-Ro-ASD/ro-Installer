@@ -929,89 +929,37 @@ Label: none  uuid: 11111111-2222-3333-4444-555555555555
   });
 
   group('PartitioningStage — free space', () {
-    test('secilen ayrilmis alanda SWAP ve Root olusturur', () async {
-      final fake = FakeCommandRunner();
-      fake.addResponse('grep', [
-        'MemTotal',
-        '/proc/meminfo',
-      ], stdout: 'MemTotal:        4096000 kB');
-
-      final state = {
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'free_space',
-        'hasExistingEfi': true,
-        'existingEfiPartition': '/dev/sda1',
-        'diskPartitionTable': 'gpt',
-        'selectedFreeSpace': {
-          'name': 'Free Space',
-          'type': 'unallocated',
-          'isFreeSpace': true,
-          'sizeBytes': 64 * 1024 * 1024 * 1024,
-          'startSector': 2048,
-          'endSector': 134219775,
-          'sectorSize': 512,
+    for (final existing in [false, true]) {
+      test(
+        'unapproved free-space state with existing EFI=$existing cannot write',
+        () async {
+          final fake = FakeCommandRunner();
+          final ctx = makeContext({
+            'selectedDisk': '/dev/sda',
+            'partitionMethod': 'free_space',
+            'hasExistingEfi': existing,
+            'existingEfiPartition': existing ? '/dev/sda1' : '',
+            'selectedFreeSpace': {'startSector': 2048, 'endSector': 134219775},
+          }, fake);
+          expect((await const PartitioningStage().execute(ctx)).success, false);
+          expect(
+            fake.commandLog.where(
+              (c) =>
+                  [
+                    'sgdisk',
+                    'sfdisk',
+                    'parted',
+                    'ntfsresize',
+                    'swapoff',
+                    'swapon',
+                  ].contains(c.command) ||
+                  c.command.startsWith('mkfs.'),
+            ),
+            isEmpty,
+          );
         },
-      };
-      final ctx = makeContext(state, fake);
-
-      final stage = const PartitioningStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, true);
-      expect(fake.wasCommandCalled('ntfsresize'), false);
-      expect(fake.wasCommandCalled('parted'), false);
-      expect(
-        fake.wasCalledWith('sgdisk', [
-          '-n',
-          '0:2048:16779263',
-          '-t',
-          '0:8200',
-          '-c',
-          '0:RoASD_Swap',
-          '/dev/sda',
-        ]),
-        true,
       );
-      expect(
-        fake.wasCalledWith('sgdisk', [
-          '-n',
-          '0:16779264:134219775',
-          '-t',
-          '0:8300',
-          '-c',
-          '0:RoASD_Root',
-          '/dev/sda',
-        ]),
-        true,
-      );
-      expect(state['_resolvedSwapStartSector'], 2048);
-      expect(state['_resolvedRootStartSector'], 16779264);
-    });
-
-    test('mevcut EFI yoksa baslamadan durur', () async {
-      final fake = FakeCommandRunner();
-      final state = {
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'free_space',
-        'hasExistingEfi': false,
-        'existingEfiPartition': '',
-        'selectedFreeSpace': {'startSector': 2048, 'endSector': 134219775},
-      };
-      final ctx = makeContext(state, fake);
-
-      final stage = const PartitioningStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, false);
-      expect(
-        fake.commandLog.any(
-          (cmd) =>
-              cmd.command == 'sgdisk' &&
-              cmd.args.any((arg) => arg.startsWith('--backup=')),
-        ),
-        false,
-      );
-    });
+    }
   });
 
   group('PartitioningStage — manual', () {

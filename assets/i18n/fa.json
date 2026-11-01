@@ -147,7 +147,7 @@
   "disk_alongside_confirm_body": "{disk} برای نصب در کنار بدون پاک کردن کل دیسک استفاده خواهد شد. درباره {size} برای لینوکس رزرو خواهد شد. {source} ممکن است در صورت نیاز کوچک شود. قبل از ادامه، ویندوز باید به طور کامل خاموش شود و از اطلاعات مهم نسخه پشتیبان تهیه شود.",
   "disk_alongside_confirm_action": "Alongside را نصب کنید",
   "disk_free_space_confirm_title": "Install to Free Space",
-  "disk_free_space_confirm_body": "Ro-ASD will be installed on the selected {size} free area on {disk}. The existing EFI partition {efi} will be reused without formatting.",
+  "disk_free_space_confirm_body": "نصب Ro-ASD در {size} فضای آزاد روی {disk}. پارتیشن‌های موجود حفظ می‌شوند. یک EFI جدید با اندازهٔ {efi} و ریشهٔ Btrfs ساخته می‌شود.",
   "disk_free_space_confirm_action": "Use Free Space",
   "disk_free_space_missing": "Select an unallocated area before continuing.",
   "disk_plan_label": "طرح نصب",
@@ -177,7 +177,7 @@
   "disk_free_space_caption": "Uses only selected unallocated space",
   "disk_free_space_locked_title": "Why is free-space install locked?",
   "disk_free_space_pick_title": "Choose unallocated space",
-  "disk_free_space_pick_desc": "Select the free segment where Ro-ASD should create its root and swap partitions. Existing partitions are shown for orientation only.",
+  "disk_free_space_pick_desc": "EFI جداگانه و ریشهٔ Btrfs را در فضای آزاد ایجاد می‌کند. پارتیشن‌های موجود حفظ می‌شوند؛ بدون swap دیسک.",
   "disk_free_space_loading": "Reading disk layout...",
   "disk_free_space_empty": "No usable unallocated area was found on this disk.",
   "disk_free_space_selected": "{size} unallocated",
@@ -487,5 +487,7 @@
   "install_copy_measurement": "دادهٔ کپی‌شده ({phase}): {bytes} · {rate} · زمان تقریبی کپی: {eta}",
   "install_copy_main": "سیستم",
   "install_copy_efi": "EFI",
-  "disk_full_plan_summary": "طرح کل دیسک: پاک کردن همهٔ داده‌ها؛ ساخت EFI با FAT32 به اندازهٔ 512 MiB و Btrfs در فضای باقی‌مانده. بدون پارتیشن swap."
+  "disk_full_plan_summary": "طرح کل دیسک: پاک کردن همهٔ داده‌ها؛ ساخت EFI با FAT32 به اندازهٔ 512 MiB و Btrfs در فضای باقی‌مانده. بدون پارتیشن swap.",
+  "disk_free_space_probe": "خواندن فضای آزاد",
+  "disk_free_space_limit": "تعداد پارتیشن‌ها از حد ایمن نصب بیشتر است."
 }

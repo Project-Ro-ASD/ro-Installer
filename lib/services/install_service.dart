@@ -1,6 +1,7 @@
 import 'install_observation.dart';
 import 'copy_progress.dart';
 import '../models/approved_full_disk_plan.dart';
+import '../models/approved_free_space_plan.dart';
 import 'session_command_runner.dart';
 import 'dart:async';
 import 'mount_session.dart';
@@ -183,9 +184,11 @@ class InstallService {
     }
 
     // Fail closed before disk preparation; never reinterpret another mode as full.
-    if ((state['partitionMethod'] ?? 'full') != 'full') {
+    if ((state['partitionMethod'] ?? 'full') != 'full' &&
+        !(state['partitionMethod'] == 'free_space' &&
+            state.containsKey('_approvedFreeSpacePlan'))) {
       log(
-        'Storage MVP yalnızca full-disk erase destekler; disk işlemleri başlatılmadı.',
+        'Desteklenmeyen kurulum modu; disk işlemleri başlatılmadı.',
       );
       lastOutcome = InstallOutcome(
         primaryFailure: 'UNSUPPORTED_MODE',
@@ -200,7 +203,19 @@ class InstallService {
       return false;
     }
     ApprovedFullDiskPlan? approvedPlan;
+    ApprovedFreeSpacePlan? approvedFreeSpacePlan;
     try {
+      if (state['partitionMethod'] == 'free_space') {
+        approvedFreeSpacePlan = ApprovedFreeSpacePlan.fromJson(
+          state['_approvedFreeSpacePlan'],
+        );
+        if (!approvedFreeSpacePlan.matchesState(state) ||
+            state.containsKey('_approvedFullDiskPlan')) {
+          throw const FormatException('Stale free-space plan');
+        }
+      } else if (state.containsKey('_approvedFreeSpacePlan')) {
+        throw const FormatException('Wrong mode');
+      }
       if (state.containsKey('_approvedFullDiskPlan')) {
         approvedPlan = ApprovedFullDiskPlan.fromJson(
           state['_approvedFullDiskPlan'],
@@ -381,8 +396,11 @@ class InstallService {
         observation: observation,
         onCopyProgress: onCopyProgress,
         approvedPlan: approvedPlan,
+        approvedFreeSpacePlan: approvedFreeSpacePlan,
         beforeFirstMutation: () async {
-          if (!matchesApprovedPlan(state, expected: approvedPlan)) {
+          if (!matchesApprovedPlan(state, expected: approvedPlan) ||
+              (approvedFreeSpacePlan != null &&
+                  !approvedFreeSpacePlan.matchesState(state))) {
             throw const FormatException('Stale plan');
           }
           await mountSession!.validateTarget(disk, commit: true);

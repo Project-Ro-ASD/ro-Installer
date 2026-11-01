@@ -257,7 +257,7 @@ class _InstallingScreenState extends State<InstallingScreen>
       final identity = state.confirmedDevice;
       if (identity == null ||
           identity.path != state.selectedDisk ||
-          state.partitionMethod != 'full' ||
+          !const ['full', 'free_space'].contains(state.partitionMethod) ||
           state.fileSystem != 'btrfs') {
         throw const HelperException('MISSING_CONFIRMATION');
       }
@@ -276,8 +276,17 @@ class _InstallingScreenState extends State<InstallingScreen>
       }
 
       final client = widget.helperClient ?? HelperClient(protocolVersion: 2);
+      final isFree = state.partitionMethod == 'free_space';
       final plan = state.confirmedPlan;
-      if (client.protocolVersion == 2 &&
+      final freePlan = state.confirmedFreeSpacePlan;
+      if (isFree) {
+        if (client.protocolVersion != 2 ||
+            freePlan == null ||
+            !samePlanValue(freePlan.snapshot.device.json, identity.json) ||
+            state.fileSystem != 'btrfs') {
+          throw const HelperException('MISSING_CONFIRMATION');
+        }
+      } else if (client.protocolVersion == 2 &&
           (plan == null ||
               !plan.matchesState({
                 'selectedDisk': state.selectedDisk,
@@ -287,7 +296,29 @@ class _InstallingScreenState extends State<InstallingScreen>
               !samePlanValue(plan.device.json, identity.json))) {
         throw const HelperException('MISSING_CONFIRMATION');
       }
-      if (client.protocolVersion == 1) {
+      void copyChanged(CopyProgress value) {
+        if (!mounted || _isFinished) return;
+        _copyExpiry?.cancel();
+        setState(() => _copyProgress = value);
+        _copyExpiry = Timer(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _copyProgress = null);
+        });
+      }
+
+      void reportChanged(SessionReport? report, String status) {
+        _sessionReport = report;
+        _reportStatus = status;
+      }
+
+      if (isFree) {
+        await client.installFreeSpace(
+          freePlan!,
+          progressChanged,
+          uiLanguage: state.selectedLanguage,
+          onCopyProgress: copyChanged,
+          onReport: reportChanged,
+        );
+      } else if (client.protocolVersion == 1) {
         await client.install(identity, progressChanged);
       } else {
         await client.installWithReport(
@@ -295,18 +326,8 @@ class _InstallingScreenState extends State<InstallingScreen>
           progressChanged,
           uiLanguage: state.selectedLanguage,
           confirmedPlan: plan,
-          onCopyProgress: (value) {
-            if (!mounted || _isFinished) return;
-            _copyExpiry?.cancel();
-            setState(() => _copyProgress = value);
-            _copyExpiry = Timer(const Duration(seconds: 3), () {
-              if (mounted) setState(() => _copyProgress = null);
-            });
-          },
-          onReport: (report, status) {
-            _sessionReport = report;
-            _reportStatus = status;
-          },
+          onCopyProgress: copyChanged,
+          onReport: reportChanged,
         );
       }
       success = true;

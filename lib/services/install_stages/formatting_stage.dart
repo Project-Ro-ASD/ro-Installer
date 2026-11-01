@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import '../../models/storage_plan.dart';
-import '../../models/approved_full_disk_plan.dart';
 import '../storage_topology_guard.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
@@ -17,12 +16,32 @@ class FormattingStage {
   const FormattingStage();
 
   Future<StageResult> execute(StageContext ctx) async {
-    if (!matchesApprovedPlan(ctx.state, expected: ctx.approvedPlan)) {
+    if (!ctx.approvedStateMatches) {
       return StageResult.fail('Onaylanan disk planı değişti.');
     }
     final selectedDisk = ctx.state['selectedDisk'] as String;
     final partitionMethod = ctx.state['partitionMethod'] as String;
     final String rootFs = ctx.state['fileSystem'] ?? 'btrfs';
+    if (partitionMethod == 'free_space') {
+      if (!ctx.usesStandardStorage || !await ctx.verifyFreeSpaceLayoutNow()) {
+        return StageResult.fail('Doğrulanmış yeni bölüm kimlikleri gerekli.');
+      }
+      if (!await ctx.runCmd(
+        'mkfs.fat',
+        ['-F32', ctx.espPartition],
+        ctx.log,
+        isMock: ctx.isMock,
+      )) {
+        return StageResult.fail('Yeni EFI biçimlendirilemedi.');
+      }
+      if (!await ctx.verifyFreeSpaceLayoutNow()) {
+        return StageResult.fail('Root biçimlendirme öncesi GPT değişti.');
+      }
+      if (!await _formatPartition(ctx, ctx.rootPartition, 'btrfs')) {
+        return StageResult.fail('Yeni Btrfs root biçimlendirilemedi.');
+      }
+      return StageResult.ok('Yeni EFI ve Btrfs biçimlendirildi.');
+    }
     if (rootFs != 'btrfs') {
       return StageResult.fail(
         'Ro-ASD yalnızca Btrfs dosya sistemiyle kurulabilir: $rootFs',
@@ -54,8 +73,6 @@ class FormattingStage {
       case 'full':
         return _formatFullDisk(ctx, selectedDisk, rootFs, storagePlan);
       case 'alongside':
-        return _formatAlongside(ctx, selectedDisk, rootFs, storagePlan);
-      case 'free_space':
         return _formatAlongside(ctx, selectedDisk, rootFs, storagePlan);
       case 'manual':
         return _formatManualPartitions(ctx, storagePlan);

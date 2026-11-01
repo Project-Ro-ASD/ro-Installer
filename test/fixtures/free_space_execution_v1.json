@@ -1,0 +1,143 @@
+{
+  "snapshot": {
+    "schemaVersion": 1,
+    "device": {
+      "path": "/dev/vda",
+      "majorMinor": "252:0",
+      "size": 274877906944,
+      "diskSequence": 11
+    },
+    "logicalSectorBytes": 512,
+    "firstUsableSector": 2048,
+    "lastUsableSector": 536870878,
+    "entryCount": 128,
+    "entryBytes": 128,
+    "primaryEntriesLba": 2,
+    "backupEntriesLba": 536870879,
+    "diskGuid": "11111111-1111-1111-1111-111111111111",
+    "tableFingerprint": "0ab5dfde72dba1dcec690c906fd54b74dd88474ed578040180f820a284c1dee4",
+    "partitions": [
+      {
+        "number": 1,
+        "startSector": 2048,
+        "endSector": 1050623,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "8000000000000000"
+      },
+      {
+        "number": 2,
+        "startSector": 1050624,
+        "endSector": 167772159,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000"
+      },
+      {
+        "number": 7,
+        "startSector": 335544320,
+        "endSector": 356515839,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "44444444-4444-4444-4444-444444444444",
+        "attributesHex": "0000000000000000"
+      }
+    ]
+  },
+  "approval": {
+    "intent": {
+      "schemaVersion": 1,
+      "mode": "free_space",
+      "device": {
+        "path": "/dev/vda",
+        "majorMinor": "252:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "0ab5dfde72dba1dcec690c906fd54b74dd88474ed578040180f820a284c1dee4",
+      "selectedExtent": {
+        "startSector": 167772160,
+        "endSector": 335544319
+      },
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "esp": {
+        "number": 3,
+        "startSector": 167772160,
+        "endSector": 168820735
+      },
+      "root": {
+        "number": 4,
+        "startSector": 168820736,
+        "endSector": 335544319
+      }
+    },
+    "allocationGuids": {
+      "esp": "55555555-5555-5555-5555-555555555555",
+      "root": "66666666-6666-6666-6666-666666666666"
+    },
+    "preservationFingerprint": "febfb62984b10c41c3442e79b91265c12203a48063095807f1a742d18c1f5868"
+  },
+  "created": {
+    "snapshot": {
+      "schemaVersion": 1,
+      "device": {
+        "path": "/dev/vda",
+        "majorMinor": "252:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "logicalSectorBytes": 512,
+      "firstUsableSector": 2048,
+      "lastUsableSector": 536870878,
+      "entryCount": 128,
+      "entryBytes": 128,
+      "primaryEntriesLba": 2,
+      "backupEntriesLba": 536870879,
+      "diskGuid": "11111111-1111-1111-1111-111111111111",
+      "tableFingerprint": "ec184bb2862ef1715d1de0a5a80f87a7228b528f228aaff0cd955be635d9204c",
+      "partitions": [
+        {
+          "number": 1,
+          "startSector": 2048,
+          "endSector": 1050623,
+          "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+          "partitionGuid": "22222222-2222-2222-2222-222222222222",
+          "attributesHex": "8000000000000000"
+        },
+        {
+          "number": 2,
+          "startSector": 1050624,
+          "endSector": 167772159,
+          "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+          "partitionGuid": "33333333-3333-3333-3333-333333333333",
+          "attributesHex": "0000000000000000"
+        },
+        {
+          "number": 3,
+          "startSector": 167772160,
+          "endSector": 168820735,
+          "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+          "partitionGuid": "55555555-5555-5555-5555-555555555555",
+          "attributesHex": "0000000000000000"
+        },
+        {
+          "number": 4,
+          "startSector": 168820736,
+          "endSector": 335544319,
+          "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+          "partitionGuid": "66666666-6666-6666-6666-666666666666",
+          "attributesHex": "0000000000000000"
+        },
+        {
+          "number": 7,
+          "startSector": 335544320,
+          "endSector": 356515839,
+          "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+          "partitionGuid": "44444444-4444-4444-4444-444444444444",
+          "attributesHex": "0000000000000000"
+        }
+      ]
+    },
+    "preservationFingerprint": "febfb62984b10c41c3442e79b91265c12203a48063095807f1a742d18c1f5868"
+  }
+}

@@ -147,7 +147,7 @@
   "disk_alongside_confirm_body": "{disk} будет использоваться для параллельной установки без стирания всего диска. Около {size} будет зарезервировано для Linux; При необходимости {source} можно уменьшить. Прежде чем продолжить, необходимо полностью завершить работу Windows и создать резервную копию важных данных.",
   "disk_alongside_confirm_action": "Установить рядом",
   "disk_free_space_confirm_title": "Install to Free Space",
-  "disk_free_space_confirm_body": "Ro-ASD will be installed on the selected {size} free area on {disk}. The existing EFI partition {efi} will be reused without formatting.",
+  "disk_free_space_confirm_body": "Установить Ro-ASD в {size} свободного места на {disk}. Существующие разделы сохранятся. Будут созданы новая EFI {efi} и корень Btrfs.",
   "disk_free_space_confirm_action": "Use Free Space",
   "disk_free_space_missing": "Select an unallocated area before continuing.",
   "disk_plan_label": "План установки",
@@ -177,7 +177,7 @@
   "disk_free_space_caption": "Uses only selected unallocated space",
   "disk_free_space_locked_title": "Why is free-space install locked?",
   "disk_free_space_pick_title": "Choose unallocated space",
-  "disk_free_space_pick_desc": "Select the free segment where Ro-ASD should create its root and swap partitions. Existing partitions are shown for orientation only.",
+  "disk_free_space_pick_desc": "Создаёт отдельные EFI и корень Btrfs в свободной области. Существующие разделы сохраняются; без дискового swap.",
   "disk_free_space_loading": "Reading disk layout...",
   "disk_free_space_empty": "No usable unallocated area was found on this disk.",
   "disk_free_space_selected": "{size} unallocated",
@@ -487,5 +487,7 @@
   "install_copy_measurement": "Скопировано ({phase}): {bytes} · {rate} · Оценка копирования: {eta}",
   "install_copy_main": "Система",
   "install_copy_efi": "EFI",
-  "disk_full_plan_summary": "Весь диск: удалить все данные; создать EFI FAT32 512 MiB и Btrfs на оставшемся месте. Без раздела подкачки."
+  "disk_full_plan_summary": "Весь диск: удалить все данные; создать EFI FAT32 512 MiB и Btrfs на оставшемся месте. Без раздела подкачки.",
+  "disk_free_space_probe": "Прочитать свободное место",
+  "disk_free_space_limit": "Число разделов превышает безопасный предел установки."
 }

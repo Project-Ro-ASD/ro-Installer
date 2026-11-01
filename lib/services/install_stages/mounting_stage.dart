@@ -12,6 +12,9 @@ class MountingStage {
   const MountingStage();
 
   Future<StageResult> execute(StageContext ctx) async {
+    if (!ctx.approvedStateMatches) {
+      return StageResult.fail('Onaylanan hedef yerleşimi değişti.');
+    }
     final selectedDisk = ctx.state['selectedDisk'] as String;
     final partitionMethod = ctx.state['partitionMethod'] as String;
     final String rootFs = ctx.state['fileSystem'] ?? 'btrfs';
@@ -40,7 +43,18 @@ class MountingStage {
       case 'alongside':
         return _mountAlongside(ctx, selectedDisk, rootFs);
       case 'free_space':
-        return _mountAlongside(ctx, selectedDisk, rootFs);
+        if (!ctx.usesStandardStorage || !await ctx.verifyFreeSpaceLayoutNow()) {
+          return StageResult.fail(
+            'Bağlama öncesi yeni bölüm kimlikleri doğrulanamadı.',
+          );
+        }
+        if (!await _mountStandardRoot(ctx, ctx.rootPartition)) {
+          return StageResult.fail('Yeni root bağlanamadı.');
+        }
+        if (!await _mountEfi(ctx, ctx.espPartition)) {
+          return StageResult.fail('Yeni EFI bağlanamadı.');
+        }
+        return StageResult.ok('Boş alan kurulumu bağlamaları tamamlandı.');
       case 'manual':
         return _mountManualPartitions(ctx);
       default:

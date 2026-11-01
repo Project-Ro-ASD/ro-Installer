@@ -147,7 +147,7 @@
   "disk_alongside_confirm_body": "{disk} wird für eine parallele Installation verwendet, ohne dass die gesamte Festplatte gelöscht wird. Ungefähr {size} wird für Linux reserviert; {source} kann bei Bedarf verkleinert werden. Bevor Sie fortfahren, muss Windows vollständig heruntergefahren und wichtige Daten gesichert werden.",
   "disk_alongside_confirm_action": "Parallel installieren",
   "disk_free_space_confirm_title": "Install to Free Space",
-  "disk_free_space_confirm_body": "Ro-ASD will be installed on the selected {size} free area on {disk}. The existing EFI partition {efi} will be reused without formatting.",
+  "disk_free_space_confirm_body": "Ro-ASD in {size} freiem Speicher auf {disk} installieren. Bestehende Partitionen bleiben unverändert. Eine neue {efi}-EFI-Partition und Btrfs-Root werden erstellt.",
   "disk_free_space_confirm_action": "Use Free Space",
   "disk_free_space_missing": "Select an unallocated area before continuing.",
   "disk_plan_label": "Installationsplan",
@@ -177,7 +177,7 @@
   "disk_free_space_caption": "Uses only selected unallocated space",
   "disk_free_space_locked_title": "Why is free-space install locked?",
   "disk_free_space_pick_title": "Choose unallocated space",
-  "disk_free_space_pick_desc": "Select the free segment where Ro-ASD should create its root and swap partitions. Existing partitions are shown for orientation only.",
+  "disk_free_space_pick_desc": "Erstellt eigene EFI- und Btrfs-Partitionen im freien Bereich. Bestehende Partitionen bleiben erhalten; kein Disk-Swap.",
   "disk_free_space_loading": "Reading disk layout...",
   "disk_free_space_empty": "No usable unallocated area was found on this disk.",
   "disk_free_space_selected": "{size} unallocated",
@@ -487,5 +487,7 @@
   "install_copy_measurement": "Kopierte Daten ({phase}): {bytes} · {rate} · Kopierschätzung: {eta}",
   "install_copy_main": "System",
   "install_copy_efi": "EFI",
-  "disk_full_plan_summary": "Gesamter Datenträger: alle Daten löschen; 512 MiB FAT32-EFI und Btrfs im übrigen Speicher erstellen. Keine Swap-Partition."
+  "disk_full_plan_summary": "Gesamter Datenträger: alle Daten löschen; 512 MiB FAT32-EFI und Btrfs im übrigen Speicher erstellen. Keine Swap-Partition.",
+  "disk_free_space_probe": "Freien Speicher lesen",
+  "disk_free_space_limit": "Die Anzahl der Partitionen überschreitet die sichere Installationsgrenze."
 }

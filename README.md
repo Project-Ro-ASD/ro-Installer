@@ -85,10 +85,10 @@ selection/channel policy, or replacing Fedora kernels with custom kernels.
 
 ## Standard Storage Contract
 
-Free-space installation is being developed in three parts: deterministic GPT
-planning, authoritative helper admission, and execution/GUI integration. The
-`GptDiskSnapshot` and `FreeSpaceInstallationPlan` models provide deterministic
-planning; helper v2 now adds read-only probing and fresh plan validation.
+The production GUI supports full-disk installation and create-only installation
+inside an existing GPT free extent. `GptDiskSnapshot` and
+`FreeSpaceInstallationPlan` provide deterministic planning; helper v2 probes
+authoritative metadata and revalidates the approved extent before mutation.
 The models validate normalized sector geometry, primary/backup entry-array
 reservations, partition identities, overlap and GPT slot capacity. Plans bind
 the device sequence, table fingerprint and partition inventory to one complete
@@ -98,8 +98,8 @@ The proposed layout creates a dedicated 512 MiB ESP and Btrfs root inside that
 extent, keeping existing partitions and their EFI files separate. It uses no
 disk swap, shrinking, wiping or shared-ESP formatting. Allocation uses integer
 sector arithmetic and 1 MiB alignment; the existing temporary root-space safety
-floor applies. This planning layer does not enable the legacy `free_space`
-executor or change the full-disk-only production admission contract.
+floor applies. The legacy free-space executor is replaced by this verified
+create-only path; root-auto profiles remain full-disk only.
 
 ### Read-only free-space admission (helper v2)
 
@@ -129,8 +129,40 @@ Probe limits are 512/4096-byte sectors, 4096 entries of at most 1024 bytes, up t
 32 occupied partitions and a 7168-byte snapshot. The worker has a ten-second
 deadline and bounded combined output; exceeding a bound fails rather than
 truncating inventory. Its root-owned package payload is checked alongside the
-helper. A validated proposal is not a write authorization: execution/GUI wiring
-and revalidation at the first mutation remain the third implementation part.
+helper. A validated proposal alone is not a write authorization.
+
+### Create-only free-space installation (GUI/helper v2)
+
+The GUI scans the selected disk, lists eligible extents and confirms a dedicated
+512 MiB FAT32 ESP plus Btrfs root. Selection changes invalidate both the proposal
+and confirmation; delayed scans and dialogs cannot approve a superseded choice.
+`install-free-space` requires `disk`, `expectedDevice`, `confirmDestructive: true`
+and the compact `confirmedPlan`; optional `uiLanguage` and `includeCopyProgress`
+retain their existing contracts. Public requests cannot supply source inventory,
+partition GUIDs, preservation proofs, commands or partition-path overrides. V1
+rejects this operation.
+
+Under the installer lease, the helper recomputes the intent from fresh GPT data,
+allocates unique partition GUIDs and binds a private approval to the backend's
+ready/continue gate. `sfdisk --append` adds exactly the planned two entries with
+signature wiping disabled. After kernel rescan, both GPT copies and sysfs must
+identify the new partitions exactly. A separate SHA-256 preservation proof masks
+only those two owned entries and the header/entry-array CRC fields; every other
+metadata byte must remain unchanged. Existing partition identities, ranges,
+attributes and hashed names remain protected.
+
+Only the verified new devices enter formatting, mount ownership, fstab,
+bootloader and final validation. GPT identity and preservation are checked again
+before each format and mounting. A mismatch stops execution; there is no automatic
+GPT restore or retry after partial creation. Existing EFI filesystems are not
+mounted or reused. This mode disables GRUB os-prober to avoid scanning existing
+systems; their firmware entries remain the route to those systems.
+
+Execution accepts at most 30 existing partitions, leaving room for the two new
+entries within the probe limit. The complete private backend frame must fit
+8192 bytes; oversized inventories fail before backend launch. Damaged, hybrid or
+unsupported layouts are rejected rather than repaired. Full-disk behavior and
+its older protocol compatibility remain unchanged.
 
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
 and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:
@@ -362,8 +394,8 @@ copy cannot downgrade execution to the legacy path. It checks the approval
 before the first mutation and rechecks the partitioning/formatting stages.
 Rsync, partition geometry, format argv, mount ownership and cleanup contracts
 are unchanged. This binds the supported full-disk intent, not a snapshot of
-the disk's existing partition contents. Manual/free-space/alongside approval
-requires a separate plan design. The plan is not a signature, authorization
+the disk's existing partition contents. Manual/alongside approval requires a separate plan design; free-space approval
+uses the independent contract above. The plan is not a signature, authorization
 token or proof of a human click; polkit and authoritative device checks remain
 the privilege boundary.
 
@@ -375,7 +407,8 @@ installation mode is added by this feature.
 
 ### Live copy measurements (explicit helper v2 capability)
 
-A v2 `install-full-disk` request can opt in with `includeCopyProgress: true`.
+V2 `install-full-disk` and `install-free-space` requests can opt in with
+`includeCopyProgress: true`.
 V1, audit and probe reject the field; existing v2 clients that omit it receive
 the existing response types. The GUI opts in and receives typed frames:
 
@@ -466,8 +499,9 @@ filesystems remain unknown; a portal used as loop/overlay backing is rejected.
 The Fedora 44 KIWI fixture covers ISO → loop → erofs → overlay, ZRAM and portal,
 plus protected media, missing/ambiguous data and identity-change regressions.
 
-Only x86_64 UEFI, full erase, Btrfs, GPT, a 512 MiB ESP and the existing Btrfs
-subvolume layout are authorized. No disk swap is created. Helper disk preparation
+Only x86_64 UEFI, Btrfs, GPT, a 512 MiB ESP and the existing Btrfs
+subvolume layout are authorized, through full erase or the verified free-space
+contract above. No disk swap is created. Helper disk preparation
 does not globally swapoff/unmount; ZRAM remains system policy. Alongside, manual,
 ext4/XFS, LUKS/LVM/RAID/multipath and arbitrary swap are not authorized.
 

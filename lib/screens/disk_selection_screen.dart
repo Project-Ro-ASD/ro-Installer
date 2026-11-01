@@ -5,6 +5,7 @@ import '../services/disk_service.dart';
 import '../services/helper_client.dart';
 import '../services/helper_protocol.dart';
 import '../models/approved_full_disk_plan.dart';
+import '../models/free_space_installation_plan.dart';
 import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/nebula_ui.dart';
@@ -23,6 +24,157 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
   bool _isLoading = true;
   bool _isConfirming = false;
   DiskDiscoveryResult? _discovery;
+  bool _scanningFree = false;
+  bool _freeLimit = false;
+  List<FreeSpaceInstallationPlan> _freePlans = [];
+  int? _freeRevision;
+
+  Future<void> _scanFreeSpace(InstallerState state) async {
+    if (_scanningFree ||
+        _isConfirming ||
+        state.partitionMethod != 'free_space' ||
+        state.selectedDisk.isEmpty) {
+      return;
+    }
+    final path = state.selectedDisk;
+    final revision = state.diskSelectionRevision;
+    setState(() {
+      _scanningFree = true;
+      _freePlans = [];
+      _freeLimit = false;
+      _freeRevision = null;
+    });
+    try {
+      final snapshot =
+          await (widget.helperClient ?? HelperClient(protocolVersion: 2))
+              .probeFreeSpace(path);
+      if (!mounted ||
+          state.diskSelectionRevision != revision ||
+          state.selectedDisk != path ||
+          state.partitionMethod != 'free_space') {
+        return;
+      }
+      final candidates = <FreeSpaceInstallationPlan>[];
+      if (snapshot.partitions.length <= 30) {
+        for (final extent in snapshot.freeExtents) {
+          try {
+            candidates.add(FreeSpaceInstallationPlan.build(snapshot, extent));
+          } on FormatException {
+            /* Not a deployable gap. */
+          }
+        }
+      }
+      if (candidates.isNotEmpty) state.selectFreeSpacePlan(candidates.first);
+      setState(() {
+        _freePlans = candidates;
+        _freeLimit = snapshot.partitions.length > 30;
+        _freeRevision = state.diskSelectionRevision;
+      });
+    } on HelperException catch (error) {
+      if (mounted && state.diskSelectionRevision == revision) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${state.t('helper_error')} (${error.code})')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _scanningFree = false);
+    }
+  }
+
+  Widget _freeControls(InstallerState state) {
+    final current = _freeRevision == state.diskSelectionRevision;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Text(state.t('disk_free_space_pick_desc')),
+        const SizedBox(height: 12),
+        NebulaSecondaryButton(
+          label: state.t(
+            _scanningFree ? 'disk_free_space_loading' : 'disk_free_space_probe',
+          ),
+          icon: Icons.search_rounded,
+          onPressed: _scanningFree || _isConfirming
+              ? null
+              : () => _scanFreeSpace(state),
+        ),
+        if (current && _freePlans.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(
+              state.t(
+                _freeLimit ? 'disk_free_space_limit' : 'disk_free_space_empty',
+              ),
+            ),
+          ),
+        if (current && _freePlans.isNotEmpty)
+          DropdownButton<FreeSpaceInstallationPlan>(
+            key: const ValueKey('free-space-extent'),
+            isExpanded: true,
+            value: state.selectedFreeSpacePlan,
+            items: _freePlans.map((plan) {
+              final sector = plan.snapshot.logicalSectorBytes;
+              final extent = plan.selectedExtent;
+              final size =
+                  ((extent.endSector - extent.startSector + 1) *
+                          sector /
+                          (1024 * 1024 * 1024))
+                      .toStringAsFixed(1);
+              final start = (extent.startSector * sector / (1024 * 1024 * 1024))
+                  .toStringAsFixed(1);
+              return DropdownMenuItem(
+                value: plan,
+                child: Text(
+                  '$size GiB · $start GiB',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            }).toList(),
+            onChanged: (plan) {
+              if (plan != null &&
+                  !_isConfirming &&
+                  state.selectFreeSpacePlan(plan)) {
+                setState(() => _freeRevision = state.diskSelectionRevision);
+              }
+            },
+          ),
+      ],
+    );
+  }
+
+  Future<void> _confirmFreeSpace(InstallerState state) async {
+    final plan = state.selectedFreeSpacePlan;
+    if (plan == null ||
+        _isConfirming ||
+        _scanningFree ||
+        _freeRevision != state.diskSelectionRevision) {
+      return;
+    }
+    final revision = state.diskSelectionRevision;
+    setState(() => _isConfirming = true);
+    final size =
+        ((plan.selectedExtent.endSector - plan.selectedExtent.startSector + 1) *
+                plan.snapshot.logicalSectorBytes /
+                (1024 * 1024 * 1024))
+            .toStringAsFixed(1);
+    final confirmed = await _showDecisionDialog(
+      accent: const Color(0xFF6BE7B1),
+      icon: Icons.add_to_photos_rounded,
+      title: state.t('disk_free_space_confirm_title'),
+      message: state.t('disk_free_space_confirm_body', {
+        'disk': plan.snapshot.device.path,
+        'size': '$size GiB',
+        'efi': '512 MiB FAT32',
+      }),
+      confirmLabel: state.t('disk_free_space_confirm_action'),
+      cancelLabel: state.t('cancel'),
+    );
+    if (!mounted) return;
+    setState(() => _isConfirming = false);
+    if (confirmed == true && state.confirmFreeSpacePlan(plan, revision)) {
+      state.nextStep();
+    }
+  }
 
   Future<bool?> _showDecisionDialog({
     required Color accent,
@@ -166,6 +318,10 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
       return;
     }
 
+    if (partitionMethod == 'free_space') {
+      await _confirmFreeSpace(state);
+      return;
+    }
     if (partitionMethod != 'full') {
       return;
     }
@@ -243,6 +399,9 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
         final strategyPanel = _InstallationPlanPanel(
           state: state,
           dense: denseDesktop || compact,
+          freeControls: state.partitionMethod == 'free_space'
+              ? _freeControls(state)
+              : null,
         );
 
         final compactControls = Column(
@@ -283,7 +442,10 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                   children: [
                     Expanded(flex: 5, child: diskPanel),
                     const SizedBox(width: 16),
-                    Expanded(flex: 5, child: strategyPanel),
+                    Expanded(
+                      flex: 5,
+                      child: SingleChildScrollView(child: strategyPanel),
+                    ),
                     const SizedBox(width: 16),
                     Expanded(
                       flex: 6,
@@ -327,6 +489,9 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                   icon: Icons.arrow_forward_rounded,
                   onPressed:
                       _isLoading ||
+                          _scanningFree ||
+                          (state.partitionMethod == 'free_space' &&
+                              state.selectedFreeSpacePlan == null) ||
                           _isConfirming ||
                           _discovery?.succeeded != true
                       ? null
@@ -342,7 +507,12 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
 }
 
 class _InstallationPlanPanel extends StatelessWidget {
-  const _InstallationPlanPanel({required this.state, this.dense = false});
+  const _InstallationPlanPanel({
+    required this.state,
+    this.dense = false,
+    this.freeControls,
+  });
+  final Widget? freeControls;
 
   final InstallerState state;
   final bool dense;
@@ -367,6 +537,7 @@ class _InstallationPlanPanel extends StatelessWidget {
           ),
           SizedBox(height: dense ? 14 : 18),
           _CompactMethodGrid(state: state),
+          ?freeControls,
         ],
       ),
     );
@@ -712,7 +883,11 @@ class _StorageSummaryPanel extends StatelessWidget {
                       width: metricWidth,
                       child: _SummaryMetric(
                         label: state.t('disk_install_type'),
-                        value: state.t('install_type_standard'),
+                        value: state.t(
+                          state.partitionMethod == 'free_space'
+                              ? 'disk_free_space_label'
+                              : 'install_type_standard',
+                        ),
                         icon: Icons.tune_rounded,
                         dense: dense,
                       ),
@@ -855,14 +1030,28 @@ class _CompactMethodGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _CompactMethodOption(
-      label: state.t('disk_full'),
-      caption: state.t('disk_full_caption'),
-      icon: Icons.delete_sweep_rounded,
-      accent: const Color(0xFFFF8C7A),
-      selected: state.partitionMethod == 'full',
-      disabled: false,
-      onTap: () => state.updatePartitionMethod('full'),
+    return Column(
+      children: [
+        _CompactMethodOption(
+          label: state.t('disk_full'),
+          caption: state.t('disk_full_caption'),
+          icon: Icons.delete_sweep_rounded,
+          accent: const Color(0xFFFF8C7A),
+          selected: state.partitionMethod == 'full',
+          disabled: false,
+          onTap: () => state.updatePartitionMethod('full'),
+        ),
+        const SizedBox(height: 12),
+        _CompactMethodOption(
+          label: state.t('disk_free_space_method'),
+          caption: state.t('disk_free_space_caption'),
+          icon: Icons.add_to_photos_rounded,
+          accent: const Color(0xFF6BE7B1),
+          selected: state.partitionMethod == 'free_space',
+          disabled: false,
+          onTap: () => state.updatePartitionMethod('free_space'),
+        ),
+      ],
     );
   }
 }

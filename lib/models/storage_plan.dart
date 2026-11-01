@@ -102,7 +102,9 @@ class StoragePlanBuilder {
     final operations = switch (mode) {
       'full' => _fullDiskOperations(targetDisk),
       'alongside' => _alongsideOperations(state, targetDisk),
-      'free_space' => _freeSpaceOperations(state, targetDisk),
+      'free_space' => throw const StoragePlanException(
+        'Verified FreeSpaceInstallationPlan required.',
+      ),
       'manual' => _manualOperations(state),
       _ => throw StoragePlanException('Bilinmeyen storage plan yöntemi: $mode'),
     };
@@ -180,39 +182,6 @@ class StoragePlanBuilder {
       ),
     ]);
     return operations;
-  }
-
-  static List<StoragePlanOperation> _freeSpaceOperations(
-    Map<String, dynamic> state,
-    String targetDisk,
-  ) {
-    final existingEfi = (state['existingEfiPartition'] ?? '').toString();
-    final selectedFreeSpace = state['selectedFreeSpace'];
-    final freeSpaceDetails = selectedFreeSpace is Map
-        ? Map<String, dynamic>.from(selectedFreeSpace)
-        : <String, dynamic>{};
-    return [
-      StoragePlanOperation(
-        type: 'use_existing_efi',
-        target: existingEfi.isEmpty ? '<pending-existing-efi>' : existingEfi,
-      ),
-      StoragePlanOperation(
-        type: 'allocate_selected_free_space',
-        target: targetDisk,
-        destructive: true,
-        details: freeSpaceDetails,
-      ),
-      StoragePlanOperation(
-        type: 'create_swap',
-        target: targetDisk,
-        destructive: true,
-      ),
-      StoragePlanOperation(
-        type: 'create_btrfs_root',
-        target: targetDisk,
-        destructive: true,
-      ),
-    ];
   }
 
   static List<StoragePlanOperation> _manualOperations(

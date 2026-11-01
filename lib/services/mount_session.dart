@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../models/approved_free_space_plan.dart';
 import '../models/standard_storage_layout.dart';
 import 'command_runner.dart';
 import 'session_command_runner.dart';
@@ -95,6 +96,7 @@ class MountRecord {
 }
 
 abstract class MountSession {
+  void bindCreatedFreeSpaceLayout(CreatedFreeSpaceLayout layout);
   Future<void> initialize();
   Future<void> validateTarget(String disk, {bool commit = false});
   Future<void> assertEmpty();
@@ -129,6 +131,7 @@ class VerifiedMountSession implements MountSession {
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>) control;
   final Map<int, MountRecord> _owned = {};
   String? _namespace, _disk;
+  CreatedFreeSpaceLayout? _freeLayout;
   bool _unsafe = false, _attempted = false, _verified = false;
   CleanupReport? _report;
   static bool below(String path, String root) =>
@@ -184,8 +187,21 @@ class VerifiedMountSession implements MountSession {
     _disk = disk;
   }
 
-  String _part(int n) =>
-      '${_disk!}${_disk!.contains('nvme') || _disk!.contains('mmcblk') || _disk!.contains('loop') ? 'p' : ''}$n';
+  String _part(int n) => _freeLayout != null
+      ? (n == 1 ? _freeLayout!.espPath : _freeLayout!.rootPath)
+      : '${_disk!}${_disk!.contains('nvme') || _disk!.contains('mmcblk') || _disk!.contains('loop') ? 'p' : ''}$n';
+  @override
+  void bindCreatedFreeSpaceLayout(CreatedFreeSpaceLayout layout) {
+    if (!_verified ||
+        _attempted ||
+        _unsafe ||
+        _owned.isNotEmpty ||
+        _disk != layout.snapshot.device.path ||
+        _freeLayout != null) {
+      throw StateError('Cannot bind an unverified storage layout');
+    }
+    _freeLayout = layout;
+  }
 
   @override
   Future<bool> mount(List<String> args) async {
@@ -384,6 +400,8 @@ class VerifiedMountSession implements MountSession {
 /// Only explicit isMock/injected unit contexts use this implementation.
 /// It provides no Linux namespace/ownership evidence and is never GUI-selectable.
 class SimulatedMountSession implements MountSession {
+  @override
+  void bindCreatedFreeSpaceLayout(CreatedFreeSpaceLayout layout) {}
   SimulatedMountSession(this.runner);
   final CommandRunner runner;
   final List<String> _targets = [];

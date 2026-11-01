@@ -147,7 +147,7 @@
   "disk_alongside_confirm_body": "{disk} 将用于并行安装，而无需擦除整个磁盘。关于{size}将保留给Linux；如果需要，{source} 可以缩小。在继续之前，必须完全关闭 Windows，并备份重要数据。",
   "disk_alongside_confirm_action": "并排安装",
   "disk_free_space_confirm_title": "Install to Free Space",
-  "disk_free_space_confirm_body": "Ro-ASD will be installed on the selected {size} free area on {disk}. The existing EFI partition {efi} will be reused without formatting.",
+  "disk_free_space_confirm_body": "将 Ro-ASD 安装到 {disk} 上的 {size} 空闲空间。现有分区保持不变。将创建新的 {efi} EFI 分区和 Btrfs 根分区。",
   "disk_free_space_confirm_action": "Use Free Space",
   "disk_free_space_missing": "Select an unallocated area before continuing.",
   "disk_plan_label": "安装方案",
@@ -177,7 +177,7 @@
   "disk_free_space_caption": "Uses only selected unallocated space",
   "disk_free_space_locked_title": "Why is free-space install locked?",
   "disk_free_space_pick_title": "Choose unallocated space",
-  "disk_free_space_pick_desc": "Select the free segment where Ro-ASD should create its root and swap partitions. Existing partitions are shown for orientation only.",
+  "disk_free_space_pick_desc": "在所选空闲区域创建独立 EFI 和 Btrfs 根分区。保留现有分区，不创建磁盘交换分区。",
   "disk_free_space_loading": "Reading disk layout...",
   "disk_free_space_empty": "No usable unallocated area was found on this disk.",
   "disk_free_space_selected": "{size} unallocated",
@@ -487,5 +487,7 @@
   "install_copy_measurement": "已复制数据（{phase}）：{bytes} · {rate} · 复制预计剩余：{eta}",
   "install_copy_main": "系统",
   "install_copy_efi": "EFI",
-  "disk_full_plan_summary": "整盘方案：清除所有数据；创建 512 MiB FAT32 EFI 分区，其余空间使用 Btrfs。不创建磁盘交换分区。"
+  "disk_full_plan_summary": "整盘方案：清除所有数据；创建 512 MiB FAT32 EFI 分区，其余空间使用 Btrfs。不创建磁盘交换分区。",
+  "disk_free_space_probe": "读取未分配空间",
+  "disk_free_space_limit": "此磁盘的分区数量超过安全安装上限。"
 }

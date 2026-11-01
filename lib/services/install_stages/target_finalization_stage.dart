@@ -178,8 +178,7 @@ class TargetFinalizationStage {
   const TargetFinalizationStage();
 
   Future<StageResult> execute(StageContext ctx) async {
-    if ((ctx.state['partitionMethod'] ?? 'full') != 'full' ||
-        (ctx.state['fileSystem'] ?? 'btrfs') != 'btrfs') {
+    if (!ctx.usesStandardStorage) {
       return StageResult.fail(
         'Target finalization requires the full/Btrfs MVP layout.',
       );
@@ -309,9 +308,8 @@ class TargetFinalizationStage {
       'stage_progress_target_fstab_selinux',
       'Fstab ve hedef handoff hazırlanıyor...',
     );
-    final disk = (ctx.state['selectedDisk'] ?? '').toString();
-    final rootUuid = await _lookupUuid(ctx, _partitionPath(disk, 2));
-    final espUuid = await _lookupUuid(ctx, _partitionPath(disk, 1));
+    final rootUuid = await _lookupUuid(ctx, ctx.rootPartition);
+    final espUuid = await _lookupUuid(ctx, ctx.espPartition);
     if (rootUuid == null || espUuid == null) {
       return StageResult.fail('/etc/fstab için UUID okunamadı.');
     }
@@ -345,7 +343,9 @@ class TargetFinalizationStage {
     );
     for (final entry in {
       installerSeedPath: seed,
-      installMetadataPath: installMetadata(),
+      installMetadataPath: installMetadata(
+        mode: ctx.state['partitionMethod'] ?? 'full',
+      ),
     }.entries) {
       failure = await _writeTargetFile(
         ctx,
@@ -505,13 +505,5 @@ EOF
 
     ctx.log('HATA: UUID okunamadı: $device');
     return null;
-  }
-
-  String _partitionPath(String disk, int partitionNumber) {
-    final needsP =
-        disk.contains('nvme') ||
-        disk.contains('loop') ||
-        disk.contains('mmcblk');
-    return needsP ? '${disk}p$partitionNumber' : '$disk$partitionNumber';
   }
 }

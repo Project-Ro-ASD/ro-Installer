@@ -147,7 +147,7 @@
   "disk_alongside_confirm_body": "{disk} será usado para uma instalação paralela sem apagar todo o disco. Sobre {size} será reservado para Linux; {source} pode ser reduzido, se necessário. Antes de continuar, o Windows deve ser totalmente desligado e fazer backup dos dados importantes.",
   "disk_alongside_confirm_action": "Instalar ao lado",
   "disk_free_space_confirm_title": "Install to Free Space",
-  "disk_free_space_confirm_body": "Ro-ASD will be installed on the selected {size} free area on {disk}. The existing EFI partition {efi} will be reused without formatting.",
+  "disk_free_space_confirm_body": "Instalar Ro-ASD em {size} livres de {disk}. As partições existentes serão preservadas. Serão criadas uma nova EFI de {efi} e uma raiz Btrfs.",
   "disk_free_space_confirm_action": "Use Free Space",
   "disk_free_space_missing": "Select an unallocated area before continuing.",
   "disk_plan_label": "Plano de instalação",
@@ -177,7 +177,7 @@
   "disk_free_space_caption": "Uses only selected unallocated space",
   "disk_free_space_locked_title": "Why is free-space install locked?",
   "disk_free_space_pick_title": "Choose unallocated space",
-  "disk_free_space_pick_desc": "Select the free segment where Ro-ASD should create its root and swap partitions. Existing partitions are shown for orientation only.",
+  "disk_free_space_pick_desc": "Cria EFI e raiz Btrfs separadas na área livre. Preserva as partições existentes; sem swap em disco.",
   "disk_free_space_loading": "Reading disk layout...",
   "disk_free_space_empty": "No usable unallocated area was found on this disk.",
   "disk_free_space_selected": "{size} unallocated",
@@ -487,5 +487,7 @@
   "install_copy_measurement": "Dados copiados ({phase}): {bytes} · {rate} · Estimativa da cópia: {eta}",
   "install_copy_main": "Principal",
   "install_copy_efi": "EFI",
-  "disk_full_plan_summary": "Disco inteiro: apagar todos os dados; criar EFI FAT32 de 512 MiB e Btrfs no espaço restante. Sem partição swap."
+  "disk_full_plan_summary": "Disco inteiro: apagar todos os dados; criar EFI FAT32 de 512 MiB e Btrfs no espaço restante. Sem partição swap.",
+  "disk_free_space_probe": "Ler espaço livre",
+  "disk_free_space_limit": "O número de partições excede o limite seguro de instalação."
 }
