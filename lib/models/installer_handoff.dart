@@ -8,16 +8,21 @@ Map<String, dynamic> installerSeed(String language) => {
   'installer_ui_language_hint': language,
 };
 
-Map<String, dynamic> installMetadata() => {
+Map<String, dynamic> installMetadata({String mode = 'full'}) => {
   'schema_version': 1,
   'layout_schema_version': 1,
-  'install_mode': 'full',
+  'install_mode': mode,
   'filesystem': 'btrfs',
   'subvolumes': StandardStorageLayout.subvolumes.keys.toList(),
 };
 
 /// Exact allowlists keep provenance and the firstboot hint free of identity/secrets.
-bool isValidInstallerHandoff(Object? seed, Object? metadata) {
+bool isValidInstallerHandoff(
+  Object? seed,
+  Object? metadata, {
+  String expectedMode = 'full',
+}) {
+  if (!const ['full', 'free_space'].contains(expectedMode)) return false;
   if (seed is! Map || metadata is! Map) return false;
   final language = seed['installer_ui_language_hint'];
   if (seed.length != 2 ||
@@ -26,7 +31,7 @@ bool isValidInstallerHandoff(Object? seed, Object? metadata) {
       language.trim().isEmpty) {
     return false;
   }
-  final expected = installMetadata();
+  final expected = installMetadata(mode: expectedMode);
   if (metadata.length != expected.length ||
       !expected.keys.every(metadata.containsKey)) {
     return false;

@@ -49,8 +49,7 @@ class BootloaderStage {
   const BootloaderStage();
 
   Future<StageResult> execute(StageContext ctx) async {
-    if ((ctx.state['partitionMethod'] ?? 'full') != 'full' ||
-        (ctx.state['fileSystem'] ?? 'btrfs') != 'btrfs') {
+    if (!ctx.usesStandardStorage) {
       return StageResult.fail(
         'Bootloader requires the standard full/Btrfs layout.',
       );
@@ -106,6 +105,11 @@ class BootloaderStage {
         return StageResult.fail('EFI bölümü /mnt/boot/efi\'ye bağlı değil.');
       }
     }
+    if (ctx.state['partitionMethod'] == 'free_space' &&
+        !ctx.isMock &&
+        efiCheckResult.stdout.trim() != ctx.espPartition) {
+      return StageResult.fail('EFI kaynağı onaylanan yeni bölümle eşleşmiyor.');
+    }
     ctx.log('EFI doğrulandı: ${efiCheckResult.stdout.trim()} → /mnt/boot/efi');
 
     // ── 7.1: Root UUID Tespiti ve Kernel Cmdline ──
@@ -152,7 +156,7 @@ GRUB_TERMINAL_OUTPUT="console"
 GRUB_CMDLINE_LINUX="rhgb quiet"
 GRUB_DISABLE_RECOVERY="true"
 GRUB_ENABLE_BLSCFG=true
-GRUB_DISABLE_OS_PROBER=false
+GRUB_DISABLE_OS_PROBER=${ctx.state['partitionMethod'] == 'free_space' ? 'true' : 'false'}
 EOF
       ''',
     ], '/etc/default/grub yazılamadı.');
@@ -255,8 +259,17 @@ EOF
       );
     }
 
-    final efiDisk = ctx.isMock ? '/dev/vda' : efiDevice!.disk;
-    final efiPartNum = ctx.isMock ? '1' : efiDevice!.partition;
+    final isFree = ctx.state['partitionMethod'] == 'free_space';
+    final efiDisk = isFree
+        ? ctx.approvedFreeSpacePlan!.plan.snapshot.device.path
+        : ctx.isMock
+        ? '/dev/vda'
+        : efiDevice!.disk;
+    final efiPartNum = isFree
+        ? '${ctx.approvedFreeSpacePlan!.plan.espNumber}'
+        : ctx.isMock
+        ? '1'
+        : efiDevice!.partition;
     failure = await _requireCommand(ctx, 'efibootmgr', [
       '-c',
       '-d',

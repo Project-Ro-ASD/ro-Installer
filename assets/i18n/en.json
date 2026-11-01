@@ -147,7 +147,7 @@
   "disk_alongside_confirm_body": "{disk} will be used for an alongside installation without erasing the whole disk. About {size} will be reserved for Linux; {source} may be shrunk if needed. Before continuing, Windows must be fully shut down and important data should be backed up.",
   "disk_alongside_confirm_action": "Install Alongside",
   "disk_free_space_confirm_title": "Install to Free Space",
-  "disk_free_space_confirm_body": "Ro-ASD will be installed on the selected {size} free area on {disk}. The existing EFI partition {efi} will be reused without formatting.",
+  "disk_free_space_confirm_body": "Install Ro-ASD in {size} of free space on {disk}. Existing partitions stay unchanged. A new {efi} EFI partition and Btrfs root will be created.",
   "disk_free_space_confirm_action": "Use Free Space",
   "disk_free_space_missing": "Select an unallocated area before continuing.",
   "disk_plan_label": "Installation Plan",
@@ -177,7 +177,7 @@
   "disk_free_space_caption": "Uses only selected unallocated space",
   "disk_free_space_locked_title": "Why is free-space install locked?",
   "disk_free_space_pick_title": "Choose unallocated space",
-  "disk_free_space_pick_desc": "Select the free segment where Ro-ASD should create its root and swap partitions. Existing partitions are shown for orientation only.",
+  "disk_free_space_pick_desc": "Creates a separate EFI partition and Btrfs root in the selected free area. Existing partitions are preserved; no disk swap is created.",
   "disk_free_space_loading": "Reading disk layout...",
   "disk_free_space_empty": "No usable unallocated area was found on this disk.",
   "disk_free_space_selected": "{size} unallocated",
@@ -487,5 +487,7 @@
   "install_copy_measurement": "Copied data ({phase}): {bytes} · {rate} · Copy estimate: {eta}",
   "install_copy_main": "Main",
   "install_copy_efi": "EFI",
-  "disk_full_plan_summary": "Full-disk plan: erase all data; create a 512 MiB FAT32 EFI partition and Btrfs in the remaining space. No disk swap partition."
+  "disk_full_plan_summary": "Full-disk plan: erase all data; create a 512 MiB FAT32 EFI partition and Btrfs in the remaining space. No disk swap partition.",
+  "disk_free_space_probe": "Read free space",
+  "disk_free_space_limit": "This disk has more partitions than the safe installation limit."
 }

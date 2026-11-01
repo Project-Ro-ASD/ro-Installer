@@ -147,7 +147,7 @@
   "disk_alongside_confirm_body": "{disk} diskine mevcut sistemi silmeden yanına kurulum yapılacak. Linux için yaklaşık {size} alan ayrılacak; gerekiyorsa {source} küçültülecek. Devam etmeden önce Windows tamamen kapatılmış olmalı ve önemli veriler yedeklenmiş olmalıdır.",
   "disk_alongside_confirm_action": "Yanına Kur",
   "disk_free_space_confirm_title": "Ayrılmış Alana Kur",
-  "disk_free_space_confirm_body": "Ro-ASD, {disk} üzerindeki seçili {size} boş alana kurulacak. Mevcut EFI bölümü {efi} formatlanmadan yeniden kullanılacak.",
+  "disk_free_space_confirm_body": "Ro-ASD, {disk} üzerindeki {size} boş alana kurulacak. Mevcut bölümler korunacak. Yeni {efi} EFI bölümü ve Btrfs root oluşturulacak.",
   "disk_free_space_confirm_action": "Boş Alanı Kullan",
   "disk_free_space_missing": "Devam etmeden önce ayrılmamış bir boş alan seçin.",
   "disk_plan_label": "Kurulum Planı",
@@ -177,7 +177,7 @@
   "disk_free_space_caption": "Yalnizca secili ayrilmamis alani kullanir",
   "disk_free_space_locked_title": "Ayrılmış alana kur neden kilitli?",
   "disk_free_space_pick_title": "Ayrılmamış alanı seç",
-  "disk_free_space_pick_desc": "Ro-ASD'nin root ve swap bölümlerini oluşturacağı boş segmenti seçin. Mevcut bölümler yalnızca yön bulmak için gösterilir.",
+  "disk_free_space_pick_desc": "Seçilen boş alanda ayrı EFI ve Btrfs root oluşturur. Mevcut bölümler korunur; disk swap oluşturulmaz.",
   "disk_free_space_loading": "Disk yerleşimi okunuyor...",
   "disk_free_space_empty": "Bu diskte kullanılabilir ayrılmamış alan bulunamadı.",
   "disk_free_space_selected": "{size} ayrılmamış alan",
@@ -487,5 +487,7 @@
   "install_copy_measurement": "Kopyalanan veri ({phase}): {bytes} · {rate} · Kopyalama tahmini: {eta}",
   "install_copy_main": "Ana",
   "install_copy_efi": "EFI",
-  "disk_full_plan_summary": "Tam disk planı: tüm veriler silinir; 512 MiB FAT32 EFI ve kalan alanda Btrfs oluşturulur. Diskte swap bölümü oluşturulmaz."
+  "disk_full_plan_summary": "Tam disk planı: tüm veriler silinir; 512 MiB FAT32 EFI ve kalan alanda Btrfs oluşturulur. Diskte swap bölümü oluşturulmaz.",
+  "disk_free_space_probe": "Boş alanları oku",
+  "disk_free_space_limit": "Bu diskin bölüm sayısı güvenli kurulum sınırını aşıyor."
 }

@@ -155,7 +155,7 @@ void main() {
       expect(find.text('install_type_advanced'), findsNothing);
       expect(find.text('type_adv_desc'), findsNothing);
       expect(find.text('disk_manual'), findsNothing);
-      expect(find.text('disk_free_space_method'), findsNothing);
+      expect(find.text('disk_free_space_method'), findsOneWidget);
       expect(runner.wasCommandCalled('nmcli'), isFalse);
     });
 
@@ -209,14 +209,14 @@ void main() {
       });
       state.updatePartitionMethod('free_space');
 
-      expect(state.partitionMethod, 'full');
+      expect(state.partitionMethod, 'free_space');
       expect(state.selectedFreeSpace, isEmpty);
 
       state.updatePartitionMethod('manual');
-      expect(state.partitionMethod, 'full');
+      expect(state.partitionMethod, 'free_space');
 
       state.updatePartitionMethod('alongside');
-      expect(state.partitionMethod, 'full');
+      expect(state.partitionMethod, 'free_space');
     });
   });
 }

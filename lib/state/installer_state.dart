@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/disk_service.dart';
 import '../services/helper_protocol.dart';
 import '../models/approved_full_disk_plan.dart';
+import '../models/free_space_installation_plan.dart';
 import '../l10n/installer_translation_catalog.dart';
 
 class InstallerState extends ChangeNotifier {
@@ -49,16 +50,53 @@ class InstallerState extends ChangeNotifier {
     _diskSelectionRevision++;
     _confirmedDevice = value;
     _confirmedPlan = null;
+    _freeSpaceProposal = null;
+    _confirmedFreeSpacePlan = null;
   }
 
   ApprovedFullDiskPlan? _confirmedPlan;
   ApprovedFullDiskPlan? get confirmedPlan => _confirmedPlan;
+  FreeSpaceInstallationPlan? _freeSpaceProposal;
+  FreeSpaceInstallationPlan? _confirmedFreeSpacePlan;
+  FreeSpaceInstallationPlan? get selectedFreeSpacePlan => _freeSpaceProposal;
+  FreeSpaceInstallationPlan? get confirmedFreeSpacePlan =>
+      _confirmedFreeSpacePlan;
+  bool selectFreeSpacePlan(FreeSpaceInstallationPlan plan) {
+    if (installationActive ||
+        partitionMethod != 'free_space' ||
+        selectedDisk != plan.snapshot.device.path ||
+        fileSystem != 'btrfs') {
+      return false;
+    }
+    clearConfirmation();
+    _freeSpaceProposal = plan;
+    selectedFreeSpace = plan.selectedExtent.json;
+    notifyListeners();
+    return true;
+  }
+
+  bool confirmFreeSpacePlan(FreeSpaceInstallationPlan plan, int revision) {
+    if (installationActive ||
+        revision != _diskSelectionRevision ||
+        _freeSpaceProposal != plan ||
+        partitionMethod != 'free_space' ||
+        selectedDisk != plan.snapshot.device.path ||
+        fileSystem != 'btrfs') {
+      return false;
+    }
+    _confirmedDevice = plan.snapshot.device;
+    _confirmedFreeSpacePlan = plan;
+    return true;
+  }
+
   int _diskSelectionRevision = 0;
   int get diskSelectionRevision => _diskSelectionRevision;
   void clearConfirmation() {
     _diskSelectionRevision++;
     _confirmedDevice = null;
     _confirmedPlan = null;
+    _freeSpaceProposal = null;
+    _confirmedFreeSpacePlan = null;
   }
 
   bool confirmPlan(ApprovedFullDiskPlan plan, int revision) {
@@ -184,11 +222,11 @@ class InstallerState extends ChangeNotifier {
     if (installationActive) return;
     clearConfirmation();
     selectedFreeSpace = {};
-    if (method != 'full') {
+    if (!const ['full', 'free_space'].contains(method)) {
       notifyListeners();
       return;
     }
-    partitionMethod = 'full';
+    partitionMethod = method;
     notifyListeners();
   }
 

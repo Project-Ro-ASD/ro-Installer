@@ -253,8 +253,7 @@ class PostInstallValidationStage {
   const PostInstallValidationStage();
 
   Future<StageResult> execute(StageContext ctx) async {
-    if ((ctx.state['partitionMethod'] ?? 'full') != 'full' ||
-        (ctx.state['fileSystem'] ?? 'btrfs') != 'btrfs') {
+    if (!ctx.usesStandardStorage) {
       return StageResult.fail(
         'Technical validation requires full/Btrfs storage.',
       );
@@ -442,7 +441,13 @@ class PostInstallValidationStage {
         }
         values.add(jsonDecode(result.stdout));
       }
-      if (isValidInstallerHandoff(values[0], values[1])) return null;
+      if (isValidInstallerHandoff(
+        values[0],
+        values[1],
+        expectedMode: ctx.state['partitionMethod'] ?? 'full',
+      )) {
+        return null;
+      }
     } catch (_) {
       // JSON parse errors can include source excerpts; never log them.
     }
