@@ -239,6 +239,35 @@ model nor this read-only primitive enables manual installation. Shared-ESP
 write isolation, capacity/collision checks, execution gates and GUI confirmation
 still need integration; public helper requests cannot supply private ownership.
 
+### Protected reusable ESP mounts
+
+The internal mount session can inspect a reusable ESP read-only, bound to the
+exact private manual approval. Source EFI files are traversed without following
+links, with byte/count/depth limits and case-collision checks. The fixed worker
+returns only numeric allocation estimates and available space from the verified
+mount descriptor. Cluster rounding, directory growth and operational headroom
+are reserved; unsupported source entries and insufficient space fail closed.
+
+After resolved manual targets are bound, reused ESPs cannot use the ordinary
+writable mount path. Preparation reserves a new `EFI/fedora` directory only if
+that namespace does not exist, binds the ESP read-only at `/mnt/boot/efi`, and
+leaves only that new subtree writable. The temporary full writable staging mount
+must disappear before protection is considered ready. Capacity and collision
+checks run again before namespace creation. Existing `EFI/fedora` content is
+rejected rather than taken over.
+
+Mount ownership includes per-mount flags, device, root subtree and mount ID.
+The read-only bind explicitly retains `nosuid,nodev,noexec`; Linux distinguishes
+these [per-mount flags from filesystem-wide flags](https://man7.org/linux/man-pages/man2/mount.2.html).
+Partial failures remain tracked for cleanup. Wrong subtrees, unexpected flag or
+namespace changes, foreign mounts and busy resources cannot produce success.
+The original full/free-space mount allowlists remain separate.
+
+These are internal building blocks, not manual installation admission. Copying
+only the owned boot namespace, kernel-plugin write controls, mutation gates and
+GUI integration are still required. Installed-system update policy is separate
+from this installation-time mount protection.
+
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
 and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:
 
