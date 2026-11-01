@@ -6,15 +6,17 @@ and validates the resulting system. Ro-Installer is not a distro builder.
 
 ## Release identity and integration readiness
 
-The source version remains `2.4.5+1`, producing
-`ro-installer-2.4.5-1.fc44.x86_64.rpm` and
-`ro-installer-2.4.5-1.fc44.src.rpm` in CI. Published `v2.4.5` binds commit
-`a402892ad5380bc7b26e4b66ce748d3a911b2446` and predates P0-01 through P0-04.
-Current main includes those changes, so its CI RPM has different content under
-the same NEVRA. CI artifacts are review fixtures and must not replace that
-release or enter a repository as another `2.4.5-1.fc44` build. Published tags,
-releases and artifacts stay immutable. A new version requires an explicit
-operator decision; this readiness work does not select or publish one.
+The approved source version is `2.5.0+1`, producing
+`ro-installer-2.5.0-1.fc44.x86_64.rpm` and
+`ro-installer-2.5.0-1.fc44.src.rpm` in CI. It includes the merged P0-01 through
+P0-05 reliability and acceptance work. This is source/release preparation;
+`v2.5.0` has not been tagged or published by this change.
+
+Published `v2.4.5` binds commit
+`a402892ad5380bc7b26e4b66ce748d3a911b2446` and predates those P0 changes.
+The new version avoids reusing its `2.4.5-1.fc44` identity for different source
+content. Published tags, releases and artifacts stay immutable. CI artifacts
+remain review fixtures; they do not authorize release or repository publication.
 
 The released baseline includes PR #22–24 (privileged helper, user-session GUI and
 fail-closed live/root topology checks) and PR #25, merged on 2026-10-09.
@@ -39,9 +41,11 @@ Acceptance evidence has three separate levels:
    Ro-image-compose stage. Green package CI does not prove Plasma Setup runs on
    a physical computer. No ISO build or QEMU install is required for this PR.
 
-After operator approval of a new, unused version and the accepted source commit,
-update pubspec, spec defaults, displayed UI versions and these instructions
-together. Do not recreate or move `v2.4.5`. A future approved tag triggers
+Pubspec, spec defaults and both displayed UI versions are aligned to 2.5.0.
+After review and separate operator approval of publication, freeze the accepted
+source commit and recheck that `v2.5.0` remains unused. Source-version approval
+alone does not authorize merge, tag creation or publication. Do not recreate or
+move `v2.4.5`. A future approved `v2.5.0` tag triggers
 `.github/workflows/release.yml`, which builds the exact RPM/SRPM pair, binds the
 manifest to the real release ID and run, attests both RPMs, `SHA256SUMS` and
 `component-artifact-manifest-v1.json`, and verifies the four immutable assets.

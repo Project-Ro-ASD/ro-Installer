@@ -1,5 +1,5 @@
 Name:           ro-installer
-Version:        %{?app_version}%{!?app_version:2.4.5}
+Version:        %{?app_version}%{!?app_version:2.5.0}
 Release:        %{?app_release}%{!?app_release:1}%{?dist}
 Summary:        Ro-ASD Installer
 License:        MIT
@@ -114,6 +114,10 @@ install -Dm755 linux/ro-installer-export \
 %attr(0644,root,root) %{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy
 
 %changelog
+* Sun Nov 01 2026 Semih Murat <arslansemihmurat@gmail.com> - 2.5.0-1
+- Prepare a unique package identity for the merged P0 reliability changes.
+- Align the package and displayed installer versions.
+
 * Mon Oct 19 2026 Ro-ASD Team <contact@roasd.org> - 2.4.5-1
 - Restore Plasma Setup first boot after Live copy (PR #25).
 - Retain privileged helper, user-session GUI and live topology guards (PR #22-24).
