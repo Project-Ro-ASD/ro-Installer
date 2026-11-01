@@ -75,6 +75,24 @@ final class FreeSpaceInstallationPlan {
   }
 
   bool matchesSnapshot(GptDiskSnapshot current) => snapshot.sameAs(current);
+
+  /// Bounded intent for helper revalidation; never sends a full inventory as
+  /// executable instructions. The helper independently rebuilds this layout.
+  Map<String, dynamic> get intentJson => {
+    'schemaVersion': 1,
+    'mode': 'free_space',
+    'device': snapshot.device.json,
+    'tableFingerprint': snapshot.tableFingerprint,
+    'selectedExtent': selectedExtent.json,
+    'fileSystem': 'btrfs',
+    'diskSwap': false,
+    'esp': {'number': espNumber, 'startSector': espStart, 'endSector': espEnd},
+    'root': {
+      'number': rootNumber,
+      'startSector': rootStart,
+      'endSector': rootEnd,
+    },
+  };
   Map<String, dynamic> get json => {
     'schemaVersion': 1,
     'mode': 'free_space',

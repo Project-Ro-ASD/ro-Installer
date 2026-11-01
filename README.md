@@ -87,8 +87,9 @@ selection/channel policy, or replacing Fedora kernels with custom kernels.
 
 Free-space installation is being developed in three parts: deterministic GPT
 planning, authoritative helper admission, and execution/GUI integration. The
-current `GptDiskSnapshot` and `FreeSpaceInstallationPlan` models cover the first
-part. They validate normalized sector geometry, primary/backup entry-array
+`GptDiskSnapshot` and `FreeSpaceInstallationPlan` models provide deterministic
+planning; helper v2 now adds read-only probing and fresh plan validation.
+The models validate normalized sector geometry, primary/backup entry-array
 reservations, partition identities, overlap and GPT slot capacity. Plans bind
 the device sequence, table fingerprint and partition inventory to one complete
 current free extent. The normalized input is not a disk probe or authorization.
@@ -99,6 +100,37 @@ disk swap, shrinking, wiping or shared-ESP formatting. Allocation uses integer
 sector arithmetic and 1 MiB alignment; the existing temporary root-space safety
 floor applies. This planning layer does not enable the legacy `free_space`
 executor or change the full-disk-only production admission contract.
+
+### Read-only free-space admission (helper v2)
+
+`probe-free-space` accepts only `{protocolVersion:2, operation, disk}` and returns
+a typed `snapshot`. `validate-free-space-plan` accepts the disk, `expectedDevice`,
+`tableFingerprint` and `selectedExtent: {startSector, endSector}` and returns a
+recomputed compact `plan`. Both use the existing root authorization, topology
+guards and installer lease; validation reads fresh metadata instead of trusting
+caller-supplied inventory or partition operations. V1 rejects both operations.
+
+The isolated `ro_installer_gpt.py` worker opens only the validated block device
+read-only, checks its descriptor identity/geometry/disk sequence, and verifies
+the protective MBR, both GPT headers, entry-array CRCs and matching table copies
+against the [UEFI GPT format](https://uefi.org/specs/UEFI/2.11/05_GUID_Partition_Table_Format.html).
+It reserves at least 16 KiB for each entry array, reads metadata twice, and
+compares partition numbers and byte geometry with kernel sysfs data. Hybrid,
+damaged, stale or unsupported tables are rejected; no repair path exists.
+
+The SHA-256 fingerprint uses the `ro-gpt-snapshot-v1` domain, disk size/sector
+size/array LBAs and length-prefixed PMBR, primary header, primary reserved array,
+backup reserved array and backup header bytes. Names remain inside this digest;
+raw partition names never enter public output. The compact intent contains only
+device/table identity, selected extent and the independently computed ESP/root
+numbers and ranges.
+
+Probe limits are 512/4096-byte sectors, 4096 entries of at most 1024 bytes, up to
+32 occupied partitions and a 7168-byte snapshot. The worker has a ten-second
+deadline and bounded combined output; exceeding a bound fails rather than
+truncating inventory. Its root-owned package payload is checked alongside the
+helper. A validated proposal is not a write authorization: execution/GUI wiring
+and revalidation at the first mutation remain the third implementation part.
 
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
 and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:

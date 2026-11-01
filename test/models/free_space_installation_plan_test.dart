@@ -253,6 +253,13 @@ void main() {
       );
     },
   );
+  test('minimum GPT array reservation remains 16KiB even with few entries', () {
+    final v = fixture();
+    v['entryCount'] = 3;
+    v['partitions'].removeLast();
+    v['firstUsableSector'] = 3;
+    expect(() => GptDiskSnapshot.fromJson(v), throwsFormatException);
+  });
   test(
     'device sequence, table fingerprint, GUID and geometry changes invalidate a plan',
     () {
