@@ -486,5 +486,6 @@
   "install_backend_record_incomplete": "Korumalı oturum kayıtları eksik; güvenli raporu dışa aktarabilirsiniz.",
   "install_copy_measurement": "Kopyalanan veri ({phase}): {bytes} · {rate} · Kopyalama tahmini: {eta}",
   "install_copy_main": "Ana",
-  "install_copy_efi": "EFI"
+  "install_copy_efi": "EFI",
+  "disk_full_plan_summary": "Tam disk planı: tüm veriler silinir; 512 MiB FAT32 EFI ve kalan alanda Btrfs oluşturulur. Diskte swap bölümü oluşturulmaz."
 }

@@ -486,5 +486,6 @@
   "install_backend_record_incomplete": "保護されたセッション記録は不完全です。安全なレポートをエクスポートできます。",
   "install_copy_measurement": "コピー済みデータ（{phase}）：{bytes} · {rate} · コピー残り目安：{eta}",
   "install_copy_main": "システム",
-  "install_copy_efi": "EFI"
+  "install_copy_efi": "EFI",
+  "disk_full_plan_summary": "ディスク全体：すべてのデータを消去し、512 MiB の FAT32 EFI と残りの領域に Btrfs を作成します。スワップパーティションは作成しません。"
 }

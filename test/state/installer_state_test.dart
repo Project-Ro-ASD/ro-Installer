@@ -6,6 +6,9 @@ import 'package:ro_installer/screens/disk_selection_screen.dart';
 import 'package:ro_installer/services/command_runner.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
 import 'package:ro_installer/state/installer_state.dart';
+import 'package:ro_installer/models/approved_full_disk_plan.dart';
+import 'package:ro_installer/services/helper_protocol.dart';
+import 'package:ro_installer/services/disk_service.dart';
 import 'package:ro_installer/theme/app_theme.dart';
 
 void main() {
@@ -30,6 +33,70 @@ void main() {
       expect(state.currentStep, 0);
       expect(state.partitionMethod, 'full');
     });
+    test(
+      'disk setters invalidate snapshot and revision while language keeps approval',
+      () {
+        final plan = ApprovedFullDiskPlan(
+          DeviceIdentity(
+            path: '/dev/vda',
+            majorMinor: '252:0',
+            size: 68719476736,
+            diskSequence: 11,
+          ),
+        );
+        for (final change in <void Function()>[
+          () => state.updateDiskParams('/dev/vda', 'btrfs', 'full'),
+          () => state.updateFileSystem('btrfs'),
+          () => state.updatePartitionMethod('full'),
+          () => state.updateLinuxDiskSize(60),
+          () => state.updateFreeSpaceSelection({}),
+          () => state.selectDisk({'name': '/dev/vda'}),
+          () => state.clearDiskSelection(),
+        ]) {
+          state.updateDiskParams('/dev/vda', 'btrfs', 'full');
+          final revision = state.diskSelectionRevision;
+          expect(state.confirmPlan(plan, revision), true);
+          state.updateLanguage('en');
+          expect(state.confirmedPlan, same(plan));
+          change();
+          expect(state.confirmedPlan, isNull);
+          expect(state.confirmedDevice, isNull);
+          expect(state.diskSelectionRevision, greaterThan(revision));
+          expect(state.confirmPlan(plan, revision), false);
+        }
+      },
+    );
+    test(
+      'changing selection away and back rejects an older dialog approval',
+      () {
+        final plan = ApprovedFullDiskPlan(
+          DeviceIdentity(
+            path: '/dev/vda',
+            majorMinor: '252:0',
+            size: 68719476736,
+            diskSequence: 11,
+          ),
+        );
+        state.updateDiskParams('/dev/vda', 'btrfs', 'full');
+        final old = state.diskSelectionRevision;
+        state.updateDiskParams('/dev/vdb', 'btrfs', 'full');
+        state.updateDiskParams('/dev/vda', 'btrfs', 'full');
+        expect(state.confirmPlan(plan, old), false);
+        expect(state.confirmedPlan, isNull);
+        expect(state.confirmPlan(plan, state.diskSelectionRevision), true);
+        state.beginInstallation();
+        final revision = state.diskSelectionRevision;
+        state.updateDiskParams('/dev/vdb', 'ext4', 'manual');
+        state.updateFileSystem('ext4');
+        state.updatePartitionMethod('manual');
+        state.updateFreeSpaceSelection({'start': 1});
+        state.updateLinuxDiskSize(50);
+        state.clearDiskSelection();
+        expect(state.diskSelectionRevision, revision);
+        expect(state.confirmedPlan, same(plan));
+        expect(state.selectedDisk, '/dev/vda');
+      },
+    );
 
     test('legacy storage data does not expose removed pages', () {
       state.partitionMethod = 'manual';
@@ -72,7 +139,11 @@ void main() {
           value: state,
           child: MaterialApp(
             theme: AppTheme.darkTheme,
-            home: const Scaffold(body: DiskSelectionScreen()),
+            home: Scaffold(
+              body: DiskSelectionScreen(
+                diskService: DiskService(commandRunner: runner),
+              ),
+            ),
           ),
         ),
       );

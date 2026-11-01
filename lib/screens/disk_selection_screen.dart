@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../services/disk_service.dart';
 import '../services/helper_client.dart';
 import '../services/helper_protocol.dart';
+import '../models/approved_full_disk_plan.dart';
 import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/nebula_ui.dart';
@@ -170,6 +171,8 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
     }
 
     setState(() => _isConfirming = true);
+    state.clearConfirmation();
+    final revision = state.diskSelectionRevision;
     DeviceIdentity identity;
     try {
       identity = await (widget.helperClient ?? HelperClient.instance).probe(
@@ -184,7 +187,13 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
       return;
     }
     if (!mounted) return;
-    if (state.selectedDisk != selectedPath) {
+    final plan = ApprovedFullDiskPlan(identity);
+    if (state.diskSelectionRevision != revision ||
+        !plan.matchesState({
+          'selectedDisk': state.selectedDisk,
+          'partitionMethod': state.partitionMethod,
+          'fileSystem': state.fileSystem,
+        })) {
       setState(() => _isConfirming = false);
       return;
     }
@@ -195,15 +204,8 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
       title: isSafe
           ? state.t('disk_safe_confirm_title')
           : state.t('disk_danger_confirm_title'),
-      message: isSafe
-          ? state.t('disk_safe_confirm_body', {
-              'disk':
-                  '$selectedPath (${(identity.size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB)',
-            })
-          : state.t('disk_danger_confirm_body', {
-              'disk':
-                  '$selectedPath (${(identity.size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB)',
-            }),
+      message:
+          '${isSafe ? state.t('disk_safe_confirm_body', {'disk': '$selectedPath (${(identity.size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB)'}) : state.t('disk_danger_confirm_body', {'disk': '$selectedPath (${(identity.size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB)'})}\n\n${state.t('disk_full_plan_summary')}',
       confirmLabel: isSafe
           ? state.t('disk_safe_confirm_action')
           : state.t('disk_danger_confirm_action'),
@@ -211,8 +213,7 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
     );
 
     if (mounted) setState(() => _isConfirming = false);
-    if (confirmed == true && mounted && state.selectedDisk == identity.path) {
-      state.confirmedDevice = identity;
+    if (confirmed == true && mounted && state.confirmPlan(plan, revision)) {
       state.nextStep();
     }
   }

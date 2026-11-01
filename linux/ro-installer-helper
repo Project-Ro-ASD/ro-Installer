@@ -100,6 +100,25 @@ class Request:
     protocol_version: int = 1
     ui_language: str | None = None
     include_copy_progress: bool = False
+    confirmed_plan: dict | None = None
+
+
+def full_disk_plan(device):
+    disk=device['path']
+    partition=lambda n: disk+('p' if any(word in disk for word in ('nvme','loop','mmcblk')) else '')+str(n)
+    operations=[{'type':kind,'target':target,'destructive':True} for kind,target in (
+        ('wipe_disk',disk),('create_efi',disk),('create_btrfs_root',disk),
+        ('format_efi',partition(1)),('format_btrfs_root',partition(2)))]
+    return {'schemaVersion':1,'layoutVersion':1,'device':dict(device),'partitionTable':'gpt',
+            'espBytes':512*1024*1024,'espFileSystem':'fat32','diskSwap':False,
+            'subvolumes':{'root':'/','home':'/home','var_log':'/var/log','var_cache':'/var/cache','var_tmp':'/var/tmp'},
+            'storagePlan':{'planId':'full-'+re.sub(r'[^A-Za-z0-9._-]','_',disk),
+                           'mode':'full','targetDisk':disk,'fileSystem':'btrfs',
+                           'operations':operations,'destructiveOperations':operations}}
+
+
+def same_plan_value(actual, expected):
+    return json.dumps(actual,sort_keys=True,separators=(',',':')) == json.dumps(expected,sort_keys=True,separators=(',',':'))
 
 
 def parse_request(raw, version=1):
@@ -122,6 +141,8 @@ def parse_request(raw, version=1):
         allowed.add("disk")
     if operation == "install-full-disk":
         allowed.update({"partitionMethod", "fileSystem", "confirmDestructive", "expectedDevice"})
+        if version == 2 and 'confirmedPlan' in data:
+            allowed.add('confirmedPlan')
         if version == 2 and "includeCopyProgress" in data:
             allowed.add("includeCopyProgress")
             if data["includeCopyProgress"] is not True:
@@ -155,7 +176,12 @@ def parse_request(raw, version=1):
         except HelperError:
             fail("INVALID_REQUEST", "Invalid expected device identity.")
         expected = dict(expected, majorMinor=number)
-    return Request(operation, disk, expected, version, data.get("uiLanguage"), data.get("includeCopyProgress", False))
+    plan = None
+    if 'confirmedPlan' in data:
+        plan=full_disk_plan({'path':disk,**expected})
+        if not same_plan_value(data['confirmedPlan'],plan):
+            fail('INVALID_REQUEST','Confirmed plan does not match the fixed full-disk contract.')
+    return Request(operation, disk, expected, version, data.get("uiLanguage"), data.get("includeCopyProgress", False), plan)
 
 
 def read_request(fd):
@@ -570,7 +596,7 @@ def safe_session_report(value):
         return None
 
 
-def backend_message(raw, *, allow_report=False, allow_copy=False):
+def backend_message(raw, *, allow_report=False, allow_copy=False, confirmed_plan=None):
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object,
                            parse_constant=lambda _: fail("BACKEND_ERROR", "Invalid backend number."))
@@ -596,7 +622,9 @@ def backend_message(raw, *, allow_report=False, allow_copy=False):
                     or value["messageKey"] != STAGE_KEYS[value["stage"]]):
                 raise ValueError()
         elif kind == "ready":
-            if set(value) != {"protocolVersion", "type"}: raise ValueError()
+            if (set(value) != ({'protocolVersion','type'} if confirmed_plan is None else {'protocolVersion','type','confirmedPlan'})
+                    or confirmed_plan is not None and not same_plan_value(value['confirmedPlan'],confirmed_plan)):
+                raise ValueError()
         elif kind == "result":
             if (set(value) != {"protocolVersion", "type", "ok", "code"}
                     or type(value["ok"]) is not bool
@@ -651,6 +679,8 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
             payload["uiLanguage"] = request.ui_language
         if request.include_copy_progress:
             payload['includeCopyProgress'] = True
+        if request.confirmed_plan is not None:
+            payload['confirmedPlan'] = request.confirmed_plan
         process.stdin.write(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
         process.stdin.flush()
         while streams:
@@ -682,7 +712,7 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
                         messages += 1
                         if len(raw) > MAX_MESSAGE_BYTES or messages > 16384 or report_seen:
                             fail("BACKEND_ERROR", "Invalid backend stream framing.")
-                        message = backend_message(raw, allow_report=reports, allow_copy=request.include_copy_progress)
+                        message = backend_message(raw, allow_report=reports, allow_copy=request.include_copy_progress,confirmed_plan=request.confirmed_plan)
                         if message['type'] == 'session-report':
                             report_seen = True
                             report = safe_session_report(message['report'])
@@ -698,6 +728,8 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
                             if validate_device(system, request.disk) != confirmed:
                                 fail("DEVICE_CHANGED", "Device changed immediately before mutation.")
                             gate = {"protocolVersion": 1, "type": "continue", "device": confirmed.public()}
+                            if request.confirmed_plan is not None:
+                                gate['confirmedPlan']=request.confirmed_plan
                             process.stdin.write(json.dumps(gate).encode() + b"\n")
                             process.stdin.flush()
                             process.stdin.close()

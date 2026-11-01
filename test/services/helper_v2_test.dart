@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:test/test.dart';
 import 'package:ro_installer/services/helper_client.dart';
 import 'package:ro_installer/services/helper_protocol.dart';
+import 'package:ro_installer/models/approved_full_disk_plan.dart';
 import 'package:ro_installer/services/session_report.dart';
 import 'helper_client_test.dart' as f;
 
@@ -26,6 +27,43 @@ Map<String, dynamic> report(dynamic value) => {
   'report': value,
 };
 void main() {
+  test(
+    'v2 sends immutable approval; v1 or mismatching disk never launches helper',
+    () async {
+      final plan = ApprovedFullDiskPlan(f.identity);
+      final process = f.FakeHelperProcess(f.messages([terminal()]));
+      await HelperClient(
+        protocolVersion: 2,
+        start: (_, _) async => process,
+      ).installWithReport(f.identity, (_, _) {}, confirmedPlan: plan);
+      expect(jsonDecode(process.sent)['confirmedPlan'], plan.json);
+      for (final version in [1, 2]) {
+        final wrong = DeviceIdentity(
+          path: '/dev/vdb',
+          majorMinor: '252:16',
+          size: f.identity.size,
+          diskSequence: 99,
+        );
+        var starts = 0;
+        final client = HelperClient(
+          protocolVersion: version,
+          start: (_, _) async {
+            starts++;
+            return process;
+          },
+        );
+        await expectLater(
+          client.installWithReport(
+            version == 1 ? f.identity : wrong,
+            (_, _) {},
+            confirmedPlan: plan,
+          ),
+          throwsA(f.helperError('INVALID_REQUEST')),
+        );
+        expect(starts, 0);
+      }
+    },
+  );
   test('language allowlist matches the shipped UI catalog', () {
     final catalog =
         jsonDecode(File('assets/i18n/locales.json').readAsStringSync()) as List;

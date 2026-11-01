@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'helper_protocol.dart';
 import 'copy_progress.dart';
+import '../models/approved_full_disk_plan.dart';
 import 'session_report.dart';
 
 abstract class HelperProcess {
@@ -105,8 +106,12 @@ class HelperClient {
     void Function(SessionReport? report, String status)? onReport,
     String? uiLanguage,
     void Function(CopyProgress)? onCopyProgress,
+    ApprovedFullDiskPlan? confirmedPlan,
   }) async {
-    if ((onCopyProgress != null && protocolVersion != 2) ||
+    if ((confirmedPlan != null &&
+            (protocolVersion != 2 ||
+                !samePlanValue(confirmedPlan.device.json, identity.json))) ||
+        (onCopyProgress != null && protocolVersion != 2) ||
         uiLanguage != null &&
             (protocolVersion != 2 ||
                 !installerUiLanguages.contains(uiLanguage))) {
@@ -118,6 +123,7 @@ class HelperClient {
         'protocolVersion': protocolVersion,
         'uiLanguage': ?uiLanguage,
         if (onCopyProgress != null) 'includeCopyProgress': true,
+        if (confirmedPlan != null) 'confirmedPlan': confirmedPlan.json,
       },
       onProgress: onProgress,
       onReport: onReport,

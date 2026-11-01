@@ -486,5 +486,6 @@
   "install_backend_record_incomplete": "سوابق محافظت‌شدهٔ نشست ناقص است؛ می‌توانید گزارش امن را خروجی بگیرید.",
   "install_copy_measurement": "دادهٔ کپی‌شده ({phase}): {bytes} · {rate} · زمان تقریبی کپی: {eta}",
   "install_copy_main": "سیستم",
-  "install_copy_efi": "EFI"
+  "install_copy_efi": "EFI",
+  "disk_full_plan_summary": "طرح کل دیسک: پاک کردن همهٔ داده‌ها؛ ساخت EFI با FAT32 به اندازهٔ 512 MiB و Btrfs در فضای باقی‌مانده. بدون پارتیشن swap."
 }
