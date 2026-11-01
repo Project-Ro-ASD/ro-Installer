@@ -21,14 +21,36 @@ class V2Tests(legacy.ErrorAssertions,unittest.TestCase):
             try:return rec.finish(8)
             finally:rec.close()
     def frame(self,report):return 'print('+repr(json.dumps({'protocolVersion':1,'type':'session-report','report':report}))+',flush=True)\n'
-    def run_stub(self,body,version=2,events=None):
+    def run_stub(self,body,version=2,events=None,language=None):
         data=legacy.install_request();data['protocolVersion']=version
+        if language is not None:data['uiLanguage']=language
         request=helper.parse_request(json.dumps(data).encode(),version=version)
         system=legacy.FakeSystem();confirmed=helper.validate_device(system,request.disk)
         with tempfile.TemporaryDirectory(prefix='p0-04-v2-') as td:
             path=Path(td)/'engine.py';path.write_text(legacy.BackendBridgeTests.prefix+body)
             with mock.patch.object(helper,'BACKEND_ARGV',(sys.executable,'-I',str(path))):
                 return helper.run_backend(request,confirmed,system,emit=(events.append if events is not None else lambda _:None))
+    def test_language_hint_allowlist_and_scope(self):
+        catalog=json.loads((legacy.ROOT/'assets/i18n/locales.json').read_text())
+        self.assertEqual(helper.INSTALLER_UI_LANGUAGES,{row['code'] for row in catalog})
+        for language in helper.INSTALLER_UI_LANGUAGES:
+            data={**legacy.install_request(), 'protocolVersion':2, 'uiLanguage':language}
+            self.assertEqual(helper.parse_request(json.dumps(data).encode(),2).ui_language,language)
+            data['protocolVersion']=1
+            self.error('INVALID_REQUEST',helper.parse_request,json.dumps(data).encode(),version=1)
+        for language in [None,True,1,[],{},'', 'TR','tr_TR.UTF-8','tr\n','en;id','x'*9000]:
+            data={**legacy.install_request(),'protocolVersion':2,'uiLanguage':language}
+            self.error('INVALID_REQUEST',helper.parse_request,json.dumps(data).encode(),version=2)
+        for operation in ['audit-live','probe-disk']:
+            data={'protocolVersion':2,'operation':operation,'uiLanguage':'tr'}
+            if operation=='probe-disk':data['disk']='/dev/vda'
+            self.error('INVALID_REQUEST',helper.parse_request,json.dumps(data).encode(),version=2)
+
+    def test_language_hint_crosses_real_backend_pipe_without_extra_fields(self):
+        for language in ['tr','pt_BR','zh_CN']:
+            body='assert request=='+repr({'protocolVersion':1,'operation':'install-full-disk','disk':'/dev/vda','expectedDevice':legacy.install_request()['expectedDevice'],'uiLanguage':language})+'\n'
+            body+=legacy.BackendBridgeTests.ready+legacy.BackendBridgeTests.success
+            self.assertEqual(self.run_stub(body,language=language),{'installed':True})
     def test_closed_gui_pipe_after_authorization_does_not_cancel_backend(self):
         read_fd,write_fd=os.pipe();os.close(read_fd)
         try:

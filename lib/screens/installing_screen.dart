@@ -273,6 +273,7 @@ class _InstallingScreenState extends State<InstallingScreen>
         await client.installWithReport(
           identity,
           progressChanged,
+          uiLanguage: state.selectedLanguage,
           onReport: (report, status) {
             _sessionReport = report;
             _reportStatus = status;

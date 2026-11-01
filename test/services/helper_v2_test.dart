@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:test/test.dart';
 import 'package:ro_installer/services/helper_client.dart';
+import 'package:ro_installer/services/helper_protocol.dart';
 import 'package:ro_installer/services/session_report.dart';
 import 'helper_client_test.dart' as f;
 
@@ -25,6 +26,55 @@ Map<String, dynamic> report(dynamic value) => {
   'report': value,
 };
 void main() {
+  test('language allowlist matches the shipped UI catalog', () {
+    final catalog =
+        jsonDecode(File('assets/i18n/locales.json').readAsStringSync()) as List;
+    expect(installerUiLanguages, catalog.map((row) => row['code']).toSet());
+  });
+  test(
+    'v2 sends selected canonical hint and legacy omission stays unchanged',
+    () async {
+      for (final language in <String?>[null, ...installerUiLanguages]) {
+        final process = f.FakeHelperProcess(f.messages([terminal()]));
+        final client = HelperClient(
+          protocolVersion: 2,
+          start: (_, _) async => process,
+        );
+        await client.installWithReport(
+          f.identity,
+          (_, _) {},
+          uiLanguage: language,
+        );
+        expect(jsonDecode(process.sent), {
+          ...f.identity.installRequest,
+          'protocolVersion': 2,
+          'uiLanguage': ?language,
+        });
+      }
+    },
+  );
+  test('invalid or v1 language hint fails before launching pkexec', () async {
+    for (final version in [1, 2]) {
+      for (final language in [
+        '',
+        'TR',
+        'en_US.UTF-8',
+        'tr;id',
+        'tr\n',
+        'x' * 9000,
+        if (version == 1) 'tr',
+      ]) {
+        final client = HelperClient(
+          protocolVersion: version,
+          start: (_, _) async => throw StateError('must not launch'),
+        );
+        await expectLater(
+          client.installWithReport(f.identity, (_, _) {}, uiLanguage: language),
+          throwsA(f.helperError('INVALID_REQUEST')),
+        );
+      }
+    }
+  });
   test(
     'central report schema rejects secrets wrong types impossible success and oversized values',
     () {
@@ -131,13 +181,7 @@ void main() {
   test('fragmented v2 JSON and progress validated without downgrade', () async {
     final text =
         '${[
-          {
-            'protocolVersion': 2,
-            'type': 'progress',
-            'stage': 5,
-            'progress': 0.5,
-            'messageKey': 'install_stage_file_copy',
-          },
+          {'protocolVersion': 2, 'type': 'progress', 'stage': 5, 'progress': 0.5, 'messageKey': 'install_stage_file_copy'},
           report(fixture()),
           terminal(),
         ].map(jsonEncode).join('\n')}\n';

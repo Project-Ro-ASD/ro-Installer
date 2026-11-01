@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -38,6 +39,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final state = InstallerState(translations: catalog)
         ..selectedDisk = '/dev/vda'
+        ..selectedLanguage = mode == 'complete' ? 'en' : 'tr'
         ..confirmedDevice = f.identity;
       final report = v2.fixture();
       if (const ['failed', 'unavailable', 'truncated'].contains(mode)) {
@@ -158,6 +160,7 @@ void main() {
       });
       await tester.pump(const Duration(seconds: 1));
       expect(exported, isTrue);
+      expect(jsonDecode(process.sent)['uiLanguage'], state.selectedLanguage);
       expect(
         find.text(
           state.t(

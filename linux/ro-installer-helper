@@ -41,6 +41,9 @@ STAGE_KEYS = (
     "install_stage_post_validation", "install_stage_cleanup",
 )
 OPERATIONS = frozenset({"audit-live", "probe-disk", "install-full-disk"})
+INSTALLER_UI_LANGUAGES = frozenset({
+    "tr", "en", "es", "de", "fr", "pt_BR", "it", "ru", "ar", "fa", "zh_CN", "ja",
+})
 PSEUDO_FILESYSTEMS = frozenset({
     "proc", "sysfs", "tmpfs", "devtmpfs", "devpts", "cgroup", "cgroup2",
     "pstore", "securityfs", "debugfs", "tracefs", "configfs", "efivarfs",
@@ -95,6 +98,7 @@ class Request:
     disk: str | None = None
     expected_device: dict | None = None
     protocol_version: int = 1
+    ui_language: str | None = None
 
 
 def parse_request(raw, version=1):
@@ -117,6 +121,11 @@ def parse_request(raw, version=1):
         allowed.add("disk")
     if operation == "install-full-disk":
         allowed.update({"partitionMethod", "fileSystem", "confirmDestructive", "expectedDevice"})
+        if version == 2 and "uiLanguage" in data:
+            allowed.add("uiLanguage")
+            if (not isinstance(data["uiLanguage"], str)
+                    or data["uiLanguage"] not in INSTALLER_UI_LANGUAGES):
+                fail("INVALID_REQUEST", "Unsupported installer UI language hint.")
     if set(data) != allowed:
         fail("INVALID_REQUEST", "Missing or unknown request fields.")
     if operation == "audit-live":
@@ -141,7 +150,7 @@ def parse_request(raw, version=1):
         except HelperError:
             fail("INVALID_REQUEST", "Invalid expected device identity.")
         expected = dict(expected, majorMinor=number)
-    return Request(operation, disk, expected, version)
+    return Request(operation, disk, expected, version, data.get("uiLanguage"))
 
 
 def read_request(fd):
@@ -622,6 +631,8 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
     try:
         payload = {"protocolVersion": 1, "operation": "install-full-disk",
                    "disk": confirmed.path, "expectedDevice": request.expected_device}
+        if request.ui_language is not None:
+            payload["uiLanguage"] = request.ui_language
         process.stdin.write(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
         process.stdin.flush()
         while streams:

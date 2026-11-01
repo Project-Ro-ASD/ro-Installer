@@ -102,9 +102,18 @@ class HelperClient {
     DeviceIdentity identity,
     void Function(double, String) onProgress, {
     void Function(SessionReport? report, String status)? onReport,
+    String? uiLanguage,
   }) async {
+    if (uiLanguage != null &&
+        (protocolVersion != 2 || !installerUiLanguages.contains(uiLanguage))) {
+      throw const HelperException('INVALID_REQUEST');
+    }
     final result = await _call(
-      {...identity.installRequest, 'protocolVersion': protocolVersion},
+      {
+        ...identity.installRequest,
+        'protocolVersion': protocolVersion,
+        'uiLanguage': ?uiLanguage,
+      },
       onProgress: onProgress,
       onReport: onReport,
     );

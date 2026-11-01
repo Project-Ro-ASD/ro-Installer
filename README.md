@@ -300,6 +300,16 @@ requires root and constructs a fixed full/Btrfs engine state, with no GUI
 state/environment/profile overrides. Its initial request must arrive within
 five seconds; total stdin is capped at 32 KiB.
 
+For a v2 install, the public request may also contain `uiLanguage`, restricted
+to the canonical codes in `assets/i18n/locales.json`: tr, en, es, de, fr, pt_BR,
+it, ru, ar, fa, zh_CN and ja. The helper forwards only this validated hint in
+the backend request. The GUI sends its selected language; target finalization
+writes it to the existing `installer_ui_language_hint` seed field. Missing
+hints retain the legacy `en` backend default. V1 public requests, audit and
+probe reject this field. Invalid types/codes fail before the engine starts;
+there is no silent protocol downgrade. This hint does not configure the target
+locale, keyboard or timezone; Initial Setup still owns those choices.
+
 The helper holds `/run/ro-installer/install.lock` for the complete backend
 lifetime, in a root-owned 0700 directory with a root-owned 0600 persistent,
 non-symlink inode. The backend inherits the locked descriptor so its kernel

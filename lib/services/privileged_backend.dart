@@ -47,10 +47,13 @@ Future<int> runPrivilegedBackend(
           'operation',
           'disk',
           'expectedDevice',
+          if (request.containsKey('uiLanguage')) 'uiLanguage',
         }) ||
         request['protocolVersion'] is! int ||
         request['protocolVersion'] != 1 ||
         request['operation'] != 'install-full-disk' ||
+        (request.containsKey('uiLanguage') &&
+            !installerUiLanguages.contains(request['uiLanguage'])) ||
         request['expectedDevice'] is! Map<String, dynamic> ||
         !exactFields(request['expectedDevice'], {
           'majorMinor',
@@ -69,7 +72,7 @@ Future<int> runPrivilegedBackend(
       'selectedDisk': identity.path,
       'partitionMethod': 'full',
       'fileSystem': 'btrfs',
-      'selectedLanguage': 'en',
+      'selectedLanguage': request['uiLanguage'] ?? 'en',
     };
     publish();
     heartbeat = Timer.periodic(const Duration(seconds: 5), (_) => publish());
