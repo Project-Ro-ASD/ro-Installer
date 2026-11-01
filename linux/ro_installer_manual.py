@@ -119,11 +119,24 @@ def probe_manual(path, expected, choices):
     return {'snapshot': snapshot, 'plan': plan}
 
 
+def probe_layout(path, expected, slots):
+    if (not isinstance(slots,list) or len(slots)>2
+            or any(type(n) is not int or not 1<=n<=4096 for n in slots)
+            or len(set(slots))!=len(slots)):
+        raise ValueError('Invalid owned GPT slots')
+    return gpt.probe_device(path,expected,preserve_slots=slots)
+
+
 def main():
     try:
-        if os.geteuid() != 0 or len(sys.argv) != 4:
+        if os.geteuid() != 0:
             return 2
-        result = probe_manual(sys.argv[1], json.loads(sys.argv[2]), json.loads(sys.argv[3]))
+        if len(sys.argv)==5 and sys.argv[1]=='--layout':
+            result=probe_layout(sys.argv[2],json.loads(sys.argv[3]),json.loads(sys.argv[4]))
+        elif len(sys.argv)==4:
+            result=probe_manual(sys.argv[1],json.loads(sys.argv[2]),json.loads(sys.argv[3]))
+        else:
+            return 2
         raw = json.dumps(result, separators=(',', ':'))
         if len(raw.encode()) > 8191:
             return 2

@@ -333,12 +333,15 @@ class System:
     def mounts(self):
         return Path("/proc/self/mountinfo").read_text()
 
-    def gpt_snapshot(self, device, preserve_slots=None, manual_roles=None):
+    def gpt_snapshot(self, device, preserve_slots=None, manual_roles=None, layout_slots=None):
         gpt_args=(*GPT_ARGV,device.path,json.dumps(device.public(),separators=(',',':')))
         if preserve_slots is not None:gpt_args+=('--preserve-slots',json.dumps(preserve_slots))
         if manual_roles is not None:
             if preserve_slots is not None:fail('INVALID_REQUEST','Conflicting probe modes.')
             gpt_args=(*MANUAL_ARGV,device.path,json.dumps(device.public(),separators=(',',':')),json.dumps(manual_roles,separators=(',',':')))
+        if layout_slots is not None:
+            if preserve_slots is not None or manual_roles is not None:fail('INVALID_REQUEST','Conflicting probe modes.')
+            gpt_args=(*MANUAL_ARGV,'--layout',device.path,json.dumps(device.public(),separators=(',',':')),json.dumps(layout_slots,separators=(',',':')))
         child_env=CHILD_ENV
         if manual_roles is not None and getattr(self,'lease_fd',None) is not None:
             child_env=dict(CHILD_ENV,RO_INSTALLER_LEASE_FD=str(self.lease_fd))
@@ -366,7 +369,7 @@ class System:
                     computed=gpt_module().manual_plan(snapshot,manual_roles)
                     if not same_plan_value(computed,value['plan']):raise ValueError()
                     return {'snapshot':snapshot,'plan':computed}
-                if preserve_slots is None:return gpt_module().normalize_snapshot(value,device.public())
+                if preserve_slots is None and layout_slots is None:return gpt_module().normalize_snapshot(value,device.public())
                 if (not isinstance(value,dict) or set(value)!={'snapshot','preservationFingerprint'} or not isinstance(value['preservationFingerprint'],str)
                         or not re.fullmatch('[0-9a-f]{64}',value['preservationFingerprint'])):raise ValueError()
                 return {'snapshot':gpt_module().normalize_snapshot(value['snapshot'],device.public()),'preservationFingerprint':value['preservationFingerprint']}
