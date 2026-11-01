@@ -85,6 +85,21 @@ selection/channel policy, or replacing Fedora kernels with custom kernels.
 
 ## Standard Storage Contract
 
+Free-space installation is being developed in three parts: deterministic GPT
+planning, authoritative helper admission, and execution/GUI integration. The
+current `GptDiskSnapshot` and `FreeSpaceInstallationPlan` models cover the first
+part. They validate normalized sector geometry, primary/backup entry-array
+reservations, partition identities, overlap and GPT slot capacity. Plans bind
+the device sequence, table fingerprint and partition inventory to one complete
+current free extent. The normalized input is not a disk probe or authorization.
+
+The proposed layout creates a dedicated 512 MiB ESP and Btrfs root inside that
+extent, keeping existing partitions and their EFI files separate. It uses no
+disk swap, shrinking, wiping or shared-ESP formatting. Allocation uses integer
+sector arithmetic and 1 MiB alignment; the existing temporary root-space safety
+floor applies. This planning layer does not enable the legacy `free_space`
+executor or change the full-disk-only production admission contract.
+
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
 and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:
 
