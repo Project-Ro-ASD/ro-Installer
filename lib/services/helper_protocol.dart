@@ -1,5 +1,21 @@
 import 'dart:convert';
 
+// Canonical UI codes only: this is a firstboot hint, not a locale or command.
+const installerUiLanguages = {
+  'tr',
+  'en',
+  'es',
+  'de',
+  'fr',
+  'pt_BR',
+  'it',
+  'ru',
+  'ar',
+  'fa',
+  'zh_CN',
+  'ja',
+};
+
 const helperErrorCodes = {
   'INVALID_REQUEST',
   'REQUEST_TOO_LARGE',

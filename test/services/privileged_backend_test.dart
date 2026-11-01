@@ -5,6 +5,9 @@ import 'package:ro_installer/services/helper_protocol.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
 import 'package:ro_installer/services/install_service.dart';
 import 'package:ro_installer/services/install_localizer.dart';
+import 'package:ro_installer/models/installer_handoff.dart';
+import 'package:ro_installer/services/install_stages/target_finalization_stage.dart';
+import 'install_stages/target_finalization_stage_test.dart' as target;
 
 final identity = DeviceIdentity(
   path: '/dev/vda',
@@ -51,6 +54,72 @@ class BridgeEngine extends InstallService {
 }
 
 void main() {
+  test(
+    'validated backend hint reaches the actual firstboot seed writer',
+    () async {
+      for (final language in installerUiLanguages) {
+        final engine = BridgeEngine();
+        expect(
+          await runPrivilegedBackend(
+            input([
+              {...request, 'uiLanguage': language},
+              gate,
+            ]),
+            (_) {},
+            service: engine,
+            rootCheck: () async => true,
+          ),
+          0,
+        );
+        final runner = target.RecordingWriter();
+        final ctx = target.context(runner);
+        ctx.state.addAll(engine.state!);
+        expect(
+          (await const TargetFinalizationStage().execute(ctx)).success,
+          isTrue,
+        );
+        expect(jsonDecode(runner.writes['/mnt$installerSeedPath']!), {
+          'schema_version': 1,
+          'installer_ui_language_hint': language,
+        });
+      }
+    },
+  );
+  test(
+    'invalid language hints cannot reach the engine or mutation gate',
+    () async {
+      for (final language in [
+        null,
+        true,
+        1,
+        [],
+        {},
+        '',
+        'TR',
+        'tr_TR.UTF-8',
+        'tr\n',
+        'en;id',
+        'x' * 9000,
+      ]) {
+        final engine = BridgeEngine();
+        final events = <Map<String, dynamic>>[];
+        expect(
+          await runPrivilegedBackend(
+            input([
+              {...request, 'uiLanguage': language},
+              gate,
+            ]),
+            events.add,
+            service: engine,
+            rootCheck: () async => true,
+          ),
+          9,
+        );
+        expect(engine.state, isNull);
+        expect(events.where((e) => e['type'] == 'ready'), isEmpty);
+      }
+    },
+  );
   test(
     'fixed normalized full/Btrfs state reuses engine and explicit result',
     () async {
