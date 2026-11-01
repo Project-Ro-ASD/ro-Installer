@@ -164,6 +164,34 @@ entries within the probe limit. The complete private backend frame must fit
 unsupported layouts are rejected rather than repaired. Full-disk behavior and
 its older protocol compatibility remain unchanged.
 
+### Manual storage planning
+
+`ManualInstallationPlan` is a pure, immutable planning model. It does not enable
+manual installation in the GUI, helper or engine, and does not consume the
+legacy `manualPartitions` maps. Authoritative filesystem/reuse checks and the
+execution/confirmation chain remain separate implementation steps.
+
+Its versioned input contains one normalized GPT `snapshot` and exactly two
+choices: `esp` and `root`. Existing choices specify a partition number and an
+explicit boolean `formatOnInstall`; new choices specify integer `startSector`
+and `endSector`. See `test/fixtures/manual_installation_plan_v1.json`. Paths,
+GUIDs, flags, filesystem claims and operations cannot be overridden by a choice.
+The compact intent binds the complete source fingerprint, device identity,
+resolved role geometry and preserve/format decision to the standard Btrfs layout.
+
+Root always requires formatting, a Linux data partition type and the temporary
+40 GiB safety floor. ESP requires the ESP type and at least 512 MiB; existing ESPs
+may explicitly be formatted or reused. Selected existing partitions must have
+zero GPT attributes. These conservative planning limits do not prove filesystem
+type, available EFI space or safe reuse. ESP reuse preserves the filesystem but
+allows later boot-file writes; only unselected partitions are classified as
+untouched.
+
+New partitions must lie entirely within current free extents, align to 1 MiB,
+remain disjoint and fit unused GPT slots. Slots are assigned deterministically
+with ESP first; the post-create inventory must fit the 32-partition probe limit.
+There is no delete, resize, root-preservation, separate-home or disk-swap plan.
+
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
 and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:
 
