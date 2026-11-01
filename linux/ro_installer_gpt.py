@@ -132,8 +132,8 @@ def read_snapshot(read, device, sector, preserve_slots=None):
         'lastUsableSector':last,'entryCount':count,'entryBytes':entry,'primaryEntriesLba':p_lba,'backupEntriesLba':b_lba,
         'diskGuid':str(uuid.UUID(bytes_le=primary[9])),'tableFingerprint':digest.hexdigest(),'partitions':parts},device)
     if preserve_slots is None:return snapshot
-    if (not isinstance(preserve_slots,list) or len(preserve_slots)!=2
-            or any(type(n) is not int or not 1<=n<=count for n in preserve_slots) or len(set(preserve_slots))!=2):
+    if (not isinstance(preserve_slots,list) or len(preserve_slots)>2
+            or any(type(n) is not int or not 1<=n<=count for n in preserve_slots) or len(set(preserve_slots))!=len(preserve_slots)):
         raise ValueError('Invalid preservation slots')
     masked=[]
     for raw in (mbr,ph,p_array,b_array,bh):masked.append(bytearray(raw))

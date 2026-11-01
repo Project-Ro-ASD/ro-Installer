@@ -218,6 +218,27 @@ payloads. This read-only result is not approval to format or reuse an ESP:
 available space, boot-file collisions/ownership and first-mutation revalidation
 are still required by future manual installation admission.
 
+### Private manual target ownership
+
+`ApprovedManualPlan` defines the future helper-to-backend ownership envelope:
+source snapshot, exact compact intent, helper-allocated GUIDs for new roles only,
+and a preservation fingerprint. Existing role identities cannot be reassigned;
+new GUIDs must be distinct from every existing partition and the disk GUID.
+A captured approval rejects state-copy deletion, mode changes and replacement
+with a different valid plan.
+
+Manual layouts may add zero, one or two partitions. The private manual worker's
+`--layout` read mode masks only the corresponding new GPT entries plus the
+header/entry-array CRC fields when computing the preservation proof. Every
+existing entry remains protected, including a root selected for filesystem
+formatting. The original GPT worker's public two-slot flag remains unchanged.
+
+`CreatedManualLayout` resolves root/ESP paths only after exact post-create
+inventory, range, type, GUID, attributes and preservation checks. Neither the
+model nor this read-only primitive enables manual installation. Shared-ESP
+write isolation, capacity/collision checks, execution gates and GUI confirmation
+still need integration; public helper requests cannot supply private ownership.
+
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
 and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:
 
