@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:ro_installer/l10n/installer_translation_catalog.dart';
 import 'package:ro_installer/screens/installing_screen.dart';
 import 'package:ro_installer/services/helper_client.dart';
+import 'package:ro_installer/services/copy_progress.dart';
 import 'package:ro_installer/services/install_log_export_service.dart';
 import 'package:ro_installer/state/installer_state.dart';
 import 'package:ro_installer/theme/app_theme.dart';
@@ -19,6 +20,110 @@ void main() {
   setUpAll(() async {
     catalog = await InstallerTranslationCatalog.loadBundled();
   });
+  testWidgets(
+    'live copy measurement expires, clears by stage and never marks success',
+    (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final state = InstallerState(translations: catalog)
+        ..selectedDisk = '/dev/vda'
+        ..confirmedDevice = f.identity
+        ..selectedLanguage = 'en';
+      final stream = StreamController<List<int>>();
+      final process = f.FakeHelperProcess(stream.stream);
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: state,
+          child: MaterialApp(
+            theme: AppTheme.darkTheme,
+            home: Scaffold(
+              body: InstallingScreen(
+                helperClient: HelperClient(
+                  protocolVersion: 2,
+                  start: (_, _) async => process,
+                ),
+                exportSession:
+                    ({
+                      required startedAt,
+                      required finishedAt,
+                      required success,
+                      required finalStatus,
+                      required statusHistory,
+                      required technicalLogs,
+                      required installContext,
+                    }) async => const InstallLogExportResult(
+                      success: false,
+                      error: 'fixture',
+                    ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      void send(Map<String, dynamic> value) =>
+          stream.add(utf8.encode('${jsonEncode(value)}\n'));
+      send({
+        'protocolVersion': 2,
+        'type': 'progress',
+        'stage': 5,
+        'progress': 0.42,
+        'messageKey': 'install_stage_file_copy',
+      });
+      const value = CopyProgress(
+        phase: 'main',
+        bytesProcessed: 4096,
+        bytesPerSecond: 1024,
+        etaSeconds: 12,
+      );
+      send(value.toJson(version: 2));
+      await tester.pump();
+      await tester.pump();
+      expect(find.textContaining('4.0 KiB'), findsOneWidget);
+      expect(find.textContaining('~0:12'), findsOneWidget);
+      expect(find.text(state.t('install_badge_active')), findsOneWidget);
+      expect(jsonDecode(process.sent)['includeCopyProgress'], true);
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.textContaining('4.0 KiB'), findsNothing);
+      send(value.toJson(version: 2));
+      await tester.pump();
+      await tester.pump();
+      expect(find.textContaining('4.0 KiB'), findsOneWidget);
+      send({
+        'protocolVersion': 2,
+        'type': 'progress',
+        'stage': 6,
+        'progress': 0.6,
+        'messageKey': 'install_stage_target_finalization',
+      });
+      await tester.pump();
+      await tester.pump();
+      expect(find.textContaining('4.0 KiB'), findsNothing);
+      send(v2.terminal());
+      await stream.close();
+      for (
+        var i = 0;
+        i < 20 &&
+            find.text(state.t('install_badge_success')).evaluate().isEmpty;
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(
+        find.text(state.t('install_badge_success')),
+        findsOneWidget,
+        reason: tester
+            .widgetList<Text>(find.byType(Text))
+            .map((v) => v.data)
+            .join(' | '),
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
   for (final mode in [
     'complete',
     'failed',

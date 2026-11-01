@@ -290,6 +290,38 @@ conversation timeout; disk enumeration's timeout is separate.
 | 8 | INSTALL_FAILED |
 | 9 | BACKEND_ERROR |
 
+### Live copy measurements (explicit helper v2 capability)
+
+A v2 `install-full-disk` request can opt in with `includeCopyProgress: true`.
+V1, audit and probe reject the field; existing v2 clients that omit it receive
+the existing response types. The GUI opts in and receives typed frames:
+
+```json
+{"protocolVersion":2,"type":"copy-progress","phase":"main","bytesProcessed":4096,"bytesPerSecond":1024,"etaSeconds":12}
+```
+
+Phases are `main` and `efi`, with separate counters. `bytesProcessed` is rsync's
+logical file-data progress, not physical writes, network traffic or a verified
+file count. Bytes and rate are bounded integers; rate and ETA may be null.
+There is no invented total-byte count from a rounded percentage. Numeric rsync
+progress is parsed with bounded, anchored rules, and at most one sample per
+second per phase is emitted. Filenames, stderr and arbitrary command output
+cannot enter these frames. Rsync exit status and required-file checks remain
+authoritative; progress or callback failure never constitutes installation
+success.
+
+ETA estimates only the current copy, never finalization, bootloader work or
+the whole installation. It is shown only after warm-up and positive measured
+throughput, when rsync reports a complete file list (`to-chk`, not `ir-chk`)
+and a remaining-time estimate below 100%. It is absent during discovery,
+stalls, completion or unknown output. The GUI removes measurements after
+three seconds without a fresh sample, at the next stage and at the terminal
+result. The existing overall stage progress is unchanged and still requires
+an authenticated successful terminal result. Session-report v1 `bytesTransferred`
+and `throughput` remain null; live copy counters are not persisted as a
+misleading session-wide transfer total. Automated tests use temporary dirs,
+stub processes and fake runners; they do not install onto disks or boot VMs.
+
 ### Backend handshake, scope and cancellation
 
 The helper clears inherited environment, sets cwd `/` and umask 077, and chooses

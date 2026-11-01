@@ -99,7 +99,7 @@ class CopyFixture extends CommandRunner {
                 '-aA',
                 '--numeric-ids',
                 '--info=progress2,stats2',
-                '--human-readable',
+                '--no-human-readable',
                 '--no-xattrs',
               }.contains(flag),
           isTrue,

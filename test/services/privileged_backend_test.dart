@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:ro_installer/services/copy_progress.dart';
 import 'package:test/test.dart';
 import 'package:ro_installer/services/privileged_backend.dart';
 import 'package:ro_installer/services/helper_protocol.dart';
@@ -30,7 +31,8 @@ Stream<List<int>> input(List<Map<String, dynamic>> data) =>
     Stream.value(utf8.encode('${data.map(jsonEncode).join('\n')}\n'));
 
 class BridgeEngine extends InstallService {
-  BridgeEngine({this.success = true, this.useGate = true});
+  BridgeEngine({this.success = true, this.useGate = true, this.copy});
+  final CopyProgress? copy;
   final bool success;
   final bool useGate;
   Map<String, dynamic>? state;
@@ -43,10 +45,12 @@ class BridgeEngine extends InstallService {
     InstallTranslator? translate,
     Future<void> Function()? beforeFirstMutation,
     void Function(int)? onStage,
+    void Function(CopyProgress)? onCopyProgress,
   }) async {
     this.state = Map.of(state);
     if (useGate) await beforeFirstMutation!();
     onStage?.call(5);
+    if (copy != null) onCopyProgress?.call(copy!);
     onProgress(0.6, 'arbitrary secret must never cross protocol');
     onTechnicalLog('password secret');
     return success;
@@ -54,6 +58,48 @@ class BridgeEngine extends InstallService {
 }
 
 void main() {
+  test(
+    'backend copy telemetry requires opt-in and cannot replace terminal authorization',
+    () async {
+      const value = CopyProgress(phase: 'main', bytesProcessed: 4096);
+      for (final enabled in [false, true]) {
+        final events = <Map<String, dynamic>>[];
+        expect(
+          await runPrivilegedBackend(
+            input([
+              {...request, if (enabled) 'includeCopyProgress': true},
+              gate,
+            ]),
+            events.add,
+            service: BridgeEngine(copy: value),
+            rootCheck: () async => true,
+          ),
+          0,
+        );
+        expect(
+          events.where((e) => e['type'] == 'copy-progress').toList(),
+          enabled ? [value.toJson()] : isEmpty,
+        );
+        expect(events.last['ok'], true);
+      }
+      for (final invalid in [false, null, 1, 'true', {}, []]) {
+        final engine = BridgeEngine(copy: value);
+        expect(
+          await runPrivilegedBackend(
+            input([
+              {...request, 'includeCopyProgress': invalid},
+              gate,
+            ]),
+            (_) {},
+            service: engine,
+            rootCheck: () async => true,
+          ),
+          9,
+        );
+        expect(engine.state, isNull);
+      }
+    },
+  );
   test(
     'validated backend hint reaches the actual firstboot seed writer',
     () async {

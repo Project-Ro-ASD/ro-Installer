@@ -483,5 +483,8 @@
   "install_backend_report_unavailable": "Отчёт backend недоступен. Результат установки не изменился.",
   "install_backend_report_invalid": "Не удалось проверить отчёт backend. Результат установки не изменился.",
   "install_backend_record_complete": "Защищённые записи сеанса завершены.",
-  "install_backend_record_incomplete": "Защищённые записи сеанса неполны; можно экспортировать безопасный отчёт."
+  "install_backend_record_incomplete": "Защищённые записи сеанса неполны; можно экспортировать безопасный отчёт.",
+  "install_copy_measurement": "Скопировано ({phase}): {bytes} · {rate} · Оценка копирования: {eta}",
+  "install_copy_main": "Система",
+  "install_copy_efi": "EFI"
 }

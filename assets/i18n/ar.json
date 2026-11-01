@@ -483,5 +483,8 @@
   "install_backend_report_unavailable": "تقرير الخلفية غير متاح. لم تتغير نتيجة التثبيت.",
   "install_backend_report_invalid": "تعذر التحقق من تقرير الخلفية. لم تتغير نتيجة التثبيت.",
   "install_backend_record_complete": "سجلات الجلسة المحمية مكتملة.",
-  "install_backend_record_incomplete": "سجلات الجلسة المحمية غير مكتملة؛ يمكنك تصدير التقرير الآمن."
+  "install_backend_record_incomplete": "سجلات الجلسة المحمية غير مكتملة؛ يمكنك تصدير التقرير الآمن.",
+  "install_copy_measurement": "البيانات المنسوخة ({phase}): {bytes} · {rate} · وقت النسخ المتوقع: {eta}",
+  "install_copy_main": "النظام",
+  "install_copy_efi": "EFI"
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:ro_installer/services/copy_progress.dart';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ro_installer/main.dart';
@@ -22,6 +23,7 @@ class CapturingInstallService extends InstallService {
     InstallTranslator? translate,
     Future<void> Function()? beforeFirstMutation,
     void Function(int)? onStage,
+    void Function(CopyProgress)? onCopyProgress,
   }) async {
     states.add(Map.of(state));
     return false; // Stop before target operations; exercise the real auto entry point.
@@ -39,6 +41,7 @@ class SuccessfulInstallService extends CapturingInstallService {
     InstallTranslator? translate,
     Future<void> Function()? beforeFirstMutation,
     void Function(int)? onStage,
+    void Function(CopyProgress)? onCopyProgress,
   }) async => true;
 }
 

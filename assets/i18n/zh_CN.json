@@ -483,5 +483,8 @@
   "install_backend_report_unavailable": "后端报告不可用。安装结果未改变。",
   "install_backend_report_invalid": "无法验证后端报告。安装结果未改变。",
   "install_backend_record_complete": "受保护的会话记录已完成。",
-  "install_backend_record_incomplete": "受保护的会话记录不完整；您可以导出安全报告。"
+  "install_backend_record_incomplete": "受保护的会话记录不完整；您可以导出安全报告。",
+  "install_copy_measurement": "已复制数据（{phase}）：{bytes} · {rate} · 复制预计剩余：{eta}",
+  "install_copy_main": "系统",
+  "install_copy_efi": "EFI"
 }

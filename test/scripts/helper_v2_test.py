@@ -21,15 +21,46 @@ class V2Tests(legacy.ErrorAssertions,unittest.TestCase):
             try:return rec.finish(8)
             finally:rec.close()
     def frame(self,report):return 'print('+repr(json.dumps({'protocolVersion':1,'type':'session-report','report':report}))+',flush=True)\n'
-    def run_stub(self,body,version=2,events=None,language=None):
+    def run_stub(self,body,version=2,events=None,language=None,copy_progress=False):
         data=legacy.install_request();data['protocolVersion']=version
         if language is not None:data['uiLanguage']=language
+        if copy_progress:data['includeCopyProgress']=True
         request=helper.parse_request(json.dumps(data).encode(),version=version)
         system=legacy.FakeSystem();confirmed=helper.validate_device(system,request.disk)
         with tempfile.TemporaryDirectory(prefix='p0-04-v2-') as td:
             path=Path(td)/'engine.py';path.write_text(legacy.BackendBridgeTests.prefix+body)
             with mock.patch.object(helper,'BACKEND_ARGV',(sys.executable,'-I',str(path))):
                 return helper.run_backend(request,confirmed,system,emit=(events.append if events is not None else lambda _:None))
+    def test_copy_progress_opt_in_is_v2_install_only_and_strict_boolean(self):
+        data={**legacy.install_request(),'protocolVersion':2,'includeCopyProgress':True}
+        self.assertTrue(helper.parse_request(json.dumps(data).encode(),2).include_copy_progress)
+        for value in [False,None,1,'true',{},[]]:
+            self.error('INVALID_REQUEST',helper.parse_request,json.dumps({**data,'includeCopyProgress':value}).encode(),version=2)
+        self.error('INVALID_REQUEST',helper.parse_request,json.dumps({**data,'protocolVersion':1}).encode(),version=1)
+        for op in ['audit-live','probe-disk']:
+            data={'protocolVersion':2,'operation':op,'includeCopyProgress':True}
+            if op=='probe-disk':data['disk']='/dev/vda'
+            self.error('INVALID_REQUEST',helper.parse_request,json.dumps(data).encode(),version=2)
+
+    def test_copy_frame_types_limits_and_unknown_fields(self):
+        frame={'protocolVersion':1,'type':'copy-progress','phase':'main','bytesProcessed':4096,'bytesPerSecond':1024,'etaSeconds':12}
+        self.assertEqual(helper.backend_message(json.dumps(frame).encode(),allow_copy=True),frame)
+        self.error('BACKEND_ERROR',helper.backend_message,json.dumps(frame).encode())
+        for change in [{'bytesProcessed':True},{'bytesProcessed':-1},{'bytesProcessed':1.0},{'bytesProcessed':9007199254740992},{'bytesPerSecond':-1},{'bytesPerSecond':None},{'etaSeconds':True},{'etaSeconds':86401},{'phase':[]},{'path':'SECRET'}]:
+            self.error('BACKEND_ERROR',helper.backend_message,json.dumps({**frame,**change}).encode(),allow_copy=True)
+
+    def test_copy_progress_real_pipe_opt_in_order_and_legacy_rejection(self):
+        frame={'protocolVersion':1,'type':'copy-progress','phase':'main','bytesProcessed':4096,'bytesPerSecond':1024,'etaSeconds':12}
+        progress='print('+repr(json.dumps({'protocolVersion':1,'type':'progress','stage':5,'progress':0.42,'messageKey':'install_stage_file_copy'}))+',flush=True)\n'
+        copy='print('+repr(json.dumps(frame))+',flush=True)\n'
+        body=legacy.BackendBridgeTests.ready+progress+copy+legacy.BackendBridgeTests.success
+        events=[]
+        self.assertEqual(self.run_stub(body,events=events,copy_progress=True),{'installed':True})
+        self.assertEqual([event for event in events if event['type']=='copy-progress'],[frame])
+        self.error('BACKEND_ERROR',self.run_stub,body)
+        self.error('BACKEND_ERROR',self.run_stub,copy+legacy.BackendBridgeTests.ready+legacy.BackendBridgeTests.success,copy_progress=True)
+        backward='print('+repr(json.dumps({**frame,'bytesProcessed':1}))+',flush=True)\n'
+        self.error('BACKEND_ERROR',self.run_stub,legacy.BackendBridgeTests.ready+progress+copy+backward+legacy.BackendBridgeTests.success,copy_progress=True)
     def test_language_hint_allowlist_and_scope(self):
         catalog=json.loads((legacy.ROOT/'assets/i18n/locales.json').read_text())
         self.assertEqual(helper.INSTALLER_UI_LANGUAGES,{row['code'] for row in catalog})
