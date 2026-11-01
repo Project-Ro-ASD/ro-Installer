@@ -42,9 +42,10 @@ STAGE_KEYS = (
     "install_stage_post_validation", "install_stage_cleanup",
 )
 OPERATIONS = frozenset({"audit-live", "probe-disk", "install-full-disk"})
-V2_READ_OPERATIONS = frozenset({'probe-free-space','validate-free-space-plan'})
+V2_READ_OPERATIONS = frozenset({'probe-free-space','validate-free-space-plan','validate-manual-plan'})
 V2_INSTALL_OPERATIONS = frozenset({'install-free-space'})
 GPT_ARGV = ('/usr/bin/python3','-I','/usr/libexec/ro_installer_gpt.py','--probe')
+MANUAL_ARGV = ('/usr/bin/python3','-I','/usr/libexec/ro_installer_manual.py')
 GPT_TIMEOUT = 10
 INSTALLER_UI_LANGUAGES = frozenset({
     "tr", "en", "es", "de", "fr", "pt_BR", "it", "ru", "ar", "fa", "zh_CN", "ja",
@@ -109,6 +110,7 @@ class Request:
     table_fingerprint: str | None = None
     selected_extent: dict | None = None
     source_snapshot: dict | None = None
+    manual_choices: dict | None = None
 
 
 def full_disk_plan(device):
@@ -149,6 +151,8 @@ def parse_request(raw, version=1):
         allowed.add("disk")
     if operation == 'validate-free-space-plan':
         allowed.update({'expectedDevice','tableFingerprint','selectedExtent'})
+    if operation == 'validate-manual-plan':
+        allowed.update({'expectedDevice','tableFingerprint','esp','root'})
     if operation in ('install-full-disk','install-free-space'):
         allowed.update({"confirmDestructive", "expectedDevice"})
         if operation=='install-full-disk':allowed.update({'partitionMethod','fileSystem'})
@@ -177,7 +181,7 @@ def parse_request(raw, version=1):
         if (data["partitionMethod"] != "full" or data["fileSystem"] != "btrfs"
                 or data["confirmDestructive"] is not True):
             fail("INVALID_REQUEST", "Only explicitly confirmed full/Btrfs installation is supported.")
-    if operation in ('install-full-disk','install-free-space','validate-free-space-plan'):
+    if operation in ('install-full-disk','install-free-space','validate-free-space-plan','validate-manual-plan'):
         expected = data["expectedDevice"]
         if (not isinstance(expected, dict)
                 or set(expected) != {"majorMinor", "size", "diskSequence"}
@@ -212,7 +216,7 @@ def parse_request(raw, version=1):
         plan=full_disk_plan({'path':disk,**expected})
         if not same_plan_value(data['confirmedPlan'],plan):
             fail('INVALID_REQUEST','Confirmed plan does not match the fixed full-disk contract.')
-    fingerprint=extent=None
+    fingerprint=extent=choices=None
     if operation == 'validate-free-space-plan':
         fingerprint=data['tableFingerprint'];extent=data['selectedExtent']
         if (not isinstance(fingerprint,str) or not re.fullmatch('[0-9a-f]{64}',fingerprint)
@@ -220,7 +224,17 @@ def parse_request(raw, version=1):
                 or type(extent['startSector']) is not int or type(extent['endSector']) is not int
                 or not 0<=extent['startSector']<=extent['endSector']<=9007199254740991):
             fail('INVALID_REQUEST','Invalid free-space intent.')
-    return Request(operation, disk, expected, version, data.get("uiLanguage"), data.get("includeCopyProgress", False), plan,fingerprint,extent)
+    if operation == 'validate-manual-plan':
+        fingerprint = data['tableFingerprint']
+        if not isinstance(fingerprint, str) or not re.fullmatch('[0-9a-f]{64}', fingerprint):
+            fail('INVALID_REQUEST', 'Invalid source fingerprint.')
+        try:
+            choices = {role: gpt_module().manual_choice(data[role]) for role in ('esp', 'root')}
+            if choices['root'].get('formatOnInstall', True) is not True:
+                raise ValueError()
+        except (ValueError, TypeError, KeyError):
+            fail('INVALID_REQUEST', 'Invalid manual role choices.')
+    return Request(operation, disk, expected, version, data.get("uiLanguage"), data.get("includeCopyProgress", False), plan, fingerprint, extent, manual_choices=choices)
 
 
 def gpt_module():
@@ -319,11 +333,17 @@ class System:
     def mounts(self):
         return Path("/proc/self/mountinfo").read_text()
 
-    def gpt_snapshot(self, device, preserve_slots=None):
+    def gpt_snapshot(self, device, preserve_slots=None, manual_roles=None):
         gpt_args=(*GPT_ARGV,device.path,json.dumps(device.public(),separators=(',',':')))
         if preserve_slots is not None:gpt_args+=('--preserve-slots',json.dumps(preserve_slots))
+        if manual_roles is not None:
+            if preserve_slots is not None:fail('INVALID_REQUEST','Conflicting probe modes.')
+            gpt_args=(*MANUAL_ARGV,device.path,json.dumps(device.public(),separators=(',',':')),json.dumps(manual_roles,separators=(',',':')))
+        child_env=CHILD_ENV
+        if manual_roles is not None and getattr(self,'lease_fd',None) is not None:
+            child_env=dict(CHILD_ENV,RO_INSTALLER_LEASE_FD=str(self.lease_fd))
         process=subprocess.Popen(gpt_args,
-            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=CHILD_ENV,close_fds=True,
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=child_env,close_fds=True,
             pass_fds=() if getattr(self,'lease_fd',None) is None else (self.lease_fd,))
         output=bytearray();total=0;streams=[process.stdout,process.stderr];deadline=time.monotonic()+GPT_TIMEOUT
         try:
@@ -340,6 +360,12 @@ class System:
                 fail('AMBIGUOUS_TOPOLOGY','GPT metadata could not be verified.')
             try:
                 value=json.loads(output,object_pairs_hook=unique_object,parse_constant=lambda _:fail('AMBIGUOUS_TOPOLOGY','Invalid GPT number.'))
+                if manual_roles is not None:
+                    if not isinstance(value,dict) or set(value)!={'snapshot','plan'}:raise ValueError()
+                    snapshot=gpt_module().normalize_snapshot(value['snapshot'],device.public())
+                    computed=gpt_module().manual_plan(snapshot,manual_roles)
+                    if not same_plan_value(computed,value['plan']):raise ValueError()
+                    return {'snapshot':snapshot,'plan':computed}
                 if preserve_slots is None:return gpt_module().normalize_snapshot(value,device.public())
                 if (not isinstance(value,dict) or set(value)!={'snapshot','preservationFingerprint'} or not isinstance(value['preservationFingerprint'],str)
                         or not re.fullmatch('[0-9a-f]{64}',value['preservationFingerprint'])):raise ValueError()
@@ -890,6 +916,15 @@ def handle(request, system, emit=lambda _: None):
                 except (ValueError,TypeError,KeyError):fail('AMBIGUOUS_TOPOLOGY','Invalid GPT snapshot.')
                 if request.operation=='probe-free-space':return {'snapshot':snapshot}
                 if snapshot['tableFingerprint']!=request.table_fingerprint:fail('DEVICE_CHANGED','Partition table changed since selection.')
+                if request.operation == 'validate-manual-plan':
+                    try:gpt_module().manual_plan(snapshot,request.manual_choices)
+                    except (ValueError,TypeError,KeyError):fail('INVALID_REQUEST','Invalid manual allocation.')
+                    verified=system.gpt_snapshot(before,manual_roles=request.manual_choices)
+                    if not same_plan_value(snapshot,verified['snapshot']) or validate_device(system,request.disk)!=before:
+                        fail('DEVICE_CHANGED','Device changed during manual validation.')
+                    computed=gpt_module().manual_plan(snapshot,request.manual_choices)
+                    if not same_plan_value(computed,verified['plan']):fail('AMBIGUOUS_TOPOLOGY','Manual probe mismatch.')
+                    return {'plan':computed}
                 try:return {'plan':gpt_module().compact_plan(snapshot,request.selected_extent)}
                 except (ValueError,TypeError,KeyError):fail('INVALID_REQUEST','Selected free-space plan is no longer valid.')
             finally:del system.lease_fd

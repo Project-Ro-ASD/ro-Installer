@@ -791,6 +791,7 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
         self.assertEqual(ast.unparse(gpt_args.elts[1]),'device.path')
         self.assertEqual(ast.unparse(gpt_args.elts[2]),"json.dumps(device.public(), separators=(',', ':'))")
         self.assertEqual(helper.GPT_ARGV,('/usr/bin/python3','-I','/usr/libexec/ro_installer_gpt.py','--probe'))
+        self.assertEqual(helper.MANUAL_ARGV,('/usr/bin/python3','-I','/usr/libexec/ro_installer_manual.py'))
         for call in process_calls:
             self.assertEqual(call.func.attr, "Popen")
             self.assertFalse(any(keyword.arg == "shell" for keyword in call.keywords))
@@ -808,12 +809,13 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
             (top / "SOURCES/backend").write_bytes(b"\x7fELFpayload-fixture")
             shutil.copy2(ROOT / "linux/ro-installer-helper", top / "SOURCES/helper")
             shutil.copy2(ROOT / "linux/ro_installer_gpt.py", top / "SOURCES/gpt")
+            shutil.copy2(ROOT / "linux/ro_installer_manual.py", top / "SOURCES/manual")
             shutil.copy2(ROOT / "linux/ro-installer-session", top / "SOURCES/session")
             shutil.copy2(ROOT / "linux/ro-installer-export", top / "SOURCES/export")
             shutil.copy2(ROOT / "linux/ro_installer_records.py", top / "SOURCES/records")
             shutil.copy2(ROOT / "linux/ro-installer-observability.json", top / "SOURCES/schema")
             shutil.copy2(ROOT / "linux/org.roasd.installer.helper.policy", top / "SOURCES/policy")
-            for release, mode, gpt_mode in (("1", "0755", "0644"), ("2", "0777", "0644"), ("3", "0755", "0666")):
+            for release, mode, gpt_mode, manual_mode in (("1", "0755", "0644", "0644"), ("2", "0777", "0644", "0644"), ("3", "0755", "0666", "0644"), ("4", "0755", "0644", "0666")):
                 spec = top / "SPECS/fixture.spec"
                 spec.write_text(f'''Name: helper-payload-fixture
 Version: 1
@@ -827,6 +829,7 @@ Non-product package fixture.
 install -Dm755 %{{_sourcedir}}/export %{{buildroot}}{package.EXPORT}
 install -Dm644 %{{_sourcedir}}/records %{{buildroot}}{package.RECORDS}
 install -Dm644 %{{_sourcedir}}/gpt %{{buildroot}}{package.GPT}
+install -Dm644 %{{_sourcedir}}/manual %{{buildroot}}{package.MANUAL}
 install -Dm644 %{{_sourcedir}}/schema %{{buildroot}}{package.SCHEMA}
 install -Dm755 %{{_sourcedir}}/session %{{buildroot}}{package.SESSION}
 install -Dm755 %{{_sourcedir}}/helper %{{buildroot}}{package.HELPER}
@@ -836,6 +839,7 @@ install -Dm644 %{{_sourcedir}}/policy %{{buildroot}}{package.POLICY}
 %attr(0755,root,root) {package.EXPORT}
 %attr(0644,root,root) {package.RECORDS}
 %attr({gpt_mode},root,root) {package.GPT}
+%attr({manual_mode},root,root) {package.MANUAL}
 %attr(0644,root,root) {package.SCHEMA}
 %attr(0755,root,root) {package.SESSION}
 %attr({mode},root,root) {package.HELPER}
@@ -847,7 +851,7 @@ install -Dm644 %{{_sourcedir}}/policy %{{buildroot}}{package.POLICY}
                                        text=True, capture_output=True, timeout=60)
                 self.assertEqual(built.returncode, 0, built.stderr)
                 rpm = next((top / "RPMS").rglob(f"*-1-{release}*.rpm"))
-                if mode == "0755" and gpt_mode == "0644":
+                if mode == "0755" and gpt_mode == "0644" and manual_mode == "0644":
                     self.assertTrue(package.check_package(rpm)["ok"])
                 else:
                     with self.assertRaises(ValueError):

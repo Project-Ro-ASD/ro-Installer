@@ -168,8 +168,9 @@ its older protocol compatibility remain unchanged.
 
 `ManualInstallationPlan` is a pure, immutable planning model. It does not enable
 manual installation in the GUI, helper or engine, and does not consume the
-legacy `manualPartitions` maps. Authoritative filesystem/reuse checks and the
-execution/confirmation chain remain separate implementation steps.
+legacy `manualPartitions` maps. Read-only helper validation checks filesystem
+eligibility; boot-file ownership, reuse capacity and the execution/confirmation
+chain remain separate implementation steps.
 
 Its versioned input contains one normalized GPT `snapshot` and exactly two
 choices: `esp` and `root`. Existing choices specify a partition number and an
@@ -191,6 +192,31 @@ New partitions must lie entirely within current free extents, align to 1 MiB,
 remain disjoint and fit unused GPT slots. Slots are assigned deterministically
 with ESP first; the post-create inventory must fit the 32-partition probe limit.
 There is no delete, resize, root-preservation, separate-home or disk-swap plan.
+
+### Read-only manual validation (helper v2)
+
+`validate-manual-plan` accepts `disk`, `expectedDevice`, `tableFingerprint` and
+the two minimal `esp`/`root` choices. It recomputes the compact intent from fresh
+GPT data under the installer lease. No inventory, commands, partition paths or
+write authorization are accepted; v1 rejects the operation. The client requires
+an exact match to its independently computed intent.
+
+A separate isolated `ro_installer_manual.py` worker checks existing role devices
+through read-only, no-follow, exclusive descriptors. Kernel partition number,
+geometry, device identity and disk sequence must match before and after probing.
+The fixed `blkid -p -o export` child receives the verified descriptor through
+`/proc/self/fd`, inherits the installer lease, and has a two-second deadline and
+4096-byte combined output cap. Only unambiguous FAT32 ESPs and Btrfs/ext4/XFS
+root filesystems are eligible; encrypted, RAID/LVM, missing and ambiguous
+signatures fail closed. Newly planned partitions need no existing filesystem.
+Raw labels, UUIDs and probe diagnostics remain inside the worker.
+
+Both GPT copies and kernel geometry are reprobed after filesystem checks, and
+the helper rechecks the whole device before returning. The GPT reader retains
+its no-subprocess contract. Both workers are root-owned, mode 0644 package
+payloads. This read-only result is not approval to format or reuse an ESP:
+available space, boot-file collisions/ownership and first-mutation revalidation
+are still required by future manual installation admission.
 
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
 and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:

@@ -1,3 +1,4 @@
+import '../models/manual_installation_plan.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -142,6 +143,32 @@ class HelperClient {
       'expectedDevice': proposed.snapshot.device.expected,
       'tableFingerprint': proposed.snapshot.tableFingerprint,
       'selectedExtent': proposed.selectedExtent.json,
+    });
+    if (!exactFields(result, {
+          'protocolVersion',
+          'type',
+          'operation',
+          'ok',
+          'plan',
+        }) ||
+        !samePlanValue(result['plan'], proposed.intentJson)) {
+      throw const HelperException('PROTOCOL_ERROR');
+    }
+    return proposed;
+  }
+
+  Future<ManualInstallationPlan> validateManualPlan(
+    ManualInstallationPlan proposed,
+  ) async {
+    if (protocolVersion != 2) throw const HelperException('INVALID_REQUEST');
+    final result = await _call({
+      'protocolVersion': 2,
+      'operation': 'validate-manual-plan',
+      'disk': proposed.snapshot.device.path,
+      'expectedDevice': proposed.snapshot.device.expected,
+      'tableFingerprint': proposed.snapshot.tableFingerprint,
+      'esp': proposed.esp.choice.json,
+      'root': proposed.root.choice.json,
     });
     if (!exactFields(result, {
           'protocolVersion',

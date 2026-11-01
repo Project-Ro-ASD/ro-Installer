@@ -54,6 +54,7 @@ jobs:
             python3 \
             kmod \
             util-linux \
+            dosfstools \
             ripgrep
 
       - name: Install pinned Flutter SDK

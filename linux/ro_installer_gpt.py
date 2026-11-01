@@ -172,6 +172,85 @@ def compact_plan(snapshot, selected):
             'root':{'number':slots[1],'startSector':root_start,'endSector':root_end}}
 
 
+def manual_choice(value):
+    if not isinstance(value, dict):
+        raise ValueError('Invalid manual selection')
+    if value.get('source') == 'existing' and set(value) == {'source', 'number', 'formatOnInstall'}:
+        integer(value['number'], 1, 4096)
+        if type(value['formatOnInstall']) is not bool:
+            raise ValueError('Explicit format decision required')
+    elif value.get('source') == 'create' and set(value) == {'source', 'startSector', 'endSector'}:
+        start = integer(value['startSector'], 0, MAX_BYTES)
+        integer(value['endSector'], start, MAX_BYTES)
+    else:
+        raise ValueError('Unsupported manual selection')
+    return dict(value)
+
+
+def manual_plan(snapshot, choices):
+    s = normalize_snapshot(snapshot)
+    if not isinstance(choices, dict) or set(choices) != {'esp', 'root'}:
+        raise ValueError('Exactly two manual roles required')
+    choices = {role: manual_choice(choices[role]) for role in ('esp', 'root')}
+    if choices['root'].get('formatOnInstall', True) is not True:
+        raise ValueError('Root must be formatted')
+    additions = sum(c['source'] == 'create' for c in choices.values())
+    if len(s['partitions']) + additions > MAX_PARTITIONS:
+        raise ValueError('Manual inventory exceeds probe limit')
+    used = {p['number'] for p in s['partitions']}
+    gaps = []; cursor = s['firstUsableSector']
+    for p in s['partitions']:
+        if cursor < p['startSector']:
+            gaps.append((cursor, p['startSector'] - 1))
+        cursor = p['endSector'] + 1
+    if cursor <= s['lastUsableSector']:
+        gaps.append((cursor, s['lastUsableSector']))
+    result = {'schemaVersion': 1, 'layoutVersion': 1, 'mode': 'manual',
+              'device': dict(s['device']), 'tableFingerprint': s['tableFingerprint'],
+              'fileSystem': 'btrfs', 'diskSwap': False,
+              'subvolumes': {'root': '/', 'home': '/home', 'var_log': '/var/log',
+                            'var_cache': '/var/cache', 'var_tmp': '/var/tmp'}}
+    for role in ('esp', 'root'):
+        choice = choices[role]
+        type_guid = ('c12a7328-f81f-11d2-ba4b-00a0c93ec93b' if role == 'esp'
+                     else '0fc63daf-8483-4772-8e79-3d69d8477de4')
+        part = None
+        if choice['source'] == 'existing':
+            rows = [p for p in s['partitions'] if p['number'] == choice['number']]
+            if len(rows) != 1:
+                raise ValueError('Missing selected partition')
+            part = rows[0]
+            if part['typeGuid'] != type_guid or part['attributesHex'] != '0000000000000000':
+                raise ValueError('Unsupported writable type or attributes')
+            number, start, end = part['number'], part['startSector'], part['endSector']
+        else:
+            start = integer(choice['startSector'], s['firstUsableSector'], s['lastUsableSector'])
+            end = integer(choice['endSector'], start, s['lastUsableSector'])
+            alignment = 1048576 // s['logicalSectorBytes']
+            if start % alignment or (end + 1) % alignment or not any(a <= start <= end <= b for a, b in gaps):
+                raise ValueError('New role is not aligned in a current free extent')
+            number = next((n for n in range(1, s['entryCount'] + 1) if n not in used), None)
+            if number is None:
+                raise ValueError('No unused GPT slot')
+            used.add(number)
+        minimum = 512 * 1048576 if role == 'esp' else 40 * 1024**3
+        if (end - start + 1) * s['logicalSectorBytes'] < minimum:
+            raise ValueError('Manual role below safety floor')
+        binding = {'source': choice['source'], 'number': number, 'startSector': start,
+                   'endSector': end, 'typeGuid': type_guid,
+                   'fileSystem': 'fat32' if role == 'esp' else 'btrfs',
+                   'mountPoint': '/boot/efi' if role == 'esp' else '/',
+                   'formatOnInstall': choice.get('formatOnInstall', True)}
+        if part is not None:
+            binding.update(partitionGuid=part['partitionGuid'], attributesHex=part['attributesHex'])
+        result[role] = binding
+    a, b = result['esp'], result['root']
+    if a['number'] == b['number'] or a['startSector'] <= b['endSector'] and b['startSector'] <= a['endSector']:
+        raise ValueError('Manual roles overlap')
+    return result
+
+
+
 def fd_geometry(fd, expected):
     info=os.fstat(fd)
     if not stat.S_ISBLK(info.st_mode) or f'{os.major(info.st_rdev)}:{os.minor(info.st_rdev)}'!=expected['majorMinor']:
