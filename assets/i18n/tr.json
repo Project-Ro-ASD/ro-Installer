@@ -483,5 +483,8 @@
   "install_backend_report_unavailable": "Backend raporu oluşturulamadı. Kurulum sonucu değişmedi.",
   "install_backend_report_invalid": "Backend raporu doğrulanamadı. Kurulum sonucu değişmedi.",
   "install_backend_record_complete": "Korumalı oturum kayıtları tamamlandı.",
-  "install_backend_record_incomplete": "Korumalı oturum kayıtları eksik; güvenli raporu dışa aktarabilirsiniz."
+  "install_backend_record_incomplete": "Korumalı oturum kayıtları eksik; güvenli raporu dışa aktarabilirsiniz.",
+  "install_copy_measurement": "Kopyalanan veri ({phase}): {bytes} · {rate} · Kopyalama tahmini: {eta}",
+  "install_copy_main": "Ana",
+  "install_copy_efi": "EFI"
 }

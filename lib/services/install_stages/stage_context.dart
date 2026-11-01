@@ -1,4 +1,5 @@
 import '../install_observation.dart';
+import '../copy_progress.dart';
 import '../command_runner.dart';
 import '../mount_session.dart';
 import '../install_localizer.dart';
@@ -23,6 +24,7 @@ class StageContext {
     this.beforeFirstMutation,
     this.mountSession,
     this.observation,
+    this.onCopyProgress,
   });
 
   /// Kurulum yapılandırma verisi (disk, storage layout, Installer UI language hint)
@@ -55,6 +57,7 @@ class StageContext {
   final Future<void> Function()? beforeFirstMutation;
   final MountSession? mountSession;
   final InstallObservation? observation;
+  final void Function(CopyProgress)? onCopyProgress;
 
   String t(
     String key,

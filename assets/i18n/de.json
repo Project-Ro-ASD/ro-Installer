@@ -483,5 +483,8 @@
   "install_backend_report_unavailable": "Backend-Bericht ist nicht verfügbar. Das Installationsergebnis bleibt unverändert.",
   "install_backend_report_invalid": "Backend-Bericht konnte nicht geprüft werden. Das Installationsergebnis bleibt unverändert.",
   "install_backend_record_complete": "Geschützte Sitzungsprotokolle sind vollständig.",
-  "install_backend_record_incomplete": "Geschützte Sitzungsprotokolle sind unvollständig; der sichere Bericht kann exportiert werden."
+  "install_backend_record_incomplete": "Geschützte Sitzungsprotokolle sind unvollständig; der sichere Bericht kann exportiert werden.",
+  "install_copy_measurement": "Kopierte Daten ({phase}): {bytes} · {rate} · Kopierschätzung: {eta}",
+  "install_copy_main": "System",
+  "install_copy_efi": "EFI"
 }

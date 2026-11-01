@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 import 'package:ro_installer/services/command_runner.dart';
+import 'package:ro_installer/services/copy_progress.dart';
 import 'package:ro_installer/services/fake_command_runner.dart';
 import 'package:ro_installer/services/install_service.dart';
 import 'package:ro_installer/services/install_stages/file_copy_stage.dart';
@@ -36,14 +37,18 @@ FakeCommandRunner healthyRunner({List<List<String>> extra = const []}) {
   return fake;
 }
 
-StageContext context(CommandRunner runner, {List<String>? logs}) =>
-    StageContext(
-      state: {},
-      log: (message) => logs?.add(message),
-      onProgress: (_, _) {},
-      commandRunner: runner,
-      runCmd: InstallService(commandRunner: runner).runCmd,
-    );
+StageContext context(
+  CommandRunner runner, {
+  List<String>? logs,
+  void Function(CopyProgress)? onCopyProgress,
+}) => StageContext(
+  state: {},
+  log: (message) => logs?.add(message),
+  onProgress: (_, _) {},
+  commandRunner: runner,
+  onCopyProgress: onCopyProgress,
+  runCmd: InstallService(commandRunner: runner).runCmd,
+);
 
 class ThrowingRunner extends FakeCommandRunner {
   ThrowingRunner(this.commandToThrow, {this.secondaryOnly = false});
@@ -83,6 +88,31 @@ class ThrowingRunner extends FakeCommandRunner {
 }
 
 void main() {
+  test(
+    'measurement callback failure cannot turn rsync23 into success or prevent success',
+    () async {
+      for (final code in [0, 23]) {
+        final runner = healthyRunner()
+          ..addResponseForCommand(
+            'rsync',
+            stdout: '  4096 20% 1.00MB/s 0:00:12 (xfr#1, to-chk=3/10)\r',
+            exitCode: code,
+          );
+        var calls = 0;
+        final result = await const FileCopyStage().execute(
+          context(
+            runner,
+            onCopyProgress: (value) {
+              calls++;
+              throw StateError('telemetry');
+            },
+          ),
+        );
+        expect(result.success, code == 0);
+        expect(calls, 1);
+      }
+    },
+  );
   const stage = FileCopyStage();
   test(
     'exit 0 preserves existing main flags, exclusions and EFI copy',
@@ -99,7 +129,7 @@ void main() {
         '-aAX',
         '--numeric-ids',
         '--info=progress2,stats2',
-        '--human-readable',
+        '--no-human-readable',
         '--exclude=/etc/kernel/cmdline',
         '--exclude=/etc/machine-id',
         '--exclude=/var/lib/dbus/machine-id',
@@ -121,6 +151,8 @@ void main() {
         '-aA',
         '--numeric-ids',
         '--no-xattrs',
+        '--info=progress2,stats2',
+        '--no-human-readable',
         '/boot/efi/',
         '/mnt/boot/efi/',
       ]);

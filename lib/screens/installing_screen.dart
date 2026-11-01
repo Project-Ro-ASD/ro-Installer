@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../services/command_runner.dart';
 import '../services/install_log_export_service.dart';
 import '../services/helper_client.dart';
+import '../services/copy_progress.dart';
 import '../services/session_report.dart';
 import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
@@ -36,6 +37,8 @@ class _InstallingScreenState extends State<InstallingScreen>
   bool _isRebooting = false;
   bool _isExporting = false;
   SessionReport? _sessionReport;
+  CopyProgress? _copyProgress;
+  Timer? _copyExpiry;
   String _reportStatus = 'unavailable';
 
   final List<String> _statusHistory = [];
@@ -78,6 +81,7 @@ class _InstallingScreenState extends State<InstallingScreen>
 
   @override
   void dispose() {
+    _copyExpiry?.cancel();
     _slideTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
@@ -260,6 +264,10 @@ class _InstallingScreenState extends State<InstallingScreen>
         if (!mounted) return;
         final status = state.t(messageKey);
         setState(() {
+          if (messageKey != 'install_stage_file_copy') {
+            _copyProgress = null;
+            _copyExpiry?.cancel();
+          }
           _progress = progress;
           _statusText = status;
         });
@@ -274,6 +282,14 @@ class _InstallingScreenState extends State<InstallingScreen>
           identity,
           progressChanged,
           uiLanguage: state.selectedLanguage,
+          onCopyProgress: (value) {
+            if (!mounted || _isFinished) return;
+            _copyExpiry?.cancel();
+            setState(() => _copyProgress = value);
+            _copyExpiry = Timer(const Duration(seconds: 3), () {
+              if (mounted) setState(() => _copyProgress = null);
+            });
+          },
           onReport: (report, status) {
             _sessionReport = report;
             _reportStatus = status;
@@ -289,6 +305,8 @@ class _InstallingScreenState extends State<InstallingScreen>
     if (!mounted) return;
     setState(() {
       _isExporting = true;
+      _copyExpiry?.cancel();
+      _copyProgress = null;
       _terminal = success
           ? InstallationTerminalState.succeeded
           : InstallationTerminalState.failed;
@@ -383,6 +401,7 @@ class _InstallingScreenState extends State<InstallingScreen>
         final compact = constraints.maxWidth < 1180;
 
         final progressPanel = _ProgressOverviewPanel(
+          copyProgress: _copyProgress,
           progress: _progress,
           statusText: visibleStatusText,
           statusColor: statusColor,
@@ -430,6 +449,7 @@ class _InstallingScreenState extends State<InstallingScreen>
 
 class _ProgressOverviewPanel extends StatelessWidget {
   const _ProgressOverviewPanel({
+    this.copyProgress,
     required this.progress,
     required this.statusText,
     required this.statusColor,
@@ -440,6 +460,7 @@ class _ProgressOverviewPanel extends StatelessWidget {
   });
 
   final double progress;
+  final CopyProgress? copyProgress;
   final String statusText;
   final Color statusColor;
   final List<String> technicalLogs;
@@ -489,7 +510,22 @@ class _ProgressOverviewPanel extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            engineStateLabel,
+            copyProgress == null
+                ? engineStateLabel
+                : state.t('install_copy_measurement', {
+                    'phase': state.t(
+                      copyProgress!.phase == 'main'
+                          ? 'install_copy_main'
+                          : 'install_copy_efi',
+                    ),
+                    'bytes': _bytes(copyProgress!.bytesProcessed),
+                    'rate': copyProgress!.bytesPerSecond == null
+                        ? '—'
+                        : '${_bytes(copyProgress!.bytesPerSecond!)}/s',
+                    'eta': copyProgress!.etaSeconds == null
+                        ? '—'
+                        : '~${copyProgress!.etaSeconds! ~/ 60}:${(copyProgress!.etaSeconds! % 60).toString().padLeft(2, '0')}',
+                  }),
             style: theme.textTheme.bodySmall?.copyWith(
               color: context.installerVisuals.mutedForeground,
             ),
@@ -517,6 +553,13 @@ class _ProgressOverviewPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+String _bytes(int value) {
+  if (value < 1024) return '$value B';
+  if (value < 1048576) return '${(value / 1024).toStringAsFixed(1)} KiB';
+  if (value < 1073741824) return '${(value / 1048576).toStringAsFixed(1)} MiB';
+  return '${(value / 1073741824).toStringAsFixed(1)} GiB';
 }
 
 class _TerminalPanel extends StatelessWidget {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../copy_progress.dart';
 
 import 'stage_context.dart';
 import 'stage_result.dart';
@@ -54,7 +55,7 @@ class FileCopyStage {
       '-aAX',
       '--numeric-ids',
       '--info=progress2,stats2',
-      '--human-readable',
+      '--no-human-readable',
       '--exclude=/dev/*',
       '--exclude=/proc/*',
       '--exclude=/sys/*',
@@ -111,6 +112,8 @@ class FileCopyStage {
       '-aA',
       '--numeric-ids',
       '--no-xattrs',
+      '--info=progress2,stats2',
+      '--no-human-readable',
       '$dir/',
       '/mnt$dir/',
     ])) {
@@ -156,10 +159,25 @@ class FileCopyStage {
     List<String> args,
   ) async {
     final observer = ctx.observation;
-    if (observer == null) return _runChecked(ctx, 'rsync', args);
+    final parser = RsyncProgressParser(
+      operation == 'copy.main' ? 'main' : 'efi',
+    );
+    void sample(String line) {
+      if (ctx.onCopyProgress == null) return;
+      try {
+        final value = parser.add(line);
+        if (value != null) ctx.onCopyProgress!(value);
+      } catch (_) {
+        /* Measurement cannot alter rsync or cleanup. */
+      }
+    }
+
+    if (observer == null) {
+      return _runChecked(ctx, 'rsync', args, onOutput: sample);
+    }
     return observer.span(
       operation,
-      () => _runChecked(ctx, 'rsync', args),
+      () => _runChecked(ctx, 'rsync', args, onOutput: sample),
       success: (ok) => ok,
     );
   }
@@ -167,15 +185,16 @@ class FileCopyStage {
   Future<bool> _runChecked(
     StageContext ctx,
     String cmd,
-    List<String> args,
-  ) async {
+    List<String> args, {
+    void Function(String)? onOutput,
+  }) async {
     try {
       // Raw filenames/stderr can contain secrets. Report only the fixed
       // operation failure above; do not introduce another raw-output channel.
       return await ctx.runCmd(
         cmd,
         args,
-        (_) {},
+        onOutput ?? (_) {},
         isMock: ctx.isMock,
         allowedExitCodes: const [0],
       );

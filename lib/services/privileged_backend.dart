@@ -48,10 +48,13 @@ Future<int> runPrivilegedBackend(
           'disk',
           'expectedDevice',
           if (request.containsKey('uiLanguage')) 'uiLanguage',
+          if (request.containsKey('includeCopyProgress')) 'includeCopyProgress',
         }) ||
         request['protocolVersion'] is! int ||
         request['protocolVersion'] != 1 ||
         request['operation'] != 'install-full-disk' ||
+        (request.containsKey('includeCopyProgress') &&
+            request['includeCopyProgress'] != true) ||
         (request.containsKey('uiLanguage') &&
             !installerUiLanguages.contains(request['uiLanguage'])) ||
         request['expectedDevice'] is! Map<String, dynamic> ||
@@ -86,6 +89,13 @@ Future<int> runPrivilegedBackend(
         _,
       ) {}, // Never forward arbitrary command output across the trust boundary.
       isMock: isMock,
+      onCopyProgress: request['includeCopyProgress'] == true
+          ? (value) {
+              try {
+                emit(value.toJson());
+              } catch (_) {}
+            }
+          : null,
       onStage: (value) {
         stage = value;
         publish();

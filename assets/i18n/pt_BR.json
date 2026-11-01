@@ -483,5 +483,8 @@
   "install_backend_report_unavailable": "O relatório do backend está indisponível. O resultado da instalação permanece inalterado.",
   "install_backend_report_invalid": "Não foi possível verificar o relatório do backend. O resultado da instalação permanece inalterado.",
   "install_backend_record_complete": "Os registros protegidos da sessão estão completos.",
-  "install_backend_record_incomplete": "Os registros protegidos da sessão estão incompletos; você pode exportar o relatório seguro."
+  "install_backend_record_incomplete": "Os registros protegidos da sessão estão incompletos; você pode exportar o relatório seguro.",
+  "install_copy_measurement": "Dados copiados ({phase}): {bytes} · {rate} · Estimativa da cópia: {eta}",
+  "install_copy_main": "Principal",
+  "install_copy_efi": "EFI"
 }

@@ -1,4 +1,5 @@
 import 'install_observation.dart';
+import 'copy_progress.dart';
 import 'session_command_runner.dart';
 import 'dart:async';
 import 'mount_session.dart';
@@ -140,6 +141,7 @@ class InstallService {
     InstallTranslator? translate,
     Future<void> Function()? beforeFirstMutation,
     void Function(int stage)? onStage,
+    void Function(CopyProgress)? onCopyProgress,
   }) async {
     lastOutcome = null;
     InstallObservation observation;
@@ -353,6 +355,7 @@ class InstallService {
         isMock: isMock,
         mountSession: mountSession,
         observation: observation,
+        onCopyProgress: onCopyProgress,
         beforeFirstMutation: () async {
           await mountSession!.validateTarget(disk, commit: true);
           await beforeFirstMutation?.call();

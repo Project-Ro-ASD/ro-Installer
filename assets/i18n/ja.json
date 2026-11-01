@@ -483,5 +483,8 @@
   "install_backend_report_unavailable": "バックエンドレポートは利用できません。インストール結果は変わりません。",
   "install_backend_report_invalid": "バックエンドレポートを検証できませんでした。インストール結果は変わりません。",
   "install_backend_record_complete": "保護されたセッション記録は完了しています。",
-  "install_backend_record_incomplete": "保護されたセッション記録は不完全です。安全なレポートをエクスポートできます。"
+  "install_backend_record_incomplete": "保護されたセッション記録は不完全です。安全なレポートをエクスポートできます。",
+  "install_copy_measurement": "コピー済みデータ（{phase}）：{bytes} · {rate} · コピー残り目安：{eta}",
+  "install_copy_main": "システム",
+  "install_copy_efi": "EFI"
 }

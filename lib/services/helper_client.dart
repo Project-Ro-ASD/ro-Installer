@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'helper_protocol.dart';
+import 'copy_progress.dart';
 import 'session_report.dart';
 
 abstract class HelperProcess {
@@ -103,9 +104,12 @@ class HelperClient {
     void Function(double, String) onProgress, {
     void Function(SessionReport? report, String status)? onReport,
     String? uiLanguage,
+    void Function(CopyProgress)? onCopyProgress,
   }) async {
-    if (uiLanguage != null &&
-        (protocolVersion != 2 || !installerUiLanguages.contains(uiLanguage))) {
+    if ((onCopyProgress != null && protocolVersion != 2) ||
+        uiLanguage != null &&
+            (protocolVersion != 2 ||
+                !installerUiLanguages.contains(uiLanguage))) {
       throw const HelperException('INVALID_REQUEST');
     }
     final result = await _call(
@@ -113,9 +117,11 @@ class HelperClient {
         ...identity.installRequest,
         'protocolVersion': protocolVersion,
         'uiLanguage': ?uiLanguage,
+        if (onCopyProgress != null) 'includeCopyProgress': true,
       },
       onProgress: onProgress,
       onReport: onReport,
+      onCopyProgress: onCopyProgress,
     );
     if (!exactFields(result, {
           'protocolVersion',
@@ -133,12 +139,15 @@ class HelperClient {
     Map<String, dynamic> request, {
     void Function(double, String)? onProgress,
     void Function(SessionReport? report, String status)? onReport,
+    void Function(CopyProgress)? onCopyProgress,
   }) async {
     if (protocolVersion != 1 && protocolVersion != 2) {
       throw const HelperException('INVALID_REQUEST');
     }
     final installing = request['operation'] == 'install-full-disk';
     var reportSeen = false;
+    var currentStage = 0;
+    CopyProgress? lastCopy;
     SessionReport? report;
     var reportStatus = 'unavailable';
     var reportNotified = false;
@@ -170,6 +179,8 @@ class HelperClient {
     var messages = 0;
     final pending = <int>[];
     final output = StreamIterator(process.output);
+    var outputEnded = false;
+    var diagnosticsEnded = false;
     final elapsed = Stopwatch()..start();
     final diagnostics = process.diagnostics.listen(
       (chunk) {
@@ -180,6 +191,7 @@ class HelperClient {
       onError: (_) {
         failure ??= 'TRANSPORT_ERROR';
       },
+      onDone: () => diagnosticsEnded = true,
     );
     try {
       process.send('${jsonEncode(request)}\n');
@@ -234,9 +246,27 @@ class HelperClient {
                   : message['status'] == 'unavailable'
                   ? 'unavailable'
                   : 'invalid';
+            } else if (message['type'] == 'copy-progress' && installing) {
+              if (reportSeen ||
+                  protocolVersion != 2 ||
+                  onCopyProgress == null) {
+                throw const FormatException('Unexpected copy progress');
+              }
+              final copy = CopyProgress.fromJson(message);
+              if (currentStage != 5 ||
+                  (lastCopy?.phase == 'efi' && copy.phase == 'main') ||
+                  (lastCopy?.phase == copy.phase &&
+                      copy.bytesProcessed < lastCopy!.bytesProcessed)) {
+                throw const FormatException('Out-of-order copy progress');
+              }
+              lastCopy = copy;
+              try {
+                onCopyProgress(copy);
+              } catch (_) {}
             } else if (message['type'] == 'progress' && installing) {
               if (reportSeen) throw const FormatException();
               validateProgress(message, expectedVersion: protocolVersion);
+              currentStage = message['stage'];
               onProgress?.call(
                 (message['progress'] as num).toDouble(),
                 message['messageKey'] as String,
@@ -272,6 +302,7 @@ class HelperClient {
           }
         }
       }
+      outputEnded = true;
       final status = await process.exitCode.timeout(const Duration(seconds: 5));
       if (failure != null) throw HelperException(failure!);
       if (pending.isNotEmpty) throw const HelperException('PROTOCOL_ERROR');
@@ -298,8 +329,10 @@ class HelperClient {
       throw const HelperException('TRANSPORT_ERROR');
     } finally {
       notifyReport(null, 'unavailable');
-      await output.cancel();
-      await diagnostics.cancel();
+      // EOF already releases the stream subscription. Only cancel streams
+      // that are still live (including timeout/error exits).
+      if (!outputEnded) await output.cancel();
+      if (!diagnosticsEnded) await diagnostics.cancel();
     }
     // Install streams have no GUI-driven termination/cancellation: the helper
     // owns the two-hour backend watchdog and retains the lock through exit.

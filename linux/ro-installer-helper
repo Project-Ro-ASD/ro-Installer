@@ -99,6 +99,7 @@ class Request:
     expected_device: dict | None = None
     protocol_version: int = 1
     ui_language: str | None = None
+    include_copy_progress: bool = False
 
 
 def parse_request(raw, version=1):
@@ -121,6 +122,10 @@ def parse_request(raw, version=1):
         allowed.add("disk")
     if operation == "install-full-disk":
         allowed.update({"partitionMethod", "fileSystem", "confirmDestructive", "expectedDevice"})
+        if version == 2 and "includeCopyProgress" in data:
+            allowed.add("includeCopyProgress")
+            if data["includeCopyProgress"] is not True:
+                fail("INVALID_REQUEST", "Copy progress requires explicit opt-in.")
         if version == 2 and "uiLanguage" in data:
             allowed.add("uiLanguage")
             if (not isinstance(data["uiLanguage"], str)
@@ -150,7 +155,7 @@ def parse_request(raw, version=1):
         except HelperError:
             fail("INVALID_REQUEST", "Invalid expected device identity.")
         expected = dict(expected, majorMinor=number)
-    return Request(operation, disk, expected, version, data.get("uiLanguage"))
+    return Request(operation, disk, expected, version, data.get("uiLanguage"), data.get("includeCopyProgress", False))
 
 
 def read_request(fd):
@@ -565,7 +570,7 @@ def safe_session_report(value):
         return None
 
 
-def backend_message(raw, *, allow_report=False):
+def backend_message(raw, *, allow_report=False, allow_copy=False):
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object,
                            parse_constant=lambda _: fail("BACKEND_ERROR", "Invalid backend number."))
@@ -576,7 +581,15 @@ def backend_message(raw, *, allow_report=False):
             if set(value) != {'protocolVersion','type','report'}:
                 raise ValueError()
             return value
-        if kind == "progress":
+        if kind == "copy-progress" and allow_copy:
+            integer=lambda n,limit: type(n) is int and 0 <= n <= limit
+            if (set(value) != {'protocolVersion','type','phase','bytesProcessed','bytesPerSecond','etaSeconds'}
+                    or value['phase'] not in ('main','efi')
+                    or not integer(value['bytesProcessed'],9007199254740991)
+                    or value['bytesPerSecond'] is not None and not integer(value['bytesPerSecond'],9007199254740991)
+                    or value['etaSeconds'] is not None and (not integer(value['etaSeconds'],86400) or not value['bytesPerSecond'])):
+                raise ValueError()
+        elif kind == "progress":
             if (set(value) != {"protocolVersion", "type", "stage", "progress", "messageKey"}
                     or type(value["stage"]) is not int or not 0 <= value["stage"] <= 9
                     or type(value["progress"]) not in (int, float) or not 0 <= value["progress"] <= 1
@@ -623,6 +636,9 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
     report_status = "unavailable"
     report = None
     final = None
+    copy_phase = None
+    copy_bytes = 0
+    current_stage = 0
     failure = None
     streams = [process.stdout, process.stderr]
     pending = bytearray()
@@ -633,6 +649,8 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
                    "disk": confirmed.path, "expectedDevice": request.expected_device}
         if request.ui_language is not None:
             payload["uiLanguage"] = request.ui_language
+        if request.include_copy_progress:
+            payload['includeCopyProgress'] = True
         process.stdin.write(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
         process.stdin.flush()
         while streams:
@@ -664,7 +682,7 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
                         messages += 1
                         if len(raw) > MAX_MESSAGE_BYTES or messages > 16384 or report_seen:
                             fail("BACKEND_ERROR", "Invalid backend stream framing.")
-                        message = backend_message(raw, allow_report=reports)
+                        message = backend_message(raw, allow_report=reports, allow_copy=request.include_copy_progress)
                         if message['type'] == 'session-report':
                             report_seen = True
                             report = safe_session_report(message['report'])
@@ -687,6 +705,14 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
                         elif message["type"] == "result":
                             final = message
                         else:
+                            if message['type'] == 'progress':
+                                current_stage = message['stage']
+                            elif message['type'] == 'copy-progress':
+                                if (not authorized or current_stage != 5
+                                        or copy_phase == 'efi' and message['phase'] == 'main'
+                                        or copy_phase == message['phase'] and message['bytesProcessed'] < copy_bytes):
+                                    fail('BACKEND_ERROR','Out-of-order copy progress.')
+                                copy_phase,copy_bytes = message['phase'],message['bytesProcessed']
                             emit(message)
                     if len(pending) > MAX_MESSAGE_BYTES:
                         fail("BACKEND_ERROR", "Backend message exceeded the safety limit.")
