@@ -96,6 +96,8 @@ run_check "P0-04 helper v1/v2 compatibility and framing" \
   python3 -B test/scripts/helper_v2_test.py
 run_check "read-only GPT worker and helper admission" \
   python3 -B test/scripts/gpt_probe_test.py
+run_check "manual installation admission and read-only filesystem checks" \
+  python3 -B test/scripts/manual_install_test.py
 run_check "bounded EFI source budget and descriptor identity" \
   python3 -B test/scripts/esp_budget_test.py
 run_check "manual partition ownership and variable-slot preservation" \

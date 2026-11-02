@@ -962,305 +962,48 @@ Label: none  uuid: 11111111-2222-3333-4444-555555555555
     }
   });
 
-  group('PartitioningStage — manual', () {
-    test('boş plan verilirse hata döner', () async {
-      final fake = FakeCommandRunner();
-      final state = {
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'manual',
-        'manualPartitions': <Map<String, dynamic>>[],
-      };
-      final ctx = makeContext(state, fake);
-
-      final stage = const PartitioningStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, false);
-      expect(result.message, contains('boş'));
-    });
-
-    test('plan varsa fiziksel uygulama akışı başlar', () async {
-      final fake = FakeCommandRunner();
-      fake.addResponse(
-        'lsblk',
-        ['-rn', '-o', 'NAME,TYPE', '/dev/sda'],
-        stdout: '''
-sda disk
-sda1 part
-sda2 part
-''',
-      );
-      fake.addResponse(
-        'lsblk',
-        ['-rn', '-o', 'NAME,TYPE', '/dev/sda'],
-        stdout: '''
-sda disk
-sda1 part
-sda3 part
-''',
-      );
-      fake.addResponse('blockdev', ['--getss', '/dev/sda'], stdout: '512');
-      fake.addResponse(
-        'lsblk',
-        ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,START,FSTYPE', '/dev/sda'],
-        stdout: '''
-{
-  "blockdevices": [
-    {
-      "name": "sda",
-      "path": "/dev/sda",
-      "type": "disk",
-      "size": 68719476736,
-      "children": [
-        {
-          "name": "sda1",
-          "path": "/dev/sda1",
-          "type": "part",
-          "size": 536870912,
-          "start": 2048,
-          "fstype": "vfat"
-        }
-      ]
-    }
-  ]
-}''',
-      );
-
-      final manualParts = [
-        {
-          'name': '/dev/sda1',
-          'type': 'fat32',
-          'mount': '/boot/efi',
-          'isFreeSpace': false,
-          'isPlanned': false,
-          'sizeBytes': 500000000,
-        },
+  group('PartitioningStage — unapproved manual state', () {
+    for (final flags in [
+      <Map<String, dynamic>>[],
+      [
         {
           'name': 'New Partition',
           'type': 'btrfs',
           'mount': '/',
-          'isFreeSpace': false,
           'isPlanned': true,
-          'sizeBytes': 50000000000,
         },
+      ],
+      [
         {
           'name': 'Free Space',
-          'type': 'unallocated',
-          'mount': 'unmounted',
           'isFreeSpace': true,
-          'isPlanned': true,
-          'sizeBytes': 85899345920,
           'deletedPartitionNames': ['/dev/sda2'],
         },
-      ];
-      final state = {
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'manual',
-        'manualPartitions': manualParts,
-      };
-      final ctx = makeContext(state, fake, isMock: true);
-
-      final stage = const PartitioningStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, true);
-      expect(fake.wasCalledWith('sgdisk', ['-d', '2', '/dev/sda']), true);
-      expect(
-        fake.wasCalledWith('sgdisk', [
-          '-n',
-          '0:1050624:98706873',
-          '-t',
-          '0:8300',
-          '/dev/sda',
-        ]),
-        true,
-      );
-      expect(fake.wasCommandCalled('partprobe'), true);
-    });
-
-    test(
-      'plandan eksilen mevcut bolum acik delete marker yoksa silinmez',
-      () async {
-        final fake = FakeCommandRunner();
-        fake.addResponse(
-          'lsblk',
-          ['-rn', '-o', 'NAME,TYPE', '/dev/sda'],
-          stdout: '''
-sda disk
-sda1 part
-sda2 part
-''',
-        );
-
-        final state = {
-          'selectedDisk': '/dev/sda',
-          'partitionMethod': 'manual',
-          'manualPartitions': [
-            {
-              'name': '/dev/sda1',
-              'type': 'fat32',
-              'mount': '/boot/efi',
-              'isFreeSpace': false,
-              'isPlanned': false,
-              'sizeBytes': 500000000,
-            },
-          ],
-        };
-        final ctx = makeContext(state, fake, isMock: true);
-
-        final result = await const PartitioningStage().execute(ctx);
-
-        expect(result.success, false);
-        expect(result.message, contains('açık silme planı olmadan'));
-        expect(fake.wasCalledWith('sgdisk', ['-d', '2', '/dev/sda']), false);
-      },
-    );
-
-    test('resize planli mevcut BTRFS bolumu gercekten kucultur', () async {
-      final fake = FakeCommandRunner();
-      fake.addResponse(
-        'lsblk',
-        ['-rn', '-o', 'NAME,TYPE', '/dev/sda'],
-        stdout: '''
-sda disk
-sda1 part
-sda2 part
-''',
-      );
-      fake.addResponse('blockdev', ['--getss', '/dev/sda'], stdout: '512');
-      fake.addResponse(
-        'lsblk',
-        ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,START,FSTYPE', '/dev/sda'],
-        stdout: '''
-{
-  "blockdevices": [
-    {
-      "name": "sda",
-      "path": "/dev/sda",
-      "type": "disk",
-      "size": 128849018880,
-      "children": [
-        {
-          "name": "sda1",
-          "path": "/dev/sda1",
-          "type": "part",
-          "size": 536870912,
-          "start": 2048,
-          "fstype": "vfat"
-        },
-        {
-          "name": "sda2",
-          "path": "/dev/sda2",
-          "type": "part",
-          "size": 85899345920,
-          "start": 1050624,
-          "fstype": "btrfs"
-        }
-      ]
-    }
-  ]
-}''',
-      );
-
-      final resizedBytes = 60 * 1024 * 1024 * 1024;
-      final manualParts = [
-        {
-          'name': '/dev/sda1',
-          'type': 'fat32',
-          'mount': '/boot/efi',
-          'isFreeSpace': false,
-          'isPlanned': false,
-          'sizeBytes': 536870912,
-        },
+      ],
+      [
         {
           'name': '/dev/sda2',
           'type': 'btrfs',
-          'mount': 'unmounted',
-          'isFreeSpace': false,
-          'isPlanned': true,
+          'mount': '/',
           'isResized': true,
-          'formatOnInstall': false,
-          'sizeBytes': resizedBytes,
-          'endSector': 126879743,
+          'sizeBytes': 40 * 1024 * 1024 * 1024,
         },
-      ];
-      final state = {
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'manual',
-        'manualPartitions': manualParts,
-      };
-      fake.addResponse(
-        'btrfs',
-        [
-          'filesystem',
-          'show',
-          '--raw',
-          '/tmp/ro-installer-btrfs-shrink-_dev_sda2',
-        ],
-        stdout: '''
-Label: none  uuid: 11111111-2222-3333-4444-555555555555
-        Total devices 1 FS bytes used 40000000000
-        devid    1 size 85899345920 used 50000000000 path /dev/sda2
-''',
+      ],
+    ]) {
+      test(
+        'manual legacy state cannot authorize disk commands: $flags',
+        () async {
+          final runner = FakeCommandRunner();
+          final ctx = makeContext({
+            'selectedDisk': '/dev/sda',
+            'partitionMethod': 'manual',
+            'fileSystem': 'btrfs',
+            'manualPartitions': flags,
+          }, runner);
+          expect((await const PartitioningStage().execute(ctx)).success, false);
+          expect(runner.commandLog, isEmpty);
+        },
       );
-      fake.addResponse('btrfs', [
-        'inspect-internal',
-        'min-dev-size',
-        '/tmp/ro-installer-btrfs-shrink-_dev_sda2',
-      ], stdout: '50000000000 bytes');
-      final ctx = makeContext(state, fake);
-
-      final stage = const PartitioningStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, true);
-      expect(
-        fake.wasCalledWith('mount', [
-          '-o',
-          'subvolid=5',
-          '/dev/sda2',
-          '/tmp/ro-installer-btrfs-shrink-_dev_sda2',
-        ]),
-        true,
-      );
-      expect(
-        fake.wasCalledWith('btrfs', [
-          'filesystem',
-          'resize',
-          '64357400576',
-          '/tmp/ro-installer-btrfs-shrink-_dev_sda2',
-        ]),
-        true,
-      );
-      expect(
-        fake.wasCalledWith('parted', [
-          '-s',
-          '/dev/sda',
-          'unit',
-          's',
-          'resizepart',
-          '2',
-          '126879743s',
-        ]),
-        true,
-      );
-    });
-  });
-
-  group('PartitioningStage — bilinmeyen yöntem', () {
-    test('bilinmeyen yöntemde hata döner', () async {
-      final fake = FakeCommandRunner();
-      final state = {
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'unknown_method',
-      };
-      final ctx = makeContext(state, fake);
-
-      final stage = const PartitioningStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, false);
-      expect(result.message, contains('Bilinmeyen'));
-    });
+    }
   });
 }

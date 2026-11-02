@@ -22,6 +22,30 @@ class FormattingStage {
     final selectedDisk = ctx.state['selectedDisk'] as String;
     final partitionMethod = ctx.state['partitionMethod'] as String;
     final String rootFs = ctx.state['fileSystem'] ?? 'btrfs';
+    if (partitionMethod == 'manual') {
+      if (!ctx.usesStandardStorage || !await ctx.verifyManualLayoutNow()) {
+        return StageResult.fail('Manuel hedefler değişti.');
+      }
+      if (ctx.approvedManualPlan!.plan.esp.formatOnInstall) {
+        if (!await ctx.runCmd(
+          'mkfs.fat',
+          ['-F32', ctx.espPartition],
+          ctx.log,
+          isMock: ctx.isMock,
+        )) {
+          return StageResult.fail('Seçilen EFI biçimlendirilemedi.');
+        }
+      }
+      if (!await ctx.verifyManualLayoutNow()) {
+        return StageResult.fail('Root öncesi manuel hedef değişti.');
+      }
+      if (!await _formatPartition(ctx, ctx.rootPartition, 'btrfs')) {
+        return StageResult.fail('Seçilen root biçimlendirilemedi.');
+      }
+      return StageResult.ok(
+        'Yalnız onaylanan manuel hedefler biçimlendirildi.',
+      );
+    }
     if (partitionMethod == 'free_space') {
       if (!ctx.usesStandardStorage || !await ctx.verifyFreeSpaceLayoutNow()) {
         return StageResult.fail('Doğrulanmış yeni bölüm kimlikleri gerekli.');
@@ -74,8 +98,6 @@ class FormattingStage {
         return _formatFullDisk(ctx, selectedDisk, rootFs, storagePlan);
       case 'alongside':
         return _formatAlongside(ctx, selectedDisk, rootFs, storagePlan);
-      case 'manual':
-        return _formatManualPartitions(ctx, storagePlan);
       default:
         return StageResult.fail(
           'Bilinmeyen bölümleme yöntemi: $partitionMethod',
@@ -270,65 +292,6 @@ class FormattingStage {
     );
   }
 
-  /// Manuel modda kullanıcının planladığı bölümleri biçimlendirir
-  Future<StageResult> _formatManualPartitions(
-    StageContext ctx,
-    StoragePlan storagePlan,
-  ) async {
-    final manualPartitions = ctx.state['manualPartitions'] as List<dynamic>;
-
-    ctx.progress(
-      0.1,
-      'stage_progress_format_manual_plan',
-      'Kullanıcının disk yapılandırma planı uygulanıyor...',
-    );
-
-    for (var p in manualPartitions) {
-      if (p['isFreeSpace'] == true || p['isPlanned'] != true) continue;
-
-      final partName = (p['name'] ?? '').toString();
-      if (partName.isEmpty) {
-        continue;
-      }
-
-      final formatOnInstall = p.containsKey('formatOnInstall')
-          ? p['formatOnInstall'] == true
-          : true;
-      if (!formatOnInstall) {
-        ctx.log('Mevcut bölüm korunuyor, biçimlendirme atlandı: $partName');
-        continue;
-      }
-
-      final fsType = _normalizeFsType((p['type'] ?? '').toString());
-
-      final planFailure = _requirePlannedDestructiveOperation(
-        storagePlan,
-        type: 'format_partition',
-        target: partName,
-        details: {
-          'mount': (p['mount'] ?? 'unmounted').toString(),
-          'fsType': (p['type'] ?? '').toString(),
-          'formatOnInstall': true,
-        },
-      );
-      if (planFailure != null) return planFailure;
-      if (!await _formatPartition(ctx, partName, fsType)) {
-        return StageResult.fail(
-          'Bölüm biçimlendirilemedi: $partName ($fsType)',
-        );
-      }
-    }
-
-    ctx.log('[AŞAMA 3] Manuel bölüm biçimlendirme tamamlandı.');
-    return StageResult.ok(
-      ctx.t(
-        'stage_result_format_manual_done',
-        'Manuel bölüm biçimlendirme tamamlandı.',
-      ),
-    );
-  }
-
-  /// Belirtilen bölümü verilen dosya sistemiyle biçimlendirir
   Future<bool> _formatPartition(
     StageContext ctx,
     String partition,
@@ -356,21 +319,6 @@ class FormattingStage {
       default:
         ctx.log('HATA: Desteklenmeyen dosya sistemi türü: $fsType');
         return false;
-    }
-  }
-
-  String _normalizeFsType(String fsType) {
-    switch (fsType) {
-      case 'vfat':
-        return 'fat32';
-      case 'swap':
-        return 'linux-swap';
-      case 'btrfs':
-      case 'fat32':
-      case 'linux-swap':
-        return fsType;
-      default:
-        return 'unsupported';
     }
   }
 

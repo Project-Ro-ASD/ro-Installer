@@ -1,3 +1,4 @@
+import 'manual_partitioning.dart';
 import 'dart:convert';
 
 import '../../models/storage_plan.dart';
@@ -6,7 +7,6 @@ import '../../models/free_space_installation_plan.dart';
 import '../../models/gpt_disk_snapshot.dart';
 import '../../models/standard_storage_layout.dart';
 import '../storage_topology_guard.dart';
-import '../../utils/manual_partition_sizing.dart';
 import 'stage_context.dart';
 import 'stage_result.dart';
 
@@ -26,7 +26,6 @@ class PartitioningStage {
   static const int _minSourcePartitionBytes = 40 * 1024 * 1024 * 1024;
   static const int _sourcePartitionExtraMarginBytes = 10 * 1024 * 1024 * 1024;
   static const int _filesystemSafetyMarginBytes = 64 * 1024 * 1024;
-  static const int _gptFirstUsableSector = 34;
 
   Future<bool> _hasCommand(StageContext ctx, String command) async {
     if (ctx.isMock) {
@@ -46,6 +45,7 @@ class PartitioningStage {
     }
     final selectedDisk = ctx.state['selectedDisk'] as String;
     final partitionMethod = ctx.state['partitionMethod'] as String;
+    if (partitionMethod == 'manual') return partitionApprovedManual(ctx);
 
     ctx.log('════════════════════════════════════════════');
     ctx.log(
@@ -82,8 +82,6 @@ class PartitioningStage {
         return _fullDiskPartition(ctx, selectedDisk, storagePlan);
       case 'alongside':
         return _alongsidePartition(ctx, selectedDisk, storagePlan);
-      case 'manual':
-        return _manualPartition(ctx, selectedDisk, storagePlan);
       default:
         return StageResult.fail(
           'Bilinmeyen bölümleme yöntemi: $partitionMethod',
@@ -697,343 +695,6 @@ class PartitioningStage {
     }
   }
 
-  /// UI üzerinden oluşturulmuş 'manualPartitions' listesini fiziksel diske uygular
-  Future<StageResult> _manualPartition(
-    StageContext ctx,
-    String selectedDisk,
-    StoragePlan storagePlan,
-  ) async {
-    if (!await _hasCommand(ctx, 'sgdisk')) {
-      return StageResult.fail(
-        'sgdisk bulunamadi. Manuel bolumleme icin gdisk/sgdisk paketi kurulu olmali.',
-      );
-    }
-
-    final manualPartitions =
-        ctx.state['manualPartitions'] as List<dynamic>? ?? [];
-    if (manualPartitions.isEmpty) {
-      return StageResult.fail('Manuel bölümleme planı boş.');
-    }
-
-    ctx.progress(
-      0.05,
-      'stage_progress_partition_apply_manual_plan',
-      'Manuel plan diske uygulanıyor...',
-    );
-
-    final manualBackupPath = _gptBackupPath(ctx, 'manual', selectedDisk);
-    if (!await ctx.runCmd(
-      'sgdisk',
-      ['--backup=$manualBackupPath', selectedDisk],
-      ctx.log,
-      isMock: ctx.isMock,
-    )) {
-      return StageResult.fail(
-        'GPT yedegi alinamadi. Manuel bolumleme guvenli sekilde baslatilamiyor.',
-      );
-    }
-
-    // 1. Mevcut bölümleri tespit et (Silinenleri bulmak için)
-    final currentPartsResult = await ctx.commandRunner.run('lsblk', [
-      '-rn',
-      '-o',
-      'NAME,TYPE',
-      selectedDisk,
-    ]);
-    final List<String> originalPartNames = [];
-    if (currentPartsResult.exitCode == 0) {
-      for (var line in currentPartsResult.stdout.trim().split('\n')) {
-        final parts = line.split(RegExp(r'\s+'));
-        if (parts.length >= 2 && parts[1] == 'part') {
-          originalPartNames.add('/dev/${parts[0]}');
-        }
-      }
-    }
-
-    // 2. Açık silme planı olan bölümleri bul ve SİL.
-    final plannedNames = manualPartitions
-        .where((p) => p is Map<String, dynamic> && p['isFreeSpace'] != true)
-        .map((p) => (p['name'] ?? '').toString())
-        .where((name) => name.isNotEmpty)
-        .toSet();
-    final deletedNames = <String>{};
-    for (final rawPart in manualPartitions) {
-      if (rawPart is! Map<String, dynamic>) continue;
-      final rawDeleted = rawPart['deletedPartitionNames'];
-      if (rawDeleted is Iterable) {
-        deletedNames.addAll(
-          rawDeleted
-              .map((entry) => entry.toString())
-              .where((entry) => entry.isNotEmpty),
-        );
-      }
-    }
-    for (var currentName in originalPartNames) {
-      if (!plannedNames.contains(currentName)) {
-        if (!deletedNames.contains(currentName)) {
-          return StageResult.fail(
-            'Mevcut bölüm açık silme planı olmadan plandan eksildi: $currentName',
-          );
-        }
-        // Bölüm numarasını bul (sda1 -> 1, nvme0n1p2 -> 2)
-        final match = RegExp(r'(\d+)$').firstMatch(currentName);
-        if (match != null) {
-          final partNum = match.group(1)!;
-          ctx.log('Bölüm siliniyor: $currentName (No: $partNum)');
-          final deletePlanFailure = _requirePlannedDestructiveOperation(
-            storagePlan,
-            type: 'delete_partition',
-            target: currentName,
-          );
-          if (deletePlanFailure != null) return deletePlanFailure;
-          if (!await ctx.runCmd(
-            'sgdisk',
-            ['-d', partNum, selectedDisk],
-            ctx.log,
-            isMock: ctx.isMock,
-          )) {
-            return StageResult.fail('Bölüm silinemedi: $currentName');
-          }
-        }
-      }
-    }
-
-    // Disk tablosunu güncelle
-    final deleteRescanFailure = await _rescanDisk(ctx, selectedDisk);
-    if (deleteRescanFailure != null) return deleteRescanFailure;
-
-    final sectorSize = await _readSectorSize(ctx, selectedDisk);
-    final alignSectors = (kManualPartitionAlignmentBytes / sectorSize).ceil();
-
-    // 3. Mevcut bölümlerde planlanmış küçültmeleri uygula
-    for (final rawPart in manualPartitions) {
-      final p = rawPart as Map<String, dynamic>;
-      if (p['isFreeSpace'] == true || p['isResized'] != true) {
-        continue;
-      }
-
-      final name = (p['name'] ?? '').toString();
-      if (name.isEmpty || name.startsWith('New Partition')) {
-        return StageResult.fail('Manuel resize icin gecersiz bolum adi: $name');
-      }
-
-      final diskLayout = await _readDiskLayout(ctx, selectedDisk, sectorSize);
-      if (diskLayout == null) {
-        return StageResult.fail(
-          'Disk yerlesimi okunamadi. Manuel resize durduruldu.',
-        );
-      }
-
-      final candidate = diskLayout.partitions
-          .cast<Map<String, dynamic>?>()
-          .firstWhere(
-            (part) => part != null && part['path'] == name,
-            orElse: () => null,
-          );
-      if (candidate == null) {
-        return StageResult.fail('Resize bolumu bulunamadi: $name');
-      }
-
-      final newSizeBytes = p['sizeBytes'] as int;
-      final candidateStart = candidate['startSector'] as int;
-      final candidateSizeBytes = candidate['sizeBytes'] as int;
-      final candidateNumber = candidate['number'] as int;
-      final newEndSector =
-          p['endSector'] as int? ??
-          candidateStart + _bytesToSectors(newSizeBytes, sectorSize) - 1;
-
-      if (newSizeBytes >= candidateSizeBytes) {
-        continue;
-      }
-      if (candidateNumber <= 0) {
-        return StageResult.fail('Resize bolum numarasi cozumlenemedi: $name');
-      }
-
-      ctx.progress(
-        0.08,
-        'stage_progress_partition_shrink_source',
-        'Kaynak bolum guvenli sekilde kucultuluyor...',
-      );
-      final resizeResult = await _shrinkAlongsideCandidate(
-        ctx,
-        storagePlan: storagePlan,
-        planOperationType: 'resize_partition',
-        selectedDisk: selectedDisk,
-        partitionPath: name,
-        partitionFs: _normalizeManualFsType((p['type'] ?? '').toString()),
-        partitionNumber: candidateNumber,
-        currentSizeBytes: candidateSizeBytes,
-        newPartitionSizeBytes: newSizeBytes,
-        newPartitionEndSector: newEndSector,
-        backupPath: manualBackupPath,
-      );
-      if (!resizeResult.success) {
-        return resizeResult;
-      }
-    }
-
-    // 4. YENİ Bölümleri oluştur
-    // Oluşturulmuş bölümleri takip etmek için (aktifler listesi)
-    final activePartNames = List<String>.from(originalPartNames)
-      ..removeWhere((n) => !plannedNames.contains(n));
-
-    for (var i = 0; i < manualPartitions.length; i++) {
-      final p = manualPartitions[i] as Map<String, dynamic>;
-      if (p['isFreeSpace'] == true) continue;
-
-      final name = p['name'] as String;
-
-      // UI tarafından 'New Partition' olarak isimlendirilmiş yeni bölümler
-      if (name.startsWith('New Partition') || name == 'New Partition') {
-        final requestedSizeBytes = p['sizeBytes'] as int;
-        final requestedSizeMB = requestedSizeBytes ~/ (1024 * 1024);
-        final createPlanDetails = _manualPartitionPlanDetails(p);
-
-        final diskLayout = await _readDiskLayout(ctx, selectedDisk, sectorSize);
-        if (diskLayout == null) {
-          return StageResult.fail(
-            'Disk yerlesimi okunamadi. Manuel bolum olusturma durduruldu.',
-          );
-        }
-
-        final requestedSectors = _bytesToSectors(
-          requestedSizeBytes,
-          sectorSize,
-        );
-        final plannedStartSector = p['startSector'] as int?;
-        final plannedEndSector =
-            p['endSector'] as int? ??
-            (plannedStartSector == null
-                ? null
-                : plannedStartSector + requestedSectors - 1);
-        final largestFreeRange =
-            plannedStartSector != null && plannedEndSector != null
-            ? _findAlignedFreeRangeForPlannedPartition(
-                diskLayout,
-                plannedStartSector: plannedStartSector,
-                plannedEndSector: plannedEndSector,
-                alignSectors: alignSectors,
-              )
-            : _findLargestAlignedFreeRange(diskLayout, alignSectors);
-        if (largestFreeRange == null) {
-          return StageResult.fail('Yeni bolum icin uygun bos alan bulunamadi.');
-        }
-
-        final availableSectors =
-            largestFreeRange.endSector - largestFreeRange.startSector + 1;
-        final availableBytes = _sectorsToBytes(availableSectors, sectorSize);
-        final plannedSizeBytes = fitManualPartitionBytesToAvailable(
-          requestedSizeBytes,
-          availableBytes,
-        );
-        if (plannedSizeBytes == null) {
-          final maxSizeMB = availableBytes ~/ (1024 * 1024);
-          return StageResult.fail(
-            'Bolum olusturulamadi: istenen ${requestedSizeMB}MB, kullanilabilir en fazla ${maxSizeMB}MB.',
-          );
-        }
-
-        final plannedSectors = _bytesToSectors(plannedSizeBytes, sectorSize);
-        final startSector = largestFreeRange.startSector;
-        final endSector = startSector + plannedSectors - 1;
-        final actualSizeBytes = _sectorsToBytes(plannedSectors, sectorSize);
-        final actualSizeMB = actualSizeBytes ~/ (1024 * 1024);
-
-        final fsType = _normalizeManualFsType((p['type'] ?? '').toString());
-        String typeCode = '8300'; // Linux filesystem
-        if (fsType == 'fat32') typeCode = 'ef00'; // EFI
-        if (fsType == 'linux-swap') typeCode = '8200'; // SWAP
-
-        if (actualSizeBytes != requestedSizeBytes) {
-          ctx.log(
-            'UYARI: Istenen ${requestedSizeMB}MB alan, GPT/hizalama guvenlik payi nedeniyle ${actualSizeMB}MB olarak ayarlandi.',
-          );
-          p['sizeBytes'] = actualSizeBytes;
-        }
-
-        ctx.progress(
-          0.1 + (i * 0.05),
-          'stage_progress_partition_create_manual',
-          'Yeni bölüm oluşturuluyor: ${actualSizeMB}MB ($fsType)',
-          {'size': actualSizeMB.toString(), 'fs': fsType},
-        );
-        ctx.log(
-          'Manuel bos alan secimi → $startSector-${largestFreeRange.endSector}, olusturulacak bolum → $startSector-$endSector',
-        );
-
-        // Bölümü diske yaz
-        final createPlanFailure = _requirePlannedDestructiveOperation(
-          storagePlan,
-          type: 'create_partition',
-          target: name,
-          details: createPlanDetails,
-        );
-        if (createPlanFailure != null) return createPlanFailure;
-        if (!await ctx.runCmd(
-          'sgdisk',
-          [
-            '-n',
-            '0:$startSector:$endSector',
-            '-t',
-            '0:$typeCode',
-            selectedDisk,
-          ],
-          ctx.log,
-          isMock: ctx.isMock,
-        )) {
-          return StageResult.fail('Bolum olusturulamadi: ${actualSizeMB}MB');
-        }
-
-        final createRescanFailure = await _rescanDisk(ctx, selectedDisk);
-        if (createRescanFailure != null) return createRescanFailure;
-
-        // Yeni oluşan bölümün gerçek (/dev/sdX) adını bul
-        final newPartsResult = await ctx.commandRunner.run('lsblk', [
-          '-rn',
-          '-o',
-          'NAME,TYPE',
-          selectedDisk,
-        ]);
-        String? newPartName;
-        if (newPartsResult.exitCode == 0) {
-          for (var line in newPartsResult.stdout.trim().split('\n')) {
-            final parts = line.split(RegExp(r'\s+'));
-            if (parts.length >= 2 && parts[1] == 'part') {
-              final cand = '/dev/${parts[0]}';
-              // Eğer mevcut aktif listede yoksa, bu bizim az önce oluşturduğumuz bölümdür
-              if (!activePartNames.contains(cand)) {
-                newPartName = cand;
-                activePartNames.add(cand);
-                break;
-              }
-            }
-          }
-        }
-
-        if (newPartName != null) {
-          ctx.log('Atanan bölüm adı: $newPartName');
-          p['name'] =
-              newPartName; // Format aşamasının kullanabilmesi için ismi referanstan güncelliyoruz
-        } else {
-          if (!ctx.isMock) {
-            return StageResult.fail(
-              'Yeni bölüm oluşturuldu ancak adı tespit edilemedi.',
-            );
-          }
-          p['name'] = '${selectedDisk}X'; // Mock testi için sahte isim
-        }
-      }
-    }
-
-    ctx.log('[AŞAMA 2] Manuel bölümleme fiziksel diske uygulandı.');
-    return StageResult.ok(
-      ctx.t(
-        'stage_result_partition_manual_done',
-        'Manuel bölümleme planı diske uygulandı.',
-      ),
-    );
-  }
-
   Future<int> _readSectorSize(StageContext ctx, String disk) async {
     final result = await ctx.commandRunner.run('blockdev', ['--getss', disk]);
     if (result.exitCode != 0) {
@@ -1131,71 +792,6 @@ class PartitioningStage {
       return null;
     }
     return _FreeRange(startSector: startSector, endSector: endSector);
-  }
-
-  _FreeRange? _findLargestAlignedFreeRange(
-    _DiskLayout layout,
-    int alignSectors,
-  ) {
-    _FreeRange? bestRange;
-    var bestSectors = 0;
-    var cursor = _gptFirstUsableSector;
-
-    void considerRange(int rawStart, int rawEnd) {
-      final alignedStart = _alignUp(rawStart, alignSectors);
-      if (alignedStart > rawEnd) {
-        return;
-      }
-
-      final rangeSectors = rawEnd - alignedStart + 1;
-      if (rangeSectors > bestSectors) {
-        bestSectors = rangeSectors;
-        bestRange = _FreeRange(startSector: alignedStart, endSector: rawEnd);
-      }
-    }
-
-    for (final partition in layout.partitions) {
-      final partitionStart = partition['startSector'] as int;
-      final partitionEnd = partition['endSector'] as int;
-      considerRange(cursor, partitionStart - 1);
-      cursor = partitionEnd + 1;
-    }
-
-    considerRange(cursor, layout.lastUsableSector);
-    return bestRange;
-  }
-
-  _FreeRange? _findAlignedFreeRangeForPlannedPartition(
-    _DiskLayout layout, {
-    required int plannedStartSector,
-    required int plannedEndSector,
-    required int alignSectors,
-  }) {
-    var cursor = _gptFirstUsableSector;
-
-    _FreeRange? matchRange(int rawStart, int rawEnd) {
-      final alignedStart = _alignUp(rawStart, alignSectors);
-      final start = _alignUp(
-        plannedStartSector < alignedStart ? alignedStart : plannedStartSector,
-        alignSectors,
-      );
-      if (start > rawEnd || plannedEndSector > rawEnd) {
-        return null;
-      }
-      return _FreeRange(startSector: start, endSector: rawEnd);
-    }
-
-    for (final partition in layout.partitions) {
-      final partitionStart = partition['startSector'] as int;
-      final partitionEnd = partition['endSector'] as int;
-      final range = matchRange(cursor, partitionStart - 1);
-      if (range != null) {
-        return range;
-      }
-      cursor = partitionEnd + 1;
-    }
-
-    return matchRange(cursor, layout.lastUsableSector);
   }
 
   _AlongsideLayout? _planAlongsideLayout({
@@ -1534,35 +1130,6 @@ class PartitioningStage {
       return 'Ro-ASD yalnızca Btrfs root dosya sistemini destekler: $rootFs';
     }
 
-    final partitionMethod = (state['partitionMethod'] ?? '').toString();
-    if (partitionMethod != 'manual') {
-      return null;
-    }
-
-    final manualPartitions =
-        state['manualPartitions'] as List<dynamic>? ?? const [];
-    for (final rawPart in manualPartitions) {
-      if (rawPart is! Map<String, dynamic> || rawPart['isFreeSpace'] == true) {
-        continue;
-      }
-      final mount = (rawPart['mount'] ?? 'unmounted').toString();
-      final type = (rawPart['type'] ?? '').toString();
-      if (mount == '/boot/efi') {
-        if (type != 'fat32' && type != 'vfat') {
-          return 'Manuel kurulumda EFI bölümü FAT32 olmalıdır: ${rawPart['name']}';
-        }
-        continue;
-      }
-      if (mount == '[SWAP]') {
-        if (type != 'linux-swap' && type != 'swap') {
-          return 'Manuel kurulumda swap bölümü linux-swap olmalıdır: ${rawPart['name']}';
-        }
-        continue;
-      }
-      if (mount != 'unmounted' && type != 'btrfs') {
-        return 'Manuel kurulumda mount edilen bölümler Btrfs olmalıdır: ${rawPart['name']} ($type)';
-      }
-    }
     return null;
   }
 
@@ -1606,21 +1173,6 @@ class PartitioningStage {
     return StageResult.fail(
       'Storage plan dışı destructive disk işlemi engellendi: $type -> $target',
     );
-  }
-
-  Map<String, dynamic> _manualPartitionPlanDetails(Map<String, dynamic> part) {
-    final formatOnInstall = part.containsKey('formatOnInstall')
-        ? part['formatOnInstall'] == true
-        : part['isPlanned'] == true;
-    return {
-      'mount': (part['mount'] ?? 'unmounted').toString(),
-      'fsType': (part['type'] ?? '').toString(),
-      'formatOnInstall': formatOnInstall,
-      'isResized': part['isResized'] == true,
-      if (part['sizeBytes'] != null) 'sizeBytes': part['sizeBytes'],
-      if (part['startSector'] != null) 'startSector': part['startSector'],
-      if (part['endSector'] != null) 'endSector': part['endSector'],
-    };
   }
 
   String _alongsideBlockerMessage(String code) {
@@ -1834,13 +1386,6 @@ class PartitioningStage {
     return (bytes + sectorSize - 1) ~/ sectorSize;
   }
 
-  int _sectorsToBytes(int sectors, int sectorSize) {
-    if (sectors <= 0 || sectorSize <= 0) {
-      return 0;
-    }
-    return sectors * sectorSize;
-  }
-
   int _alignUp(int value, int alignment) {
     if (alignment <= 1) {
       return value;
@@ -1892,18 +1437,6 @@ class PartitioningStage {
     return null;
   }
 
-  String _normalizeManualFsType(String fsType) {
-    switch (fsType) {
-      case 'vfat':
-        return 'fat32';
-      case 'swap':
-        return 'linux-swap';
-      default:
-        return fsType;
-    }
-  }
-
-  /// RAM'e göre dinamik SWAP boyutu hesaplar (MB cinsinden)
   int _calculateSwapMB(int ramMB) {
     final normalizedRamMB = ramMB > 0 ? ramMB : 4096;
     final hibernateMarginMB = normalizedRamMB <= 8192 ? 1024 : 2048;

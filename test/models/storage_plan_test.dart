@@ -35,74 +35,31 @@ void main() {
       );
     });
 
-    test(
-      'manual plan acik delete operasyonu ve Btrfs mount sozlesmesi uretir',
-      () {
-        final plan = StoragePlanBuilder.fromState({
-          'selectedDisk': '/dev/sda',
-          'partitionMethod': 'manual',
-          'fileSystem': 'btrfs',
-          'manualPartitions': [
-            {
-              'name': 'Free Space',
-              'type': 'unallocated',
-              'mount': 'unmounted',
-              'isFreeSpace': true,
-              'deletedPartitionNames': ['/dev/sda2'],
-            },
-            {
-              'name': '/dev/sda3',
-              'type': 'btrfs',
-              'mount': '/',
-              'isPlanned': true,
-              'formatOnInstall': true,
-            },
-          ],
-        });
-
-        expect(plan.operations.first.type, 'delete_partition');
-        expect(plan.operations.first.target, '/dev/sda2');
-        expect(plan.operations.first.destructive, true);
-        expect(plan.operations.last.type, 'format_partition');
-        expect(plan.operations.last.details['fsType'], 'btrfs');
-        expect(
-          plan.hasOperation(
-            'format_partition',
-            '/dev/sda3',
-            destructiveOnly: true,
-            details: {'fsType': 'btrfs', 'mount': '/'},
-          ),
-          true,
-        );
+    for (final patch in [
+      {
+        'deletedPartitionNames': ['/dev/sda2'],
+        'isFreeSpace': true,
       },
-    );
-
-    test('manual resize ayri destructive operasyon olarak isaretlenir', () {
-      final plan = StoragePlanBuilder.fromState({
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'manual',
-        'fileSystem': 'btrfs',
-        'manualPartitions': [
-          {
-            'name': '/dev/sda2',
-            'type': 'btrfs',
-            'mount': 'unmounted',
-            'isResized': true,
-            'sizeBytes': 64 * 1024 * 1024 * 1024,
-          },
-        ],
-      });
-
-      expect(plan.operations.single.type, 'resize_partition');
-      expect(plan.operations.single.destructive, true);
-      expect(
-        plan.hasOperation(
-          'resize_partition',
-          '/dev/sda2',
-          destructiveOnly: true,
-        ),
-        true,
+      {
+        'name': '/dev/sda2',
+        'isResized': true,
+        'sizeBytes': 64 * 1024 * 1024 * 1024,
+      },
+    ]) {
+      test(
+        'legacy manual maps cannot produce destructive operations: $patch',
+        () {
+          expect(
+            () => StoragePlanBuilder.fromState({
+              'selectedDisk': '/dev/sda',
+              'partitionMethod': 'manual',
+              'fileSystem': 'btrfs',
+              'manualPartitions': [patch],
+            }),
+            throwsA(isA<StoragePlanException>()),
+          );
+        },
       );
-    });
+    }
   });
 }

@@ -183,6 +183,44 @@ class HelperClient {
     return proposed;
   }
 
+  Future<void> installManualPlan(
+    ManualInstallationPlan plan,
+    void Function(double, String) onProgress, {
+    String? uiLanguage,
+    void Function(CopyProgress)? onCopyProgress,
+    void Function(SessionReport?, String)? onReport,
+  }) async {
+    if (protocolVersion != 2 ||
+        uiLanguage != null && !installerUiLanguages.contains(uiLanguage)) {
+      throw const HelperException('INVALID_REQUEST');
+    }
+    final result = await _call(
+      {
+        'protocolVersion': 2,
+        'operation': 'install-manual',
+        'disk': plan.snapshot.device.path,
+        'expectedDevice': plan.snapshot.device.expected,
+        'confirmDestructive': true,
+        'confirmedPlan': plan.intentJson,
+        'uiLanguage': ?uiLanguage,
+        if (onCopyProgress != null) 'includeCopyProgress': true,
+      },
+      onProgress: onProgress,
+      onCopyProgress: onCopyProgress,
+      onReport: onReport,
+    );
+    if (!exactFields(result, {
+          'protocolVersion',
+          'type',
+          'operation',
+          'ok',
+          'installed',
+        }) ||
+        result['installed'] != true) {
+      throw const HelperException('PROTOCOL_ERROR');
+    }
+  }
+
   Future<void> installWithReport(
     DeviceIdentity identity,
     void Function(double, String) onProgress, {
@@ -275,6 +313,7 @@ class HelperClient {
     final installing = const [
       'install-full-disk',
       'install-free-space',
+      'install-manual',
     ].contains(request['operation']);
     var reportSeen = false;
     var currentStage = 0;

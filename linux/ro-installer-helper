@@ -43,7 +43,7 @@ STAGE_KEYS = (
 )
 OPERATIONS = frozenset({"audit-live", "probe-disk", "install-full-disk"})
 V2_READ_OPERATIONS = frozenset({'probe-free-space','validate-free-space-plan','validate-manual-plan'})
-V2_INSTALL_OPERATIONS = frozenset({'install-free-space'})
+V2_INSTALL_OPERATIONS = frozenset({'install-free-space','install-manual'})
 GPT_ARGV = ('/usr/bin/python3','-I','/usr/libexec/ro_installer_gpt.py','--probe')
 MANUAL_ARGV = ('/usr/bin/python3','-I','/usr/libexec/ro_installer_manual.py')
 GPT_TIMEOUT = 10
@@ -153,7 +153,7 @@ def parse_request(raw, version=1):
         allowed.update({'expectedDevice','tableFingerprint','selectedExtent'})
     if operation == 'validate-manual-plan':
         allowed.update({'expectedDevice','tableFingerprint','esp','root'})
-    if operation in ('install-full-disk','install-free-space'):
+    if operation in ('install-full-disk','install-free-space','install-manual'):
         allowed.update({"confirmDestructive", "expectedDevice"})
         if operation=='install-full-disk':allowed.update({'partitionMethod','fileSystem'})
         else:allowed.add('confirmedPlan')
@@ -181,7 +181,7 @@ def parse_request(raw, version=1):
         if (data["partitionMethod"] != "full" or data["fileSystem"] != "btrfs"
                 or data["confirmDestructive"] is not True):
             fail("INVALID_REQUEST", "Only explicitly confirmed full/Btrfs installation is supported.")
-    if operation in ('install-full-disk','install-free-space','validate-free-space-plan','validate-manual-plan'):
+    if operation in ('install-full-disk','install-free-space','install-manual','validate-free-space-plan','validate-manual-plan'):
         expected = data["expectedDevice"]
         if (not isinstance(expected, dict)
                 or set(expected) != {"majorMinor", "size", "diskSequence"}
@@ -194,6 +194,7 @@ def parse_request(raw, version=1):
             fail("INVALID_REQUEST", "Invalid expected device identity.")
         expected = dict(expected, majorMinor=number)
     plan = None
+    choices = None
     if operation=='install-free-space':
         if data['confirmDestructive'] is not True:fail('INVALID_REQUEST','Explicit free-space confirmation required.')
         plan=data['confirmedPlan']
@@ -212,11 +213,16 @@ def parse_request(raw, version=1):
             extent=plan['selectedExtent']
             if type(extent['startSector']) is not int or type(extent['endSector']) is not int or not 0<=extent['startSector']<=extent['endSector']<=9007199254740991:raise ValueError()
         except (ValueError,TypeError,KeyError):fail('INVALID_REQUEST','Invalid compact free-space plan.')
+    elif operation=='install-manual':
+        if data['confirmDestructive'] is not True:fail('INVALID_REQUEST','Explicit manual confirmation required.')
+        plan=data['confirmedPlan']
+        try:choices=gpt_module().manual_intent_choices(plan,{'path':disk,**expected})
+        except (ValueError,TypeError,KeyError):fail('INVALID_REQUEST','Invalid compact manual plan.')
     elif 'confirmedPlan' in data:
         plan=full_disk_plan({'path':disk,**expected})
         if not same_plan_value(data['confirmedPlan'],plan):
             fail('INVALID_REQUEST','Confirmed plan does not match the fixed full-disk contract.')
-    fingerprint=extent=choices=None
+    fingerprint=extent=None
     if operation == 'validate-free-space-plan':
         fingerprint=data['tableFingerprint'];extent=data['selectedExtent']
         if (not isinstance(fingerprint,str) or not re.fullmatch('[0-9a-f]{64}',fingerprint)
@@ -333,12 +339,15 @@ class System:
     def mounts(self):
         return Path("/proc/self/mountinfo").read_text()
 
-    def gpt_snapshot(self, device, preserve_slots=None, manual_roles=None, layout_slots=None):
+    def gpt_snapshot(self, device, preserve_slots=None, manual_roles=None, layout_slots=None, admit_manual=False):
         gpt_args=(*GPT_ARGV,device.path,json.dumps(device.public(),separators=(',',':')))
         if preserve_slots is not None:gpt_args+=('--preserve-slots',json.dumps(preserve_slots))
         if manual_roles is not None:
             if preserve_slots is not None:fail('INVALID_REQUEST','Conflicting probe modes.')
             gpt_args=(*MANUAL_ARGV,device.path,json.dumps(device.public(),separators=(',',':')),json.dumps(manual_roles,separators=(',',':')))
+        if admit_manual:
+            if manual_roles is None:fail('INVALID_REQUEST','Manual roles required.')
+            gpt_args=(*MANUAL_ARGV,'--admit',device.path,json.dumps(device.public(),separators=(',',':')),json.dumps(manual_roles,separators=(',',':')))
         if layout_slots is not None:
             if preserve_slots is not None or manual_roles is not None:fail('INVALID_REQUEST','Conflicting probe modes.')
             gpt_args=(*MANUAL_ARGV,'--layout',device.path,json.dumps(device.public(),separators=(',',':')),json.dumps(layout_slots,separators=(',',':')))
@@ -348,7 +357,7 @@ class System:
         process=subprocess.Popen(gpt_args,
             stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=child_env,close_fds=True,
             pass_fds=() if getattr(self,'lease_fd',None) is None else (self.lease_fd,))
-        output=bytearray();total=0;streams=[process.stdout,process.stderr];deadline=time.monotonic()+GPT_TIMEOUT
+        output=bytearray();total=0;streams=[process.stdout,process.stderr];deadline=time.monotonic()+(30 if admit_manual else GPT_TIMEOUT)
         try:
             while streams:
                 remaining=deadline-time.monotonic()
@@ -838,7 +847,17 @@ def run_backend(request, confirmed, system, emit, *, lock_fd=None):
                             # read-only checks, immediately before the first wipefs.
                             if validate_device(system, request.disk) != confirmed:
                                 fail("DEVICE_CHANGED", "Device changed immediately before mutation.")
-                            if request.operation=='install-free-space':
+                            if request.operation=='install-manual':
+                                approval=request.confirmed_plan;intent=approval['intent']
+                                verified=system.gpt_snapshot(confirmed,manual_roles=request.manual_choices,admit_manual=True)
+                                slots=[intent[role]['number'] for role in ('esp','root') if intent[role]['source']=='create']
+                                fresh=system.gpt_snapshot(confirmed,layout_slots=slots)
+                                if (not same_plan_value(verified['snapshot'],request.source_snapshot)
+                                        or not same_plan_value(verified['plan'],intent)
+                                        or not same_plan_value(fresh['snapshot'],request.source_snapshot)
+                                        or fresh['preservationFingerprint']!=approval['preservationFingerprint']):
+                                    fail('DEVICE_CHANGED','Manual plan changed before mutation.')
+                            elif request.operation=='install-free-space':
                                 approval=request.confirmed_plan;intent=approval['intent'];slots=[intent['esp']['number'],intent['root']['number']]
                                 fresh=system.gpt_snapshot(confirmed,preserve_slots=slots)
                                 if (fresh['snapshot']['tableFingerprint']!=request.source_snapshot['tableFingerprint']
@@ -931,6 +950,31 @@ def handle(request, system, emit=lambda _: None):
                 try:return {'plan':gpt_module().compact_plan(snapshot,request.selected_extent)}
                 except (ValueError,TypeError,KeyError):fail('INVALID_REQUEST','Selected free-space plan is no longer valid.')
             finally:del system.lease_fd
+    if request.operation=='install-manual':
+        if request.protocol_version!=2:fail('INVALID_REQUEST','Manual installation requires helper v2.')
+        if not system.platform_supported():fail('UNSUPPORTED_PLATFORM','Installation requires x86_64 UEFI.')
+        with InstallerLock() as lock:
+            system.lease_fd=lock.fd
+            try:
+                before=validate_device(system,request.disk)
+                if before.public()!={'path':request.disk,**request.expected_device}:fail('DEVICE_CHANGED','Selected device changed.')
+                verified=system.gpt_snapshot(before,manual_roles=request.manual_choices,admit_manual=True)
+                initial=verified['snapshot'];intent=verified['plan']
+                if not same_plan_value(intent,request.confirmed_plan):fail('DEVICE_CHANGED','Manual plan changed since confirmation.')
+                slots=[intent[role]['number'] for role in ('esp','root') if intent[role]['source']=='create']
+                proof=system.gpt_snapshot(before,layout_slots=slots)
+                if not same_plan_value(initial,proof['snapshot']):fail('DEVICE_CHANGED','GPT changed during manual admission.')
+                used={p['partitionGuid'] for p in initial['partitions']}|{initial['diskGuid']};ids={}
+                for role in ('esp','root'):
+                    if intent[role]['source']=='create':
+                        value=str(uuid.uuid4())
+                        if value in used:fail('SYSTEM_ERROR','Partition identity allocation failed.')
+                        ids[role]=value;used.add(value)
+                approval={'intent':intent,'allocationGuids':ids,'preservationFingerprint':proof['preservationFingerprint']}
+                effective=dataclasses.replace(request,confirmed_plan=approval,source_snapshot=initial)
+                if validate_device(system,request.disk)!=before:fail('DEVICE_CHANGED','Device changed during manual admission.')
+                return run_backend(effective,before,system,emit,lock_fd=lock.fd)
+            finally:del system.lease_fd
     if request.operation=='install-free-space':
         if request.protocol_version!=2:fail('INVALID_REQUEST','Free-space installation requires helper v2.')
         if not system.platform_supported():fail('UNSUPPORTED_PLATFORM','Free-space installation requires x86_64 UEFI.')
@@ -1009,7 +1053,7 @@ def main():
             nonlocal output_available
             if output_available:
                 output_available=emit_message(message,version,sys.stdout.fileno())
-        if request.operation in ('install-full-disk','install-free-space'):
+        if request.operation in ('install-full-disk','install-free-space','install-manual'):
             for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                 signal.signal(sig, signal.SIG_IGN)
         result = handle(request, System(), emit)

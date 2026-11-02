@@ -166,11 +166,10 @@ its older protocol compatibility remain unchanged.
 
 ### Manual storage planning
 
-`ManualInstallationPlan` is a pure, immutable planning model. It does not enable
-manual installation in the GUI, helper or engine, and does not consume the
-legacy `manualPartitions` maps. Read-only helper validation checks filesystem
-eligibility; boot-file ownership, reuse capacity and the execution/confirmation
-chain remain separate implementation steps.
+`ManualInstallationPlan` is a pure, immutable planning model used by helper v2
+and the installation engine. The GUI editor is not yet connected. Legacy
+`manualPartitions` maps cannot authorize execution. Read-only validation and
+installation admission are separate operations.
 
 Its versioned input contains one normalized GPT `snapshot` and exactly two
 choices: `esp` and `root`. Existing choices specify a partition number and an
@@ -214,13 +213,13 @@ Raw labels, UUIDs and probe diagnostics remain inside the worker.
 Both GPT copies and kernel geometry are reprobed after filesystem checks, and
 the helper rechecks the whole device before returning. The GPT reader retains
 its no-subprocess contract. Both workers are root-owned, mode 0644 package
-payloads. This read-only result is not approval to format or reuse an ESP:
-available space, boot-file collisions/ownership and first-mutation revalidation
-are still required by future manual installation admission.
+payloads. This read-only result is not approval to format or reuse an ESP. Installation
+admission additionally checks filesystem safety, available space, boot-file
+collisions and ownership, then revalidates at the first-mutation gate.
 
 ### Private manual target ownership
 
-`ApprovedManualPlan` defines the future helper-to-backend ownership envelope:
+`ApprovedManualPlan` defines the private helper-to-backend ownership envelope:
 source snapshot, exact compact intent, helper-allocated GUIDs for new roles only,
 and a preservation fingerprint. Existing role identities cannot be reassigned;
 new GUIDs must be distinct from every existing partition and the disk GUID.
@@ -234,10 +233,9 @@ existing entry remains protected, including a root selected for filesystem
 formatting. The original GPT worker's public two-slot flag remains unchanged.
 
 `CreatedManualLayout` resolves root/ESP paths only after exact post-create
-inventory, range, type, GUID, attributes and preservation checks. Neither the
-model nor this read-only primitive enables manual installation. Shared-ESP
-write isolation, capacity/collision checks, execution gates and GUI confirmation
-still need integration; public helper requests cannot supply private ownership.
+inventory, range, type, GUID, attributes and preservation checks. Public helper
+requests cannot supply this private ownership envelope; installation admission
+constructs it from fresh observations under the installer lease.
 
 ### Protected reusable ESP mounts
 
@@ -263,10 +261,34 @@ Partial failures remain tracked for cleanup. Wrong subtrees, unexpected flag or
 namespace changes, foreign mounts and busy resources cannot produce success.
 The original full/free-space mount allowlists remain separate.
 
-These are internal building blocks, not manual installation admission. Copying
-only the owned boot namespace, kernel-plugin write controls, mutation gates and
-GUI integration are still required. Installed-system update policy is separate
-from this installation-time mount protection.
+The manual executor copies only the new `EFI/fedora` subtree when reusing an
+ESP. Kernel installation uses `--boot-path=/boot`, with boot entries inside the
+new root filesystem; protected mounts are checked before boot work and final
+validation. Writes outside the owned ESP subtree fail. Installed-system update
+policy is separate from this installation-time mount protection.
+
+### Manual installation (helper v2)
+
+`install-manual` requires `disk`, `expectedDevice`, `confirmDestructive: true`
+and the exact compact `confirmedPlan`. Optional language and copy-progress
+fields follow the existing v2 install contract. Helper v1 rejects this operation.
+The helper independently recomputes the intent, checks reusable FAT32 with
+read-only `fsck.fat -n` and an unambiguous UUID lookup, and rejects existing
+Btrfs roots with unsupported multi-device or seeding superblocks. New GUIDs
+are allocated only for new roles. The private ready/continue exchange binds
+the complete approval to fresh device, filesystem and GPT observations.
+
+Execution appends only the zero, one or two approved new partitions. Existing
+GPT entries are preserved and each format requires a fresh ownership check.
+Root is always formatted as Btrfs; an existing ESP is formatted only when
+explicitly selected, otherwise its new boot namespace uses protected mounts.
+Source EFI capacity is checked before mutation, including for formatted ESPs.
+There is no delete, shrink, filesystem-preserving root reuse, separate-home or
+disk-swap execution path. A failed append is reported without attempting a
+whole-table rollback. The legacy manual-map executor has been removed.
+
+The public API and backend are connected; the typed GUI editor and its
+confirmation flow remain a separate integration step.
 
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
 and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:
@@ -282,9 +304,10 @@ and no dedicated disk swap partition. The standard rollback-aware Btrfs layout i
 `/boot` belongs inside the root Btrfs snapshot scope. The ESP remains FAT32 and
 is mounted at `/boot/efi`.
 
-The first implementation milestone is full-disk erase only. Manual partitioning,
-alongside install, replace-existing-OS, reinstall-preserve-home, and LUKS are
-future milestones. Manual installation may later support ext4/XFS; these
+Full-disk erase and create-only free-space installation have GUI flows. Manual
+installation has a helper v2 backend and awaits GUI integration. Alongside
+shrink, replace-existing-OS, reinstall-preserve-home and LUKS remain future
+milestones. Manual installation may later support ext4/XFS targets; these
 filesystems are valid for reliable normal Ro-ASD operation, but Ro-ASD must not
 promise Btrfs snapshot/rollback/recovery features on them.
 
@@ -603,10 +626,11 @@ filesystems remain unknown; a portal used as loop/overlay backing is rejected.
 The Fedora 44 KIWI fixture covers ISO → loop → erofs → overlay, ZRAM and portal,
 plus protected media, missing/ambiguous data and identity-change regressions.
 
-Only x86_64 UEFI, Btrfs, GPT, a 512 MiB ESP and the existing Btrfs
-subvolume layout are authorized, through full erase or the verified free-space
-contract above. No disk swap is created. Helper disk preparation
-does not globally swapoff/unmount; ZRAM remains system policy. Alongside, manual,
+Only x86_64 UEFI, Btrfs, GPT and the existing Btrfs subvolume layout are
+authorized through full erase, verified free-space or typed manual contracts
+above. Automatic layouts use a 512 MiB ESP; manual ESPs require at least that
+size. No disk swap is created. Helper disk preparation does not globally
+swapoff/unmount; ZRAM remains system policy. Alongside shrink,
 ext4/XFS, LUKS/LVM/RAID/multipath and arbitrary swap are not authorized.
 
 PR-A2 does not support cancellation after entering installation. Navigation and

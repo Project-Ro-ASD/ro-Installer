@@ -14,6 +14,11 @@ class FileCopyStage {
   const FileCopyStage();
 
   Future<StageResult> execute(StageContext ctx) async {
+    if (ctx.reusesEsp &&
+        (!ctx.approvedStateMatches ||
+            !await ctx.mountSession!.verifyProtectedEsp())) {
+      return StageResult.fail('Korumalı EFI mount doğrulanamadı.');
+    }
     ctx.log('════════════════════════════════════════════');
     ctx.log('[AŞAMA 5] Dosya Kopyalama Başlatılıyor');
     ctx.log('════════════════════════════════════════════');
@@ -98,7 +103,7 @@ class FileCopyStage {
 
     // Only the prepared EFI directory is a secondary source. In particular,
     // arbitrary FAT/NTFS/removable mounts must never be imported here.
-    const dir = '/boot/efi';
+    final dir = ctx.reusesEsp ? '/boot/efi/EFI/fedora' : '/boot/efi';
     ctx.progress(
       -1.0,
       'stage_progress_copy_extra_dir',
@@ -107,6 +112,9 @@ class FileCopyStage {
     );
     if (!await _runChecked(ctx, 'mkdir', ['-p', '/mnt$dir'])) {
       return StageResult.fail('EFI hedef dizini oluşturulamadı: $dir');
+    }
+    if (ctx.reusesEsp && !await ctx.mountSession!.verifyProtectedEsp()) {
+      return StageResult.fail('EFI kopyasından önce koruma değişti.');
     }
     if (!await _copy(ctx, 'copy.efi', [
       '-aA',

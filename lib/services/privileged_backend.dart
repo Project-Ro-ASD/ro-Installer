@@ -1,3 +1,4 @@
+import '../models/approved_manual_plan.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -45,6 +46,7 @@ Future<int> runPrivilegedBackend(
     }
     final request = decodeProtocolObject(lines.current);
     final isFree = request['operation'] == 'install-free-space';
+    final isManual = request['operation'] == 'install-manual';
     if (!exactFields(request, {
           'protocolVersion',
           'operation',
@@ -53,13 +55,14 @@ Future<int> runPrivilegedBackend(
           if (request.containsKey('uiLanguage')) 'uiLanguage',
           if (request.containsKey('includeCopyProgress')) 'includeCopyProgress',
           if (request.containsKey('confirmedPlan')) 'confirmedPlan',
-          if (isFree) 'sourceSnapshot',
+          if (isFree || isManual) 'sourceSnapshot',
         }) ||
         request['protocolVersion'] is! int ||
         request['protocolVersion'] != 1 ||
         !const [
           'install-full-disk',
           'install-free-space',
+          'install-manual',
         ].contains(request['operation']) ||
         (request.containsKey('includeCopyProgress') &&
             request['includeCopyProgress'] != true) ||
@@ -87,7 +90,17 @@ Future<int> runPrivilegedBackend(
         !samePlanValue(freePlan.plan.snapshot.device.json, identity.json)) {
       throw const FormatException('Free-space identity mismatch');
     }
-    final plan = !isFree && request.containsKey('confirmedPlan')
+    final manualPlan = isManual
+        ? ApprovedManualPlan.fromJson({
+            'snapshot': request['sourceSnapshot'],
+            'approval': request['confirmedPlan'],
+          })
+        : null;
+    if (manualPlan != null &&
+        !samePlanValue(manualPlan.plan.snapshot.device.json, identity.json)) {
+      throw const FormatException('Manual identity mismatch');
+    }
+    final plan = !isFree && !isManual && request.containsKey('confirmedPlan')
         ? ApprovedFullDiskPlan.fromJson(request['confirmedPlan'])
         : null;
     if (plan != null && !samePlanValue(plan.device.json, identity.json)) {
@@ -97,11 +110,16 @@ Future<int> runPrivilegedBackend(
     // chroots, boot arguments or environment overrides cross this boundary.
     final state = <String, dynamic>{
       'selectedDisk': identity.path,
-      'partitionMethod': isFree ? 'free_space' : 'full',
+      'partitionMethod': isManual
+          ? 'manual'
+          : isFree
+          ? 'free_space'
+          : 'full',
       'fileSystem': 'btrfs',
       'selectedLanguage': request['uiLanguage'] ?? 'en',
       if (plan != null) '_approvedFullDiskPlan': plan.json,
       if (freePlan != null) '_approvedFreeSpacePlan': freePlan.json,
+      if (manualPlan != null) '_approvedManualPlan': manualPlan.json,
     };
     publish();
     heartbeat = Timer.periodic(const Duration(seconds: 5), (_) => publish());
@@ -129,18 +147,20 @@ Future<int> runPrivilegedBackend(
       beforeFirstMutation: () async {
         if (authorized) throw const FormatException('Repeated mutation gate');
         if (!matchesApprovedPlan(state, expected: plan) ||
-            (freePlan != null && !freePlan.matchesState(state))) {
+            (freePlan != null && !freePlan.matchesState(state)) ||
+            (manualPlan != null && !manualPlan.matchesState(state))) {
           throw const FormatException('Stale plan');
         }
         final authorizationLines = lines!;
         emit({
           'protocolVersion': 1,
           'type': 'ready',
-          if (plan != null || freePlan != null)
-            'confirmedPlan': freePlan?.approval ?? plan!.json,
+          if (plan != null || freePlan != null || manualPlan != null)
+            'confirmedPlan':
+                manualPlan?.approval ?? freePlan?.approval ?? plan!.json,
         });
         if (!await authorizationLines.moveNext().timeout(
-          const Duration(seconds: 15),
+          Duration(seconds: isManual ? 45 : 15),
         )) {
           throw const FormatException('Missing authorization');
         }
@@ -149,12 +169,15 @@ Future<int> runPrivilegedBackend(
               'protocolVersion',
               'type',
               'device',
-              if (plan != null || freePlan != null) 'confirmedPlan',
+              if (plan != null || freePlan != null || manualPlan != null)
+                'confirmedPlan',
             }) ||
             (plan != null &&
                 !samePlanValue(gate['confirmedPlan'], plan.json)) ||
             (freePlan != null &&
                 !samePlanValue(gate['confirmedPlan'], freePlan.approval)) ||
+            (manualPlan != null &&
+                !samePlanValue(gate['confirmedPlan'], manualPlan.approval)) ||
             gate['protocolVersion'] is! int ||
             gate['protocolVersion'] != 1 ||
             gate['type'] != 'continue' ||

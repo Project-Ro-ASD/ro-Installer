@@ -65,7 +65,58 @@ def partition_descriptor(snapshot, binding, fd=None):
     return path, number
 
 
-def probe_filesystem(snapshot, binding):
+def run_probe(kind, fd, inherited, uuid=None):
+    node = '/proc/self/fd/' + str(fd)
+    commands = {
+        'signature': ('/usr/sbin/blkid', '-p', '-o', 'export', '--', node),
+        'fat-check': ('/usr/sbin/fsck.fat', '-n', node),
+        'btrfs-super': ('/usr/bin/btrfs', 'inspect-internal', 'dump-super', '--super', '0', node),
+    }
+    if kind == 'uuid':
+        if not isinstance(uuid, str) or not re.fullmatch(r'[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}', uuid):
+            raise ValueError('Missing reusable ESP UUID')
+        argv = ('/usr/sbin/blkid', '-c', '/dev/null', '-t', 'UUID=' + uuid, '-o', 'device')
+    else:
+        argv = commands[kind]
+    limit = 4096 if kind == 'signature' else 65536
+    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        close_fds=True, pass_fds=inherited, env={'PATH': '/usr/sbin:/usr/bin', 'LC_ALL': 'C'})
+    output = bytearray(); total = 0; streams = [process.stdout, process.stderr]
+    deadline = time.monotonic() + (FILESYSTEM_TIMEOUT if kind == 'signature' else 8)
+    try:
+        while streams:
+            remaining = deadline - time.monotonic()
+            ready = select.select(streams, [], [], max(0, remaining))[0]
+            if remaining <= 0 or not ready:
+                raise ValueError('Filesystem probe deadline')
+            for stream in ready:
+                chunk = os.read(stream.fileno(), 4096); total += len(chunk)
+                if total > limit:
+                    raise ValueError('Filesystem probe output limit')
+                if not chunk: streams.remove(stream)
+                elif stream is process.stdout: output.extend(chunk)
+        if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
+            raise ValueError('Filesystem probe failed or found inconsistency')
+        return bytes(output)
+    finally:
+        if process.poll() is None: process.kill()
+        process.wait(); process.stdout.close(); process.stderr.close()
+
+
+def require_single_btrfs(raw):
+    text = raw.decode('utf-8', errors='strict')
+    def field(name):
+        rows = re.findall(r'^' + re.escape(name) + r'[ \t]+([^\n]+)$', text, re.M)
+        if len(rows) != 1:
+            raise ValueError('Ambiguous Btrfs superblock field')
+        return rows[0].strip()
+    if (field('num_devices') != '1' or field('bytenr') != '65536' or field('flags') != '0x1'
+            or not re.fullmatch(r'0x[0-9a-fA-F]+ \[match\]', field('csum'))
+            or field('magic') != '_BHRfS_M [match]'):
+        raise ValueError('Only a healthy non-seeding single-device Btrfs root is supported')
+
+
+def probe_filesystem(snapshot, binding, *, admission=False):
     path, number = partition_descriptor(snapshot, binding)
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_EXCL)
     try:
@@ -76,29 +127,18 @@ def probe_filesystem(snapshot, binding):
         if lease is not None:
             lease_fd = int(lease); os.fstat(lease_fd)
             inherited += (lease_fd,)
-        process = subprocess.Popen(('/usr/sbin/blkid', '-p', '-o', 'export', '--', '/proc/self/fd/' + str(fd)),
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            close_fds=True, pass_fds=inherited, env={'PATH': '/usr/sbin:/usr/bin', 'LC_ALL': 'C'})
-        output = bytearray(); total = 0; streams = [process.stdout, process.stderr]
-        deadline = time.monotonic() + FILESYSTEM_TIMEOUT
-        try:
-            while streams:
-                remaining = deadline - time.monotonic()
-                ready = select.select(streams, [], [], max(0, remaining))[0]
-                if remaining <= 0 or not ready:
-                    raise ValueError('Filesystem probe deadline')
-                for stream in ready:
-                    chunk = os.read(stream.fileno(), 4096); total += len(chunk)
-                    if total > 4096:
-                        raise ValueError('Filesystem probe output limit')
-                    if not chunk: streams.remove(stream)
-                    elif stream is process.stdout: output.extend(chunk)
-            if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
-                raise ValueError('Ambiguous or missing filesystem signature')
-        finally:
-            if process.poll() is None: process.kill()
-            process.wait(); process.stdout.close(); process.stderr.close()
-        result = parse_blkid(output)
+        raw = run_probe('signature', fd, inherited)
+        result = parse_blkid(raw)
+        if admission and binding['mountPoint'] == '/boot/efi' and not binding['formatOnInstall']:
+            run_probe('fat-check', fd, inherited)
+            rows = [line.partition('=')[2] for line in raw.decode().splitlines() if line.startswith('UUID=')]
+            if len(rows) != 1:
+                raise ValueError('Reusable ESP UUID unavailable')
+            devices = run_probe('uuid', fd, inherited, rows[0]).decode().splitlines()
+            if devices != [path]:
+                raise ValueError('Reusable ESP UUID is ambiguous')
+        if admission and result == 'btrfs':
+            require_single_btrfs(run_probe('btrfs-super', fd, inherited))
         if partition_descriptor(snapshot, binding, fd) != (path, number):
             raise ValueError('Partition changed during probe')
         return result
@@ -106,13 +146,13 @@ def probe_filesystem(snapshot, binding):
         os.close(fd)
 
 
-def probe_manual(path, expected, choices):
+def probe_manual(path, expected, choices, *, admission=False):
     snapshot = probe_device(path, expected)
     plan = manual_plan(snapshot, choices)
     for role in ('esp', 'root'):
         binding = plan[role]
         if binding['source'] == 'existing':
-            fs = probe_filesystem(snapshot, binding)
+            fs = probe_filesystem(snapshot, binding, admission=True) if admission else probe_filesystem(snapshot, binding)
             allowed = {'vfat'} if role == 'esp' else {'btrfs', 'ext4', 'xfs'}
             if fs not in allowed:
                 raise ValueError('Filesystem does not match selected role')
@@ -212,7 +252,13 @@ def main():
     try:
         if os.geteuid() != 0:
             return 2
-        if len(sys.argv)==4 and sys.argv[1]=='--efi-budget':
+        if len(sys.argv)==3 and sys.argv[1]=='--new-efi-budget':
+            available=gpt.integer(int(sys.argv[2]),512*1048576,gpt.MAX_BYTES)
+            budget=source_budget(EFI_SOURCE,1048576)
+            result={**budget,'availableBytes':available,'sufficient':available>=budget['requiredBytes']}
+        elif len(sys.argv)==5 and sys.argv[1]=='--admit':
+            result=probe_manual(sys.argv[2],json.loads(sys.argv[3]),json.loads(sys.argv[4]),admission=True)
+        elif len(sys.argv)==4 and sys.argv[1]=='--efi-budget':
             result=mounted_esp_budget(sys.argv[2],sys.argv[3])
         elif len(sys.argv)==5 and sys.argv[1]=='--layout':
             result=probe_layout(sys.argv[2],json.loads(sys.argv[3]),json.loads(sys.argv[4]))

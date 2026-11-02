@@ -26,6 +26,7 @@ BuildRequires:  rsync
 BuildRequires:  acl
 BuildRequires:  util-linux
 BuildRequires:  dosfstools
+BuildRequires:  btrfs-progs
 
 Requires:       gtk3
 Requires:       libX11
