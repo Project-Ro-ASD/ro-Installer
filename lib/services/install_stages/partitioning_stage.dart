@@ -1,3 +1,4 @@
+import 'full_disk_readiness.dart';
 import 'manual_partitioning.dart';
 import 'dart:convert';
 
@@ -248,7 +249,13 @@ class PartitioningStage {
     }
 
     // Kernel'ın yeni bölüm tablosunu okuması için bekle
-    final rescanFailure = await _rescanDisk(ctx, selectedDisk);
+    final rescanFailure = await _rescanDisk(
+      ctx,
+      selectedDisk,
+      fullWriter: hasSgdisk
+          ? FullDiskPartitionWriter.sgdisk
+          : FullDiskPartitionWriter.parted,
+    );
     if (rescanFailure != null) return rescanFailure;
 
     ctx.state.remove('_resolvedSwapPart');
@@ -1331,8 +1338,9 @@ class PartitioningStage {
 
   Future<StageResult?> _rescanDisk(
     StageContext ctx,
-    String selectedDisk,
-  ) async {
+    String selectedDisk, {
+    FullDiskPartitionWriter? fullWriter,
+  }) async {
     if (!await ctx.runCmd(
       'partprobe',
       [selectedDisk],
@@ -1354,7 +1362,14 @@ class PartitioningStage {
           'udev yeni bolumleri kararlı hale getiremedi: $selectedDisk',
         );
       }
-      await Future.delayed(const Duration(seconds: 2));
+      if (ctx.approvedPlan != null) {
+        if (fullWriter == null ||
+            !await waitForFullDiskLayout(ctx, writer: fullWriter)) {
+          return StageResult.fail('Onaylanan tam disk yerleşimi hazır değil.');
+        }
+      } else {
+        await Future.delayed(const Duration(seconds: 2));
+      }
     }
     return null;
   }
