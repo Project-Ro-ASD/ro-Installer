@@ -84,6 +84,16 @@ final class NtfsShrinkInstallationPlan {
     if (slot > snapshot.entryCount) {
       throw const FormatException('No free GPT slot');
     }
+    // Prefer a create-only root anywhere on this disk over NTFS mutation.
+    for (final gap in snapshot.freeExtents) {
+      final start = (gap.startSector + align - 1) ~/ align * align;
+      final end = (gap.endSector + 1) ~/ align * align;
+      if ((end - start) * sector >= rootBytes) {
+        throw const FormatException(
+          'Shrink unnecessary; use create-only free space',
+        );
+      }
+    }
     // Extend only into the gap immediately following the selected source.
     // Recovery/data partitions beyond that gap are never moved or consumed.
     var exclusiveEnd = source.endSector + 1;

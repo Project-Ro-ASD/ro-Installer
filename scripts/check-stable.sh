@@ -96,6 +96,8 @@ run_check "P0-04 helper v1/v2 compatibility and framing" \
   python3 -B test/scripts/helper_v2_test.py
 run_check "read-only GPT worker and helper admission" \
   python3 -B test/scripts/gpt_probe_test.py
+run_check "cross-language NTFS shrink geometry and free-space preference" \
+  python3 -B test/scripts/ntfs_shrink_plan_test.py
 run_check "manual installation admission and read-only filesystem checks" \
   python3 -B test/scripts/manual_install_test.py
 run_check "read-only NTFS metadata and regular-file integrity" \

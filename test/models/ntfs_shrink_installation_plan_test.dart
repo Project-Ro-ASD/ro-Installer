@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:test/test.dart';
 import 'package:ro_installer/models/gpt_disk_snapshot.dart';
 import 'package:ro_installer/models/ntfs_shrink_installation_plan.dart';
@@ -80,6 +81,29 @@ NtfsShrinkInstallationPlan plan({
   minimumFilesystemBytes: minimum,
 );
 void main() {
+  final cases =
+      jsonDecode(
+            File('test/fixtures/ntfs_shrink_plans_v1.json').readAsStringSync(),
+          )
+          as List<dynamic>;
+  for (final row in cases) {
+    test('shared NTFS plan: ${row['name']}', () {
+      final before = jsonEncode(row['input']);
+      if (row['intent'] == null) {
+        expect(
+          () => NtfsShrinkInstallationPlan.fromJson(row['input']),
+          throwsFormatException,
+        );
+      } else {
+        final p = NtfsShrinkInstallationPlan.fromJson(row['input']);
+        expect(p.intentJson, row['intent']);
+        p.intentJson['source']['endSector'] = 0;
+        expect(p.intentJson, row['intent']);
+      }
+      expect(jsonEncode(row['input']), before);
+    });
+  }
+
   for (final sector in [512, 4096]) {
     test(
       '$sector-byte sectors shrink only the selected tail and preserve recovery',
@@ -107,7 +131,11 @@ void main() {
     'sufficient contiguous free space never authorizes an unnecessary shrink',
     () {
       expect(() => plan(rootBytes: 40 * gib), throwsFormatException);
-      expect(() => plan(rootBytes: 41 * gib), returnsNormally);
+      // The unrelated tail gap also fits 41 GiB, so shrinking is unnecessary.
+      expect(() => plan(rootBytes: 41 * gib), throwsFormatException);
+      final s = snapshotJson();
+      s['partitions'][2]['endSector'] = s['lastUsableSector'];
+      expect(() => plan(snapshot: s, rootBytes: 41 * gib), returnsNormally);
     },
   );
   test('no following gap confines new root to the selected source', () {

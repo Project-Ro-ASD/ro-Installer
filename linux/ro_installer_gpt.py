@@ -172,6 +172,76 @@ def compact_plan(snapshot, selected):
             'root':{'number':slots[1],'startSector':root_start,'endSector':root_end}}
 
 
+def ntfs_shrink_plan(proposal):
+    """Pure geometry on normalized GPT input; never filesystem/write authority."""
+    fields = {'schemaVersion', 'snapshot', 'sourceNumber', 'espNumber',
+              'rootBytes', 'minimumFilesystemBytes'}
+    if (not isinstance(proposal, dict) or set(proposal) != fields
+            or type(proposal['schemaVersion']) is not int or proposal['schemaVersion'] != 1):
+        raise ValueError('Invalid NTFS shrink proposal')
+    s = normalize_snapshot(proposal['snapshot'])
+    source_number = integer(proposal['sourceNumber'], 1, 4096)
+    esp_number = integer(proposal['espNumber'], 1, 4096)
+    rows = {p['number']: p for p in s['partitions']}
+    if source_number not in rows or esp_number not in rows or source_number == esp_number:
+        raise ValueError('Select distinct observed partitions')
+    source, esp = rows[source_number], rows[esp_number]
+    sector = s['logicalSectorBytes']; align = 1048576 // sector
+    if (source['typeGuid'] != 'ebd0a0a2-b9e5-4433-87c0-68b6b72699c7'
+            or esp['typeGuid'] != 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b'
+            or source['attributesHex'] != '0000000000000000'
+            or esp['attributesHex'] != '0000000000000000'
+            or source['startSector'] % align
+            or (esp['endSector'] - esp['startSector'] + 1) * sector < 512 * 1048576):
+        raise ValueError('Unsupported source or reusable ESP geometry')
+    root_bytes = integer(proposal['rootBytes'], 40 * 1024**3, MAX_BYTES)
+    minimum = integer(proposal['minimumFilesystemBytes'], 1,
+                      (source['endSector'] - source['startSector'] + 1) * sector)
+    if root_bytes % 1048576 or len(rows) >= MAX_PARTITIONS:
+        raise ValueError('Root alignment or inventory limit')
+    slot = next((n for n in range(1, s['entryCount'] + 1) if n not in rows), None)
+    if slot is None:
+        raise ValueError('No free GPT slot')
+    gaps = []; cursor = s['firstUsableSector']
+    for part in s['partitions']:
+        if cursor < part['startSector']:
+            gaps.append((cursor, part['startSector'] - 1))
+        cursor = part['endSector'] + 1
+    if cursor <= s['lastUsableSector']:
+        gaps.append((cursor, s['lastUsableSector']))
+    for start, end in gaps:
+        aligned_start = (start + align - 1) // align * align
+        aligned_end = (end + 1) // align * align
+        if (aligned_end - aligned_start) * sector >= root_bytes:
+            raise ValueError('Shrink unnecessary; use create-only free space')
+    exclusive_end = source['endSector'] + 1
+    for start, end in gaps:
+        if start == exclusive_end:
+            exclusive_end = end + 1
+            break
+    exclusive_end = exclusive_end // align * align
+    root_start = exclusive_end - root_bytes // sector
+    if root_start > source['endSector']:
+        raise ValueError('Shrink unnecessary; use create-only free space')
+    source_end = root_start - 1
+    retained = (source_end - source['startSector'] + 1) * sector
+    if (root_start <= source['startSector'] or retained < 40 * 1024**3
+            or retained < minimum + 1024**3):
+        raise ValueError('Insufficient retained source capacity')
+    return {'schemaVersion': 1, 'layoutVersion': 1, 'mode': 'alongside_ntfs_shrink',
+            'device': dict(s['device']), 'tableFingerprint': s['tableFingerprint'],
+            'fileSystem': 'btrfs', 'diskSwap': False,
+            'subvolumes': {'root': '/', 'home': '/home', 'var_log': '/var/log',
+                          'var_cache': '/var/cache', 'var_tmp': '/var/tmp'},
+            'source': dict(source, newEndSector=source_end,
+                           minimumFilesystemBytes=minimum, retainedBytes=retained),
+            'esp': dict(esp, formatOnInstall=False),
+            'root': {'number': slot, 'startSector': root_start,
+                     'endSector': exclusive_end - 1,
+                     'typeGuid': '0fc63daf-8483-4772-8e79-3d69d8477de4',
+                     'formatOnInstall': True}}
+
+
 def manual_choice(value):
     if not isinstance(value, dict):
         raise ValueError('Invalid manual selection')
