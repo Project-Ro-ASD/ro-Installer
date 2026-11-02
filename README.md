@@ -304,6 +304,12 @@ at the target end, and checks MFT/Mirror bounds. It accepts exactly the
 resize-produced dirty bit while retaining the hibernation and journal checks.
 Its allocation probe uses `--info --no-action --force` only after that post-state
 check; initial eligibility still uses the strict clean-state path without force.
+The default post-check expects the original physical partition length before a
+GPT update. After a kernel table refresh, the caller can explicitly require
+`partition_bytes=target_bytes`; only those two physical extents are supported.
+The original boot record stays bound to the original extent, while the allocation
+probe must report the selected current device size and exact target volume.
+
 Native volume open must also reject mismatched `$MFT`/`$MFTMirr` records before
 allocation probing; regressions exercise this with otherwise valid boot geometry
 and update-sequence fixups in both initial and post-resize inspection.

@@ -415,22 +415,30 @@ def parse_minimum(raw, size, sector, cluster):
     return {'deviceBytes':device, 'volumeBytes':volume, 'clusterBytes':unit, 'minimumBytes':minimum}
 
 
-def parse_resized_minimum(raw, original_size, target_bytes, sector, cluster):
+def parse_resized_minimum(raw, device_bytes, target_bytes, sector, cluster):
     result = _info_fields(raw)
     volume = ((target_bytes - sector) // cluster) * cluster + sector
-    if (result['deviceBytes'] != original_size or result['clusterBytes'] != cluster
+    if (result['deviceBytes'] != device_bytes or result['clusterBytes'] != cluster
             or result['volumeBytes'] != volume or not 0 < result['minimumBytes'] <= volume
             or result['minimumBytes'] % sector):
         raise ValueError('Post-resize allocation geometry mismatch')
     return result
 
 
-def inspect_resized_fd(fd, original_size, target_bytes, sector, original_boot):
+def inspect_resized_fd(fd, original_size, target_bytes, sector, original_boot, *, partition_bytes=None):
+    """Inspect either pre-GPT physical extent or the exact refreshed target.
+
+    The caller still binds the partition FD/identity; original boot protection
+    always uses the original extent, including after the kernel table refresh.
+    """
+    current_size = original_size if partition_bytes is None else partition_bytes
+    if type(current_size) is not int or current_size not in (original_size, target_bytes):
+        raise ValueError('Unexpected post-resize partition extent')
     if fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDONLY:
         raise ValueError('Read-only post-resize descriptor required')
     before, cluster = resized_boot_sector(fd, original_size, target_bytes, sector, original_boot)
     native = NativeNtfs(); metadata = native.resized_metadata(fd)
-    result = parse_resized_minimum(run_tool('resized-minimum', fd), original_size, target_bytes, sector, cluster)
+    result = parse_resized_minimum(run_tool('resized-minimum', fd), current_size, target_bytes, sector, cluster)
     if (resized_boot_sector(fd, original_size, target_bytes, sector, original_boot) != (before, cluster)
             or native.resized_metadata(fd) != metadata):
         raise ValueError('NTFS changed during post-resize inspection')
