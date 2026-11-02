@@ -924,39 +924,41 @@ class _VisualStatePanel extends StatelessWidget {
           );
 
     return NebulaPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          NebulaSectionLabel(state.t('install_visual_feed')),
-          const SizedBox(height: 18),
-          AnimatedSwitcher(
-            duration: context.installerMotion.slow,
-            child: isFinished
-                ? _FinishedStateCard(
-                    success: success,
-                    isRebooting: isRebooting,
-                    rebootLabel: rebootLabel,
-                    onReboot: onReboot,
-                    onInspectLogs: onInspectLogs,
-                  )
-                : Column(
-                    key: const ValueKey('slideshow'),
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      feedDeck,
-                      const SizedBox(height: 18),
-                      Text(
-                        startExpansion
-                            ? state.t('install_runtime_note')
-                            : state.t('install_preparing_note'),
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: context.installerVisuals.mutedForeground,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            NebulaSectionLabel(state.t('install_visual_feed')),
+            const SizedBox(height: 18),
+            AnimatedSwitcher(
+              duration: context.installerMotion.slow,
+              child: isFinished
+                  ? _FinishedStateCard(
+                      success: success,
+                      isRebooting: isRebooting,
+                      rebootLabel: rebootLabel,
+                      onReboot: onReboot,
+                      onInspectLogs: onInspectLogs,
+                    )
+                  : Column(
+                      key: const ValueKey('slideshow'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        feedDeck,
+                        const SizedBox(height: 18),
+                        Text(
+                          startExpansion
+                              ? state.t('install_runtime_note')
+                              : state.t('install_preparing_note'),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: context.installerVisuals.mutedForeground,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-          ),
-        ],
+                      ],
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
