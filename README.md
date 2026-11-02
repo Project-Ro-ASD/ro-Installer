@@ -192,6 +192,29 @@ remain disjoint and fit unused GPT slots. Slots are assigned deterministically
 with ESP first; the post-create inventory must fit the 32-partition probe limit.
 There is no delete, resize, root-preservation, separate-home or disk-swap plan.
 
+### NTFS shrink planning
+
+`NtfsShrinkInstallationPlan` is a pure proposal for a future alongside path.
+It keeps the original immutable GPT snapshot and records expected geometry
+separately, rather than presenting changed geometry with an old fingerprint.
+The proposal binds one Microsoft basic-data source, an existing reusable ESP,
+and one newly allocated Btrfs root slot. Only the source end may move; recovery
+and other partitions keep their positions. A contiguous following gap can reduce
+the required shrink, and sufficient free space rejects shrink as unnecessary.
+
+New root ranges align to MiB boundaries and retain the temporary 40 GiB root
+floor. The source must retain at least 40 GiB and at least 1 GiB above the supplied
+filesystem minimum. These are conservative planning limits, not Windows minimum
+requirements or evidence that resizing is safe. The supplied minimum is an
+untrusted planning input until independently reproduced by privileged inspection.
+GPT partition type alone does not establish NTFS, clean state, lack of encryption
+or safe Windows shutdown.
+
+The model performs no disk or filesystem IO and grants no execution authority.
+Alongside installation remains rejected by the engine/helper. Authoritative
+read-only filesystem assessment, restricted metadata proofs, resize failure
+handling and GUI confirmation require separate integration.
+
 ### Read-only manual validation (helper v2)
 
 `validate-manual-plan` accepts `disk`, `expectedDevice`, `tableFingerprint` and
