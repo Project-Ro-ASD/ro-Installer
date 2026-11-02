@@ -319,6 +319,64 @@ def verify_ntfs_created_layout(proposal, root_guid, preservation_fingerprint, ob
     return current
 
 
+def ntfs_gpt_update_plan(read, proposal, root_guid, preservation_fingerprint):
+    """Pure immutable patches: backup copy first, primary copy second.
+
+    Each patch is (offset, original, replacement). A future applier must bind
+    its own device/lease, regenerate this plan, flush the entire backup group
+    before touching the primary and verify the final layout. No I/O writes or
+    filesystem safety/write admission are provided here.
+    """
+    plan = ntfs_shrink_plan(proposal)
+    before = normalize_snapshot(proposal['snapshot'])
+    root_guid = guid(root_guid)
+    if root_guid in {before['diskGuid'], *(p['partitionGuid'] for p in before['partitions'])}:
+        raise ValueError('Reused NTFS root allocation identity')
+    captured = {}
+    def capture(offset, length):
+        raw = read(offset, length)
+        if not isinstance(raw, bytes):
+            raise ValueError('GPT reader must return immutable bytes')
+        captured[(offset, length)] = raw
+        return raw
+    source, root = plan['source']['number'], plan['root']['number']
+    device, sector = before['device'], before['logicalSectorBytes']
+    initial = verified_ntfs_snapshot(capture, device, sector, source, root)
+    if initial != {'snapshot': before, 'preservationFingerprint': preservation_fingerprint}:
+        raise ValueError('Stale NTFS GPT update input')
+    entry, count = before['entryBytes'], before['entryCount']
+    reserved = (max(16384, count*entry)+sector-1)//sector*sector
+    updates = []
+    for entries_lba, header_lba in ((before['backupEntriesLba'], device['size']//sector-1),
+                                    (before['primaryEntriesLba'], 1)):
+        array_offset, header_offset = entries_lba*sector, header_lba*sector
+        original_array = captured[(array_offset, reserved)]
+        array = bytearray(original_array)
+        struct.pack_into('<Q', array, (source-1)*entry+40, plan['source']['newEndSector'])
+        new = bytearray(entry)
+        new[:16] = uuid.UUID(plan['root']['typeGuid']).bytes_le
+        new[16:32] = uuid.UUID(root_guid).bytes_le
+        struct.pack_into('<QQQ', new, 32, plan['root']['startSector'], plan['root']['endSector'], 0)
+        array[(root-1)*entry:root*entry] = new
+        original_header = captured[(header_offset, sector)]
+        header = bytearray(original_header)
+        struct.pack_into('<I', header, 88, zlib.crc32(array[:count*entry]))
+        header[16:20] = bytes(4)
+        struct.pack_into('<I', header, 16, zlib.crc32(header[:HEADER.unpack_from(header)[2]]))
+        updates.append(((array_offset, original_array, bytes(array)),
+                        (header_offset, original_header, bytes(header))))
+    overlay = dict(captured)
+    for group in updates:
+        for offset, original, replacement in group:
+            overlay[(offset, len(original))] = replacement
+    observed = verified_ntfs_snapshot(lambda offset, length: overlay[(offset, length)],
+                                      device, sector, source, root)
+    verify_ntfs_created_layout(proposal, root_guid, preservation_fingerprint, observed)
+    if verified_ntfs_snapshot(read, device, sector, source, root) != initial:
+        raise ValueError('GPT changed while planning update')
+    return tuple(updates)
+
+
 def manual_choice(value):
     if not isinstance(value, dict):
         raise ValueError('Invalid manual selection')
