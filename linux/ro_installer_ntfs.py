@@ -39,6 +39,48 @@ def boot_sector(fd, size, sector):
     return raw, clusters * sector
 
 
+def resized_boot_sector(fd, original_size, target_bytes, sector, original_boot):
+    """Read only: validate the exact decimal-size ntfsresize boot geometry.
+
+    The kernel partition still has its old size until a later GPT transaction.
+    This is not initial eligibility, filesystem mutation or write admission.
+    """
+    if (type(original_size) is not int or type(target_bytes) is not int
+            or not 1048576 <= target_bytes < original_size <= MAX_BYTES
+            or sector not in (512, 4096) or original_size % sector or target_bytes % 1048576
+            or not isinstance(original_boot, bytes) or len(original_boot) != sector
+            or original_boot[3:11] != b'NTFS    ' or original_boot[510:512] != b'\x55\xaa'
+            or struct.unpack_from('<H', original_boot, 11)[0] != sector):
+        raise ValueError('Invalid original NTFS geometry')
+    units = original_boot[13]; cluster = units * sector
+    old_total, old_mft, old_mirror = struct.unpack_from('<QQQ', original_boot, 40)
+    if (not units or units & (units - 1) or not 512 <= cluster <= 65536
+            or (old_total + 1) * sector != original_size
+            or not 0 < old_mft < old_total // units or not 0 < old_mirror < old_total // units
+            or old_mft == old_mirror):
+        raise ValueError('Invalid original NTFS extent')
+    current = os.pread(fd, sector, 0)
+    if len(current) != sector:
+        raise ValueError('Short resized NTFS boot sector')
+    masked = []
+    for raw in (original_boot, current):
+        protected = bytearray(raw); protected[40:64] = bytes(24); masked.append(protected)
+    if masked[0] != masked[1]:
+        raise ValueError('Protected NTFS boot fields changed')
+    total, mft, mirror = struct.unpack_from('<QQQ', current, 40)
+    clusters = (target_bytes - sector) // cluster
+    if (total != clusters * units or not 0 < mft < clusters or not 0 < mirror < clusters
+            or mft == mirror or os.pread(fd, sector, target_bytes - sector) != current):
+        raise ValueError('Resized NTFS extent or backup mismatch')
+    return current, cluster
+
+
+def resized_volume_information(raw):
+    # ntfsresize schedules Windows chkdsk. No other volume flags are admitted.
+    if len(raw) != 12 or raw[:8] != bytes(8) or raw[8:10] != b'\x03\x01' or raw[10:12] != b'\x01\x00':
+        raise ValueError('Unexpected post-resize NTFS volume state')
+
+
 def volume_information(raw):
     if len(raw) != 12 or raw[:8] != bytes(8) or raw[8:10] != b'\x03\x01' or raw[10:12] != bytes(2):
         raise ValueError('Only clean NTFS 3.1 volume metadata is supported')
@@ -150,6 +192,12 @@ class NativeNtfs:
                 raise ValueError('NTFS hibernation metadata close failed')
 
     def metadata(self, fd):
+        return self._metadata(fd, volume_information)
+
+    def resized_metadata(self, fd):
+        return self._metadata(fd, resized_volume_information)
+
+    def _metadata(self, fd, check_volume):
         volume = self.mount(f'/proc/self/fd/{fd}'.encode(), RO_FORENSIC)
         if not volume:
             raise ValueError('Read-only NTFS metadata open failed')
@@ -162,7 +210,7 @@ class NativeNtfs:
                 raise ValueError('NTFS volume metadata missing')
             try:
                 info = self.read(inode, 0x70, 12)
-                volume_information(info)
+                check_volume(info)
             finally:
                 if self.close_inode(inode) != 0:
                     raise ValueError('NTFS volume metadata close failed')
@@ -199,7 +247,10 @@ class NativeNtfs:
 def run_tool(kind, fd):
     node = f'/proc/self/fd/{fd}'
     argv = {'signature': ('/usr/sbin/blkid', '-p', '-o', 'export', '--', node),
-            'minimum': ('/usr/bin/ntfsresize', '--info', '--no-action', '-P', node)}[kind]
+            'minimum': ('/usr/bin/ntfsresize', '--info', '--no-action', '-P', node),
+            # Post-check only: allow the independently verified dirty bit for a
+            # read-only allocation scan. Initial eligibility never uses force.
+            'resized-minimum': ('/usr/bin/ntfsresize', '--info', '--no-action', '--force', '-P', node)}[kind]
     inherited = [fd]
     lease = os.environ.get('RO_INSTALLER_LEASE_FD')
     if lease is not None:
@@ -234,7 +285,7 @@ def run_tool(kind, fd):
         process.wait(); process.stdout.close(); process.stderr.close()
 
 
-def parse_minimum(raw, size, sector, cluster):
+def _info_fields(raw):
     text = raw.decode('utf-8', errors='strict')
     def field(pattern):
         values = re.findall(pattern, text, re.M)
@@ -245,10 +296,41 @@ def parse_minimum(raw, size, sector, cluster):
     device = field(r'^Current device size\s*: ([0-9]+) bytes \([0-9]+ MB\)$')
     unit = field(r'^Cluster size\s*: ([0-9]+) bytes$')
     minimum = field(r'^You might resize at ([0-9]+) bytes or [0-9]+ MB \(freeing [0-9]+ MB\)\.$')
+    return {'deviceBytes':device, 'volumeBytes':volume, 'clusterBytes':unit, 'minimumBytes':minimum}
+
+
+def parse_minimum(raw, size, sector, cluster):
+    result = _info_fields(raw)
+    device, volume, unit, minimum = (result[key] for key in ('deviceBytes', 'volumeBytes', 'clusterBytes', 'minimumBytes'))
     if (device != size or unit != cluster or not 0 < minimum <= volume <= size
             or minimum % sector or (volume-sector) % cluster or size-volume >= cluster):
         raise ValueError('NTFS inspection geometry mismatch')
     return {'deviceBytes':device, 'volumeBytes':volume, 'clusterBytes':unit, 'minimumBytes':minimum}
+
+
+def parse_resized_minimum(raw, original_size, target_bytes, sector, cluster):
+    result = _info_fields(raw)
+    volume = ((target_bytes - sector) // cluster) * cluster + sector
+    if (result['deviceBytes'] != original_size or result['clusterBytes'] != cluster
+            or result['volumeBytes'] != volume or not 0 < result['minimumBytes'] <= volume
+            or result['minimumBytes'] % sector):
+        raise ValueError('Post-resize allocation geometry mismatch')
+    return result
+
+
+def inspect_resized_fd(fd, original_size, target_bytes, sector, original_boot):
+    if fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDONLY:
+        raise ValueError('Read-only post-resize descriptor required')
+    before, cluster = resized_boot_sector(fd, original_size, target_bytes, sector, original_boot)
+    native = NativeNtfs(); metadata = native.resized_metadata(fd)
+    result = parse_resized_minimum(run_tool('resized-minimum', fd), original_size, target_bytes, sector, cluster)
+    if (resized_boot_sector(fd, original_size, target_bytes, sector, original_boot) != (before, cluster)
+            or native.resized_metadata(fd) != metadata):
+        raise ValueError('NTFS changed during post-resize inspection')
+    result = {**result, 'targetBytes': target_bytes}
+    digest = hashlib.sha256(b'ro-ntfs-resized-inspection-v1\0' + original_boot + before + metadata
+                            + json.dumps(result, sort_keys=True).encode())
+    return {'schemaVersion': 1, **result, 'inspectionFingerprint': digest.hexdigest()}
 
 
 def inspect_fd(fd, size, sector):

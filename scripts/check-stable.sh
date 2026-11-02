@@ -104,6 +104,8 @@ run_check "manual installation admission and read-only filesystem checks" \
   python3 -B test/scripts/manual_install_test.py
 run_check "identity-bound NTFS assessment and leased child cleanup" \
   python3 -B test/scripts/ntfs_assessment_test.py
+run_check "post-resize NTFS boot geometry and read-only allocation checks" \
+  python3 -B test/scripts/ntfs_postresize_test.py
 run_check "read-only NTFS metadata and regular-file integrity" \
   python3 -B test/scripts/ntfs_readonly_test.py
 run_check "bounded EFI source budget and descriptor identity" \
