@@ -17,6 +17,8 @@ import sys
 import time
 
 LIBRARY = '/usr/lib64/libntfs-3g.so.89'
+BOUND_IO = '/usr/libexec/ro-installer-ntfs-bound-io.so'
+BOUND_ALIAS = '/proc/self/fd/ro-installer-ntfs-bound'
 MAX_BYTES = 8 * 1024**4
 RO_FORENSIC = 0x04000001
 sys.dont_write_bytecode = True
@@ -245,11 +247,29 @@ class NativeNtfs:
                 raise ValueError('Read-only NTFS metadata close failed')
 
 
+def bound_io_environment(fd):
+    """Only a fixed root-owned adapter may bind the private no-action child."""
+    adapter = os.open(BOUND_IO, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        info = os.fstat(adapter)
+        header = os.pread(adapter, 20, 0)
+        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o644
+                or info.st_uid != 0 or info.st_gid != 0 or info.st_nlink != 1
+                or len(header) != 20 or header[:7] != b'\x7fELF\x02\x01\x01'
+                or header[16:20] != b'\x03\x00\x3e\x00'):
+            raise ValueError('Untrusted NTFS descriptor adapter')
+    finally:
+        os.close(adapter)
+    return {'PATH': '/usr/sbin:/usr/bin', 'LC_ALL': 'C',
+            'LD_PRELOAD': BOUND_IO, 'RO_INSTALLER_NTFS_BOUND_FD': str(fd)}
+
+
 def run_tool(kind, fd, *, target_bytes=None):
     if kind == 'resize-target' and (type(target_bytes) is not int
             or not 1048576 <= target_bytes <= MAX_BYTES or target_bytes % 1048576):
         raise ValueError('Invalid read-only NTFS target')
-    node = f'/proc/self/fd/{fd}'
+    node = BOUND_ALIAS if kind == 'resize-target' else f'/proc/self/fd/{fd}'
+    environment = bound_io_environment(fd) if kind == 'resize-target' else {'PATH':'/usr/sbin:/usr/bin','LC_ALL':'C'}
     argv = {'signature': ('/usr/sbin/blkid', '-p', '-o', 'export', '--', node),
             'minimum': ('/usr/bin/ntfsresize', '--info', '--no-action', '-P', node),
             # Post-check only: allow the independently verified dirty bit for a
@@ -269,7 +289,7 @@ def run_tool(kind, fd, *, target_bytes=None):
             raise ValueError('Invalid inspection lease descriptor')
         inherited.append(lease_fd)
     process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        close_fds=True, pass_fds=tuple(sorted(set(inherited))), env={'PATH':'/usr/sbin:/usr/bin','LC_ALL':'C'})
+        close_fds=True, pass_fds=tuple(sorted(set(inherited))), env=environment)
     streams = [process.stdout, process.stderr]; output = bytearray(); total = 0
     limit = 4096 if kind in {'signature', 'resize-version', 'resize-packages'} else 65536
     deadline = time.monotonic() + (5 if kind == 'resize-packages' else 2 if kind in {'signature', 'resize-version'} else 90)

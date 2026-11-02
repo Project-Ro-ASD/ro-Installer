@@ -316,6 +316,16 @@ available with its current dependencies. Future write admission must regenerate
 preparation under the caller's exclusive device/lease checks and still requires
 a validated write boundary, post-checks and failure handling.
 
+The private target trial uses a per-child, root-owned native descriptor adapter.
+A fixed nonnumeric procfd alias duplicates the inherited open file description
+with close-on-exec and exact access mode; destructive flags and unsupported
+file types fail. Ignoring or losing the adapter leaves an unopenable alias,
+with no device-path fallback. Other tool invocations keep their existing
+read-only behavior. The shared object is built with one hardened recipe used
+by both RPM packaging and native regressions; the worker and payload audit
+check its ownership, mode and ELF type. It is never configured as a global preload.
+This adapter does not grant write authority or complete alongside installation.
+
 ### Read-only manual validation (helper v2)
 
 `validate-manual-plan` accepts `disk`, `expectedDevice`, `tableFingerprint` and

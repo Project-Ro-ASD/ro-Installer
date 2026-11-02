@@ -10,6 +10,7 @@ from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest import mock
 import installer_helper_test as legacy
+from ntfs_bound_io_test import build_adapter, environment
 
 worker = legacy.load_module('ntfs_target_worker', legacy.ROOT/'linux/ro_installer_ntfs.py')
 GIB = 1024**3
@@ -155,6 +156,7 @@ class PreparationTests(unittest.TestCase):
                 return real_popen(['/usr/bin/printf', 'fixture'], **kwargs)
             proxy = SimpleNamespace(Popen=spawn, PIPE=subprocess.PIPE, DEVNULL=subprocess.DEVNULL)
             with mock.patch.object(worker, 'subprocess', proxy), \
+                 mock.patch.object(worker, 'bound_io_environment', return_value=environment(worker.BOUND_IO,source.fileno())), \
                  mock.patch.dict(os.environ, {'RO_INSTALLER_LEASE_FD':str(lease.fileno())}):
                 worker.run_tool('resize-version', source.fileno())
                 worker.run_tool('resize-packages', source.fileno())
@@ -163,11 +165,12 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(calls[1][0], ('/usr/bin/rpm','-qf','--qf',
                 '%{NAME}|%{EPOCHNUM}|%{VERSION}|%{RELEASE}|%{ARCH}\n', '/usr/bin/ntfsresize',worker.LIBRARY))
             self.assertEqual(calls[2][0], ('/usr/bin/ntfsresize','--no-action','-P','--size',str(TARGET),
-                                         f'/proc/self/fd/{source.fileno()}'))
+                                         worker.BOUND_ALIAS))
             self.assertEqual([call[1]['pass_fds'] for call in calls],
                 [(lease.fileno(),), (lease.fileno(),), tuple(sorted((source.fileno(),lease.fileno())))])
-            for _, kwargs in calls:
+            for _, kwargs in calls[:2]:
                 self.assertEqual(kwargs['env'], {'PATH':'/usr/sbin:/usr/bin','LC_ALL':'C'})
+            self.assertEqual(calls[2][1]['env'], environment(worker.BOUND_IO,source.fileno()))
 
     def test_native_target_probe_on_new_regular_images_preserves_every_byte(self):
         # This tests --no-action semantics only. The installed old release is
@@ -182,7 +185,9 @@ class PreparationTests(unittest.TestCase):
                 fd = os.open(path, os.O_RDONLY|os.O_CLOEXEC)
                 try:
                     observed = worker.inspect_fd(fd,size,sector)
-                    raw = worker.run_tool('resize-target',fd,target_bytes=target)
+                    adapter = build_adapter(td)
+                    with mock.patch.object(worker,'bound_io_environment',return_value=environment(adapter,fd)):
+                        raw = worker.run_tool('resize-target',fd,target_bytes=target)
                     worker.validate_resize_target_test(raw,observed,target,sector)
                     self.assertEqual(worker.inspect_fd(fd,size,sector), observed)
                     with path.open('rb') as stream:
