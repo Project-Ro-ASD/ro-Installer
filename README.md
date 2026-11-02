@@ -264,6 +264,15 @@ other entries, PMBR and reserved-array padding stay protected. The separate
 geometry and allocated GUID as well as an unchanged proof. These are pure
 verification primitives; they do not add a worker CLI or enable installation.
 
+The private `ntfs_gpt_update_plan` reconstructs immutable byte patches from a
+fresh, double-read snapshot and preservation proof. It changes only the source
+end, the allocated root entry and their CRCs, keeping each copy's reserved bytes.
+An in-memory overlay must pass the existing complete GPT and exact-layout checks;
+a final source read rejects drift during planning. Patches are grouped backup
+first, primary second. A future applier must durably flush the backup group before
+touching the primary and verify the completed table. Planning performs no writes
+and supplies neither atomicity nor filesystem resize authority.
+
 ### Read-only NTFS inspection primitive
 
 The root-only `ro_installer_ntfs.py` worker accepts an inherited read-only block
