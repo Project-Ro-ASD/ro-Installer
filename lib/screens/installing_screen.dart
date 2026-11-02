@@ -257,7 +257,11 @@ class _InstallingScreenState extends State<InstallingScreen>
       final identity = state.confirmedDevice;
       if (identity == null ||
           identity.path != state.selectedDisk ||
-          !const ['full', 'free_space'].contains(state.partitionMethod) ||
+          !const [
+            'full',
+            'free_space',
+            'manual',
+          ].contains(state.partitionMethod) ||
           state.fileSystem != 'btrfs') {
         throw const HelperException('MISSING_CONFIRMATION');
       }
@@ -277,9 +281,19 @@ class _InstallingScreenState extends State<InstallingScreen>
 
       final client = widget.helperClient ?? HelperClient(protocolVersion: 2);
       final isFree = state.partitionMethod == 'free_space';
+      final isManual = state.partitionMethod == 'manual';
+      final manualPlan = state.confirmedManualPlan;
       final plan = state.confirmedPlan;
       final freePlan = state.confirmedFreeSpacePlan;
-      if (isFree) {
+      if (isManual) {
+        if (client.protocolVersion != 2 ||
+            manualPlan == null ||
+            !identical(manualPlan, state.selectedManualPlan) ||
+            !samePlanValue(manualPlan.snapshot.device.json, identity.json) ||
+            state.fileSystem != 'btrfs') {
+          throw const HelperException('MISSING_CONFIRMATION');
+        }
+      } else if (isFree) {
         if (client.protocolVersion != 2 ||
             freePlan == null ||
             !samePlanValue(freePlan.snapshot.device.json, identity.json) ||
@@ -310,7 +324,15 @@ class _InstallingScreenState extends State<InstallingScreen>
         _reportStatus = status;
       }
 
-      if (isFree) {
+      if (isManual) {
+        await client.installManualPlan(
+          manualPlan!,
+          progressChanged,
+          uiLanguage: state.selectedLanguage,
+          onCopyProgress: copyChanged,
+          onReport: reportChanged,
+        );
+      } else if (isFree) {
         await client.installFreeSpace(
           freePlan!,
           progressChanged,

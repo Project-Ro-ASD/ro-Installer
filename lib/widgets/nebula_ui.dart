@@ -181,11 +181,13 @@ class NebulaStatusChip extends StatelessWidget {
             Icon(icon, size: 14, color: color),
             const SizedBox(width: 8),
           ],
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: color,
-              letterSpacing: 1.1,
+          Flexible(
+            child: Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: color,
+                letterSpacing: 1.1,
+              ),
             ),
           ),
         ],
@@ -326,10 +328,12 @@ class _NebulaPrimaryButtonState extends State<NebulaPrimaryButton> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              widget.label,
-                              style: Theme.of(context).textTheme.labelLarge
-                                  ?.copyWith(color: Colors.white),
+                            Flexible(
+                              child: Text(
+                                widget.label,
+                                style: Theme.of(context).textTheme.labelLarge
+                                    ?.copyWith(color: Colors.white),
+                              ),
                             ),
                             if (widget.icon != null) ...[
                               const SizedBox(width: 10),

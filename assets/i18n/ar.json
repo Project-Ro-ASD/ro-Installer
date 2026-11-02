@@ -489,5 +489,21 @@
   "install_copy_efi": "EFI",
   "disk_full_plan_summary": "خطة القرص بالكامل: مسح جميع البيانات؛ إنشاء قسم EFI بنظام FAT32 بحجم 512 MiB وBtrfs في المساحة المتبقية. دون قسم مبادلة.",
   "disk_free_space_probe": "قراءة المساحة الحرة",
-  "disk_free_space_limit": "عدد الأقسام يتجاوز الحد الآمن للتثبيت."
+  "disk_free_space_limit": "عدد الأقسام يتجاوز الحد الآمن للتثبيت.",
+  "manual_method": "تقسيم يدوي",
+  "manual_caption": "اختر EFI والجذر؛ دون تغيير الحجم أو حذف الأقسام.",
+  "manual_new": "قسم جديد",
+  "manual_existing": "قسم موجود",
+  "manual_erase": "تهيئة ومسح",
+  "manual_reuse": "إعادة استخدام EFI",
+  "manual_root_warning": "ستُمسح جميع بيانات الجذر المحدد بما فيها /home. لن تتغير الأقسام غير المحددة.",
+  "manual_esp_warning": "تهيئة EFI تمسح جميع ملفات الإقلاع؛ قد تتوقف الأنظمة الأخرى عن الإقلاع.",
+  "manual_reuse_warning": "إعادة استخدام EFI تحفظ الملفات وتضيف مجلد إقلاع جديدًا. يُرفض وجود EFI/fedora مسبقًا.",
+  "manual_confirm": "تأكيد التثبيت اليدوي",
+  "manual_install": "مسح الأهداف المحددة والتثبيت",
+  "manual_format_esp": "تهيئة EFI هذا (مسح جميع ملفات الإقلاع)",
+  "manual_no_target": "لا يوجد هدف مناسب",
+  "manual_start": "البداية (MiB)",
+  "manual_size": "الحجم (MiB)",
+  "manual_invalid": "اختر هدفين غير متداخلين. يجب أن تقع النطاقات الجديدة ضمن الفراغ المعروض؛ EFI ≥512 MiB والجذر ≥40 GiB."
 }

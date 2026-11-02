@@ -489,5 +489,21 @@
   "install_copy_efi": "EFI",
   "disk_full_plan_summary": "Intero disco: cancellare tutti i dati; creare EFI FAT32 da 512 MiB e Btrfs nello spazio restante. Nessuna partizione swap.",
   "disk_free_space_probe": "Leggi spazio libero",
-  "disk_free_space_limit": "Il numero di partizioni supera il limite sicuro di installazione."
+  "disk_free_space_limit": "Il numero di partizioni supera il limite sicuro di installazione.",
+  "manual_method": "Partizionamento manuale",
+  "manual_caption": "Seleziona EFI e root; nessun ridimensionamento o eliminazione.",
+  "manual_new": "Nuova partizione",
+  "manual_existing": "Partizione esistente",
+  "manual_erase": "Formatta e cancella",
+  "manual_reuse": "Riutilizza EFI",
+  "manual_root_warning": "Tutti i dati nella root selezionata, incluso /home, saranno cancellati. Le partizioni non selezionate restano invariate.",
+  "manual_esp_warning": "Formattare EFI cancella tutti i file di avvio; altri sistemi potrebbero non avviarsi più.",
+  "manual_reuse_warning": "Il riutilizzo EFI conserva i file e aggiunge una nuova cartella di avvio. Una EFI/fedora esistente viene rifiutata.",
+  "manual_confirm": "Conferma installazione manuale",
+  "manual_install": "Cancella le destinazioni e installa",
+  "manual_format_esp": "Formatta questa EFI (cancella tutti i file di avvio)",
+  "manual_no_target": "Nessuna destinazione idonea",
+  "manual_start": "Inizio (MiB)",
+  "manual_size": "Dimensione (MiB)",
+  "manual_invalid": "Scegli due destinazioni senza sovrapposizioni. I nuovi intervalli devono rientrare nello spazio indicato; EFI ≥512 MiB e root ≥40 GiB."
 }

@@ -9,6 +9,7 @@ import '../models/free_space_installation_plan.dart';
 import '../state/installer_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/nebula_ui.dart';
+import '../widgets/manual_plan_editor.dart';
 
 class DiskSelectionScreen extends StatefulWidget {
   const DiskSelectionScreen({super.key, this.diskService, this.helperClient});
@@ -176,6 +177,60 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
     }
   }
 
+  Future<void> _confirmManual(InstallerState state) async {
+    final plan = state.selectedManualPlan;
+    if (plan == null || _isConfirming) return;
+    final revision = state.diskSelectionRevision;
+    setState(() => _isConfirming = true);
+    try {
+      await (widget.helperClient ?? HelperClient(protocolVersion: 2))
+          .validateManualPlan(plan);
+      if (!mounted ||
+          revision != state.diskSelectionRevision ||
+          !identical(plan, state.selectedManualPlan)) {
+        return;
+      }
+      String describe(bool esp) {
+        final part = esp ? plan.esp : plan.root;
+        final bytes =
+            (part.endSector - part.startSector + 1) *
+            plan.snapshot.logicalSectorBytes;
+        final start =
+            part.startSector * plan.snapshot.logicalSectorBytes / 1048576;
+        final end =
+            (part.endSector + 1) * plan.snapshot.logicalSectorBytes / 1048576;
+        return '${part.target} · ${(bytes / 1048576).toStringAsFixed(0)} MiB ($start–$end MiB) · '
+            '${state.t(part.isNew ? 'manual_new' : 'manual_existing')} · '
+            '${state.t(part.formatOnInstall ? 'manual_erase' : 'manual_reuse')}';
+      }
+
+      final accepted = await _showDecisionDialog(
+        accent: Colors.orangeAccent,
+        icon: Icons.tune_rounded,
+        title: state.t('manual_confirm'),
+        message:
+            '${plan.snapshot.device.path}\nEFI: ${describe(true)}\nRoot: ${describe(false)}\n\n'
+            '${state.t('manual_root_warning')}\n'
+            '${state.t(plan.esp.formatOnInstall ? 'manual_esp_warning' : 'manual_reuse_warning')}',
+        confirmLabel: state.t('manual_install'),
+        cancelLabel: state.t('cancel'),
+      );
+      if (mounted &&
+          accepted == true &&
+          state.confirmManualPlan(plan, revision)) {
+        state.nextStep();
+      }
+    } on HelperException catch (error) {
+      if (mounted && revision == state.diskSelectionRevision) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${state.t('helper_error')} (${error.code})')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isConfirming = false);
+    }
+  }
+
   Future<bool?> _showDecisionDialog({
     required Color accent,
     required IconData icon,
@@ -198,52 +253,56 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
             constraints: const BoxConstraints(maxWidth: 520),
             child: NebulaPanel(
               padding: const EdgeInsets.all(28),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 58,
-                    height: 58,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: accent.withValues(alpha: 0.14),
-                    ),
-                    child: Icon(icon, color: accent, size: 28),
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    title,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.headlineSmall?.copyWith(color: accent),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    message,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: context.installerVisuals.mutedForeground,
-                      height: 1.45,
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  Row(
-                    children: [
-                      if (showCancel)
-                        NebulaSecondaryButton(
-                          label: cancelLabel,
-                          icon: Icons.close_rounded,
-                          onPressed: () => Navigator.pop(dialogContext, false),
-                        ),
-                      if (showCancel) const Spacer(),
-                      NebulaPrimaryButton(
-                        label: confirmLabel,
-                        icon: Icons.arrow_forward_rounded,
-                        onPressed: () => Navigator.pop(dialogContext, true),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 58,
+                      height: 58,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: accent.withValues(alpha: 0.14),
                       ),
-                    ],
-                  ),
-                ],
+                      child: Icon(icon, color: accent, size: 28),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      title,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.headlineSmall?.copyWith(color: accent),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      message,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: context.installerVisuals.mutedForeground,
+                        height: 1.45,
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (showCancel)
+                          NebulaSecondaryButton(
+                            label: cancelLabel,
+                            icon: Icons.close_rounded,
+                            onPressed: () =>
+                                Navigator.pop(dialogContext, false),
+                          ),
+                        if (showCancel) const SizedBox(height: 12),
+                        NebulaPrimaryButton(
+                          label: confirmLabel,
+                          icon: Icons.arrow_forward_rounded,
+                          onPressed: () => Navigator.pop(dialogContext, true),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -318,6 +377,10 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
       return;
     }
 
+    if (partitionMethod == 'manual') {
+      await _confirmManual(state);
+      return;
+    }
     if (partitionMethod == 'free_space') {
       await _confirmFreeSpace(state);
       return;
@@ -401,6 +464,14 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
           dense: denseDesktop || compact,
           freeControls: state.partitionMethod == 'free_space'
               ? _freeControls(state)
+              : state.partitionMethod == 'manual'
+              ? ManualPlanEditor(
+                  key: ValueKey('manual:${state.selectedDisk}'),
+                  state: state,
+                  helper:
+                      widget.helperClient ?? HelperClient(protocolVersion: 2),
+                  enabled: !_isConfirming,
+                )
               : null,
         );
 
@@ -449,17 +520,14 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                     const SizedBox(width: 16),
                     Expanded(
                       flex: 6,
-                      child: Column(
-                        children: [
-                          _StorageSummaryPanel(state: state, dense: true),
-                          SizedBox(height: denseDesktop ? 12 : 18),
-                          Expanded(
-                            child: _DeploymentPlanPanel(
-                              state: state,
-                              dense: true,
-                            ),
-                          ),
-                        ],
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            _StorageSummaryPanel(state: state, dense: true),
+                            SizedBox(height: denseDesktop ? 12 : 18),
+                            _DeploymentPlanPanel(state: state, dense: true),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -490,6 +558,8 @@ class _DiskSelectionScreenState extends State<DiskSelectionScreen> {
                   onPressed:
                       _isLoading ||
                           _scanningFree ||
+                          (state.partitionMethod == 'manual' &&
+                              state.selectedManualPlan == null) ||
                           (state.partitionMethod == 'free_space' &&
                               state.selectedFreeSpacePlan == null) ||
                           _isConfirming ||
@@ -884,7 +954,9 @@ class _StorageSummaryPanel extends StatelessWidget {
                       child: _SummaryMetric(
                         label: state.t('disk_install_type'),
                         value: state.t(
-                          state.partitionMethod == 'free_space'
+                          state.partitionMethod == 'manual'
+                              ? 'manual_method'
+                              : state.partitionMethod == 'free_space'
                               ? 'disk_free_space_label'
                               : 'install_type_standard',
                         ),
@@ -1050,6 +1122,16 @@ class _CompactMethodGrid extends StatelessWidget {
           selected: state.partitionMethod == 'free_space',
           disabled: false,
           onTap: () => state.updatePartitionMethod('free_space'),
+        ),
+        const SizedBox(height: 12),
+        _CompactMethodOption(
+          label: state.t('manual_method'),
+          caption: state.t('manual_caption'),
+          icon: Icons.tune_rounded,
+          accent: Colors.orangeAccent,
+          selected: state.partitionMethod == 'manual',
+          disabled: false,
+          onTap: () => state.updatePartitionMethod('manual'),
         ),
       ],
     );
