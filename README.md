@@ -231,6 +231,31 @@ Alongside installation remains rejected by the engine/helper. Authoritative
 read-only filesystem assessment, restricted metadata proofs, resize failure
 handling and GUI confirmation require separate integration.
 
+### Read-only NTFS inspection primitive
+
+The root-only `ro_installer_ntfs.py` worker accepts an inherited read-only block
+FD, size and sector size. It verifies NTFS/backup boot geometry and a distinct
+low-level NTFS signature, opens metadata with the packaged libntfs-3g ABI 89 in
+read-only forensic mode, and explicitly checks clean NTFS 3.1 volume information,
+hibernation state and the journal. A bounded root-directory scan uses the on-volume
+`$UpCase` mapping, rejects ambiguous hibernation names and requires existing
+hibernation headers to be entirely zero. Cached or unsupported journal versions
+are rejected.
+
+A fixed `ntfsresize --info --no-action -P` invocation provides the estimated
+minimum. Bounded output, tool deadlines and process resource limits constrain
+inspection, and core dumps are disabled. Metadata is checked again after the estimate. Only numeric geometry,
+minimum size and an inspection fingerprint leave the worker; raw labels, UUIDs,
+paths and diagnostics do not. The fingerprint covers the inspected fields, not
+all filesystem data. The fixed metadata flags follow the
+[exported volume API](https://github.com/tuxera/ntfs-3g/blob/edge/include/ntfs-3g/volume.h).
+
+The packaged worker is mode 0644 and has no public helper operation. Its caller
+must still establish the source partition identity, exclusive source FD, installer
+lease, current GPT and the exact shrink proposal. This primitive does not grant resize authority;
+private ownership proofs, a target-size dry run, writer validation and failure
+handling remain required before alongside execution can be enabled.
+
 ### Read-only manual validation (helper v2)
 
 `validate-manual-plan` accepts `disk`, `expectedDevice`, `tableFingerprint` and
