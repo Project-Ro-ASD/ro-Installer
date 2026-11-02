@@ -1,3 +1,4 @@
+import '../models/prepared_root_capacity.dart';
 import 'dart:convert';
 import 'command_runner.dart';
 import '../models/standard_storage_layout.dart';
@@ -65,6 +66,8 @@ class InstallPreflight {
     }
     try {
       await ctx.mountSession!.assertEmpty();
+      final disk = ctx.state['selectedDisk'] as String;
+      final method = ctx.state['partitionMethod'];
       final available = await _read(
         ctx,
         'preflight.tools',
@@ -83,15 +86,14 @@ class InstallPreflight {
         ]);
         if (!fallback.started || fallback.exitCode != 0) return false;
       }
-      if (await (ctx.observation?.span(
+      final sourceExcludes =
+          await (ctx.observation?.span(
                 'preflight.source',
                 () => const FileCopyStage().inspectSource(ctx),
                 success: (value) => value != null,
               ) ??
-              const FileCopyStage().inspectSource(ctx)) ==
-          null) {
-        return false;
-      }
+              const FileCopyStage().inspectSource(ctx));
+      if (sourceExcludes == null) return false;
       for (final path in FileCopyStage.requiredFiles) {
         for (final flag in ['-f', '-s', '-r']) {
           final index = FileCopyStage.requiredFiles.indexOf(path);
@@ -123,14 +125,17 @@ class InstallPreflight {
       }
       final capacity = await _read(ctx, 'preflight.capacity', 'blockdev', [
         '--getsize64',
-        ctx.state['selectedDisk'] as String,
+        disk,
       ]);
+      final diskBytes = int.tryParse(capacity.stdout.trim());
       if (!capacity.started ||
           capacity.exitCode != 0 ||
-          (int.tryParse(capacity.stdout.trim()) ?? 0) <
-              StandardStorageLayout.minimumDiskBytes) {
+          diskBytes == null ||
+          diskBytes < StandardStorageLayout.minimumDiskBytes) {
         return false;
       }
+      final rootBytes = _rootCapacity(ctx, diskBytes);
+      if (rootBytes == null) return false;
       final btrfs = await _read(ctx, 'preflight.btrfs', 'sh', [
         '-c',
         'grep -qw btrfs /proc/filesystems || modprobe -n -q btrfs',
@@ -145,9 +150,51 @@ class InstallPreflight {
           kernels.stdout.trim().isEmpty) {
         return false;
       }
+      final inventory = await _read(
+        ctx,
+        'preflight.source-size',
+        'rsync',
+        FileCopyStage.mainCopyArguments(sourceExcludes, dryRun: true),
+        timeout: const Duration(seconds: 60),
+      );
+      if (!inventory.started || inventory.exitCode != 0) return false;
+      final budget = PreparedRootCapacity.fromRsyncStats(inventory.stdout);
+      if (budget.requiredRootBytes > rootBytes ||
+          ctx.state['selectedDisk'] != disk ||
+          ctx.state['partitionMethod'] != method ||
+          _rootCapacity(ctx, diskBytes) != rootBytes) {
+        return false;
+      }
       return true;
     } catch (_) {
       return false; // No raw source metadata, command stderr or exception in UI errors.
+    }
+  }
+
+  int? _rootCapacity(StageContext ctx, int diskBytes) {
+    if (!ctx.approvedStateMatches ||
+        (ctx.state['fileSystem'] ?? 'btrfs') != 'btrfs') {
+      return null;
+    }
+    switch (ctx.state['partitionMethod']) {
+      case 'full':
+        return diskBytes - StandardStorageLayout.espBytes - 2 * 1048576;
+      case 'free_space':
+        final plan = ctx.approvedFreeSpacePlan?.plan;
+        if (plan == null) return null;
+        final bytes =
+            (plan.rootEnd - plan.rootStart + 1) *
+            plan.snapshot.logicalSectorBytes;
+        return bytes <= diskBytes ? bytes : null;
+      case 'manual':
+        final plan = ctx.approvedManualPlan?.plan;
+        if (plan == null) return null;
+        final bytes =
+            (plan.root.endSector - plan.root.startSector + 1) *
+            plan.snapshot.logicalSectorBytes;
+        return bytes <= diskBytes ? bytes : null;
+      default:
+        return null;
     }
   }
 
@@ -155,9 +202,11 @@ class InstallPreflight {
     StageContext ctx,
     String operation,
     String command,
-    List<String> args,
-  ) {
-    Future<CommandResult> action() => ctx.commandRunner.run(command, args);
+    List<String> args, {
+    Duration? timeout,
+  }) {
+    Future<CommandResult> action() =>
+        ctx.commandRunner.run(command, args, timeout: timeout);
     return ctx.observation?.span(
           operation,
           action,

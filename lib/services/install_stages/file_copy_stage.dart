@@ -13,6 +13,41 @@ import 'stage_result.dart';
 class FileCopyStage {
   const FileCopyStage();
 
+  static List<String> mainCopyArguments(
+    List<String> dynamicExcludes, {
+    bool dryRun = false,
+  }) => [
+    '-aAX',
+    '--numeric-ids',
+    if (dryRun) ...['--dry-run', '--stats'] else '--info=progress2,stats2',
+    '--no-human-readable',
+    '--exclude=/dev/*',
+    '--exclude=/proc/*',
+    '--exclude=/sys/*',
+    '--exclude=/tmp/*',
+    '--exclude=/run/*',
+    '--exclude=/mnt/*',
+    '--exclude=/media/*',
+    '--exclude=/lost+found',
+    '--exclude=/.cache/*',
+    '--exclude=/etc/machine-id',
+    '--exclude=/var/lib/dbus/machine-id',
+    '--exclude=/etc/hostname',
+    '--exclude=/etc/kernel/cmdline',
+    '--exclude=/home/*/.cache/*',
+    '--exclude=/home/liveuser',
+    '--exclude=/root/.cache/*',
+    '--exclude=/var/cache/dnf/*',
+    '--exclude=/var/cache/PackageKit/*',
+    '--exclude=/var/tmp/*',
+    '--exclude=/var/log/audit/*',
+    '--exclude=/boot/loader/entries/*',
+    '--exclude=/boot/grub2/grubenv',
+    ...dynamicExcludes,
+    '/', // Kaynak: Çalışan Live Kök
+    '/mnt/', // Hedef
+  ];
+
   Future<StageResult> execute(StageContext ctx) async {
     if (ctx.reusesEsp &&
         (!ctx.approvedStateMatches ||
@@ -56,37 +91,7 @@ class FileCopyStage {
       'Bu işlem disk hızına bağlı olarak 5-15 dakika sürebilir. (Rsync Çalışıyor...)',
     );
 
-    List<String> rsyncArgs = [
-      '-aAX',
-      '--numeric-ids',
-      '--info=progress2,stats2',
-      '--no-human-readable',
-      '--exclude=/dev/*',
-      '--exclude=/proc/*',
-      '--exclude=/sys/*',
-      '--exclude=/tmp/*',
-      '--exclude=/run/*',
-      '--exclude=/mnt/*',
-      '--exclude=/media/*',
-      '--exclude=/lost+found',
-      '--exclude=/.cache/*',
-      '--exclude=/etc/machine-id',
-      '--exclude=/var/lib/dbus/machine-id',
-      '--exclude=/etc/hostname',
-      '--exclude=/etc/kernel/cmdline',
-      '--exclude=/home/*/.cache/*',
-      '--exclude=/home/liveuser',
-      '--exclude=/root/.cache/*',
-      '--exclude=/var/cache/dnf/*',
-      '--exclude=/var/cache/PackageKit/*',
-      '--exclude=/var/tmp/*',
-      '--exclude=/var/log/audit/*',
-      '--exclude=/boot/loader/entries/*',
-      '--exclude=/boot/grub2/grubenv',
-      ...dynamicExcludes,
-      '/', // Kaynak: Çalışan Live Kök
-      '/mnt/', // Hedef
-    ];
+    final rsyncArgs = mainCopyArguments(dynamicExcludes);
 
     if (!await _copy(ctx, 'copy.main', rsyncArgs)) {
       return StageResult.fail(

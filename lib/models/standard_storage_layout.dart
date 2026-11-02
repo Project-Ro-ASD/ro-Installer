@@ -5,8 +5,9 @@ class StandardStorageLayout {
   static const int espBytes = 512 * 1024 * 1024;
 
   // Temporary safety floor inherited from the previous root-space guard.
-  // Prepared-root size is not yet exposed reliably. This is NOT the final
-  // Ro-ASD product minimum; replace it with measured deployment requirements.
+  // Keep this floor alongside the measured preflight budget. This is NOT
+  // the final Ro-ASD product minimum; lowering it needs validated payload and
+  // filesystem-headroom evidence.
   static const int temporaryMinimumRootBytes = 40 * 1024 * 1024 * 1024;
   static const int minimumDiskBytes =
       espBytes + temporaryMinimumRootBytes + 2 * 1024 * 1024;
