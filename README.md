@@ -504,8 +504,15 @@ Before stage 1, read-only preflight checks source topology and required EFI/syst
 files, runtime tools, target capacity and the existing
 `/usr/lib/ro-asd/release.json` Ro-ASD/Fedora 44 x86_64 metadata contract. This is
 compatibility validation, not cryptographic source attestation. No new Compose
-marker is required. The inherited 40 GiB root safety floor is temporary, not a
-measured image-size guarantee. Device identity and empty target inventory are
+marker is required. A bounded read-only rsync inventory uses the same source
+filters as copying and measures total logical file bytes and entry count, even
+when destination files already exist. The selected root range must fit that
+source plus a 20% growth reserve, 16 KiB per entry and 2 GiB operational headroom,
+rounded up to MiB. Full-disk planning also reserves its ESP and alignment space;
+free-space and manual planning use the captured root partition, not whole-disk
+capacity. The temporary 40 GiB floor still applies. This conservative budget
+does not credit compression or guarantee later source growth will fit, and the
+inventory adds a source scan with a deadline. Device identity and empty target inventory are
 rechecked before the first mutation, retaining the helper ready/continue handshake. The
 fixed runtime-tool catalogue is checked by one shell invocation using positional
 arguments and `command -v`; tool discovery never executes the discovered tools.
