@@ -9,6 +9,11 @@ import '../command_runner.dart';
 import '../mount_session.dart';
 import '../install_localizer.dart';
 
+/// A started GPT worker can fail transiently while kernel partition nodes settle.
+final class FreeSpaceProbeNotReady implements Exception {
+  const FreeSpaceProbeNotReady();
+}
+
 /// Tüm kurulum aşamalarının eriştiği ortak bağlam (context) nesnesi.
 ///
 /// Her aşama bu nesne üzerinden:
@@ -206,7 +211,9 @@ class StageContext {
       : state['partitionMethod'] == 'free_space'
       ? _createdFreeSpaceLayout!.espPath
       : _fullPartition(1);
-  Future<Map<String, dynamic>> probeFreeSpaceMetadata() async {
+  Future<Map<String, dynamic>> probeFreeSpaceMetadata({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
     final approved = approvedFreeSpacePlan!;
     final result = await commandRunner.run('/usr/bin/python3', [
       '-I',
@@ -216,12 +223,11 @@ class StageContext {
       jsonEncode(approved.plan.snapshot.device.json),
       '--preserve-slots',
       jsonEncode([approved.plan.espNumber, approved.plan.rootNumber]),
-    ], timeout: const Duration(seconds: 12));
-    if (!result.started ||
-        result.exitCode != 0 ||
-        utf8.encode(result.stdout).length > 8192) {
+    ], timeout: timeout);
+    if (!result.started || utf8.encode(result.stdout).length > 8192) {
       throw const FormatException('GPT verification failed');
     }
+    if (result.exitCode != 0) throw const FreeSpaceProbeNotReady();
     final value = decodeProtocolObject(result.stdout);
     if (!exactFields(value, {'snapshot', 'preservationFingerprint'}) ||
         value['preservationFingerprint'] is! String) {
