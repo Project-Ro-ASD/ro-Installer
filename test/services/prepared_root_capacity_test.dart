@@ -314,6 +314,13 @@ void main() {
           '--exclude=/boot/efi/*',
           '--exclude=/boot/efi',
         ], dryRun: true);
+        // Keep the large sparse fixture bounded even if argv construction regresses.
+        expect(args.contains('--dry-run'), true);
+        expect(args.sublist(args.length - 2), ['/', '/mnt/']);
+        expect(
+          args.take(args.length - 2).every((arg) => arg.startsWith('-')),
+          true,
+        );
         args[args.length - 2] = '${source.path}/';
         args[args.length - 1] = '${target.path}/';
         final result = await Process.run(
