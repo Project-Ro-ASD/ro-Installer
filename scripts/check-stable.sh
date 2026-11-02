@@ -106,6 +106,8 @@ run_check "manual installation admission and read-only filesystem checks" \
   python3 -B test/scripts/manual_install_test.py
 run_check "identity-bound NTFS assessment and leased child cleanup" \
   python3 -B test/scripts/ntfs_assessment_test.py
+run_check "native NTFS MFT mirror mismatch refusal without repair" \
+  python3 -B test/scripts/ntfs_mirror_regression_test.py
 run_check "post-resize NTFS boot geometry and read-only allocation checks" \
   python3 -B test/scripts/ntfs_postresize_test.py
 run_check "native NTFS descriptor binding and fail-closed adapter" \

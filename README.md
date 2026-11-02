@@ -304,6 +304,9 @@ at the target end, and checks MFT/Mirror bounds. It accepts exactly the
 resize-produced dirty bit while retaining the hibernation and journal checks.
 Its allocation probe uses `--info --no-action --force` only after that post-state
 check; initial eligibility still uses the strict clean-state path without force.
+Native volume open must also reject mismatched `$MFT`/`$MFTMirr` records before
+allocation probing; regressions exercise this with otherwise valid boot geometry
+and update-sequence fixups in both initial and post-resize inspection.
 Metadata and boot records must remain stable across inspection. This primitive
 has no CLI mode or write authority; dependency qualification and writer/failure
 integration are still required.
