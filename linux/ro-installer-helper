@@ -42,10 +42,12 @@ STAGE_KEYS = (
     "install_stage_post_validation", "install_stage_cleanup",
 )
 OPERATIONS = frozenset({"audit-live", "probe-disk", "install-full-disk"})
-V2_READ_OPERATIONS = frozenset({'probe-free-space','validate-free-space-plan','validate-manual-plan'})
+V2_READ_OPERATIONS = frozenset({'probe-free-space','validate-free-space-plan','validate-manual-plan','assess-ntfs-shrink'})
 V2_INSTALL_OPERATIONS = frozenset({'install-free-space','install-manual'})
 GPT_ARGV = ('/usr/bin/python3','-I','/usr/libexec/ro_installer_gpt.py','--probe')
 MANUAL_ARGV = ('/usr/bin/python3','-I','/usr/libexec/ro_installer_manual.py')
+NTFS_ARGV = ('/usr/bin/python3','-I','/usr/libexec/ro_installer_ntfs.py','--check-fd')
+NTFS_TIMEOUT = 100
 GPT_TIMEOUT = 10
 INSTALLER_UI_LANGUAGES = frozenset({
     "tr", "en", "es", "de", "fr", "pt_BR", "it", "ru", "ar", "fa", "zh_CN", "ja",
@@ -111,6 +113,7 @@ class Request:
     selected_extent: dict | None = None
     source_snapshot: dict | None = None
     manual_choices: dict | None = None
+    ntfs_choices: dict | None = None
 
 
 def full_disk_plan(device):
@@ -153,6 +156,8 @@ def parse_request(raw, version=1):
         allowed.update({'expectedDevice','tableFingerprint','selectedExtent'})
     if operation == 'validate-manual-plan':
         allowed.update({'expectedDevice','tableFingerprint','esp','root'})
+    if operation == 'assess-ntfs-shrink':
+        allowed.update({'expectedDevice','tableFingerprint','sourceNumber','espNumber','rootBytes'})
     if operation in ('install-full-disk','install-free-space','install-manual'):
         allowed.update({"confirmDestructive", "expectedDevice"})
         if operation=='install-full-disk':allowed.update({'partitionMethod','fileSystem'})
@@ -181,7 +186,7 @@ def parse_request(raw, version=1):
         if (data["partitionMethod"] != "full" or data["fileSystem"] != "btrfs"
                 or data["confirmDestructive"] is not True):
             fail("INVALID_REQUEST", "Only explicitly confirmed full/Btrfs installation is supported.")
-    if operation in ('install-full-disk','install-free-space','install-manual','validate-free-space-plan','validate-manual-plan'):
+    if operation in ('install-full-disk','install-free-space','install-manual','validate-free-space-plan','validate-manual-plan','assess-ntfs-shrink'):
         expected = data["expectedDevice"]
         if (not isinstance(expected, dict)
                 or set(expected) != {"majorMinor", "size", "diskSequence"}
@@ -240,7 +245,20 @@ def parse_request(raw, version=1):
                 raise ValueError()
         except (ValueError, TypeError, KeyError):
             fail('INVALID_REQUEST', 'Invalid manual role choices.')
-    return Request(operation, disk, expected, version, data.get("uiLanguage"), data.get("includeCopyProgress", False), plan, fingerprint, extent, manual_choices=choices)
+    ntfs_choices = None
+    if operation == 'assess-ntfs-shrink':
+        fingerprint = data['tableFingerprint']
+        if not isinstance(fingerprint, str) or not re.fullmatch('[0-9a-f]{64}', fingerprint):
+            fail('INVALID_REQUEST', 'Invalid source fingerprint.')
+        try:
+            ntfs_choices = {
+                'sourceNumber': gpt_module().integer(data['sourceNumber'], 1, 4096),
+                'espNumber': gpt_module().integer(data['espNumber'], 1, 4096),
+                'rootBytes': gpt_module().integer(data['rootBytes'], 40 * 1024**3, 9007199254740991),
+            }
+        except (ValueError, TypeError, KeyError):
+            fail('INVALID_REQUEST', 'Invalid NTFS geometry selection.')
+    return Request(operation, disk, expected, version, data.get("uiLanguage"), data.get("includeCopyProgress", False), plan, fingerprint, extent, manual_choices=choices, ntfs_choices=ntfs_choices)
 
 
 def gpt_module():
@@ -248,6 +266,33 @@ def gpt_module():
     spec=importlib.util.spec_from_loader(loader.name,loader)
     module=importlib.util.module_from_spec(spec);loader.exec_module(module)
     return module
+
+
+def manual_module():
+    loader = importlib.machinery.SourceFileLoader('ro_helper_manual', str(Path(__file__).with_name('ro_installer_manual.py')))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec); loader.exec_module(module)
+    return module
+
+
+def normalize_ntfs_inspection(value, snapshot, source):
+    fields = {'schemaVersion', 'deviceBytes', 'volumeBytes', 'clusterBytes', 'minimumBytes', 'inspectionFingerprint'}
+    if not isinstance(value, dict) or set(value) != fields or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1:
+        raise ValueError('Invalid NTFS inspection')
+    size = (source['endSector'] - source['startSector'] + 1) * snapshot['logicalSectorBytes']
+    sector = snapshot['logicalSectorBytes']
+    if (type(value['deviceBytes']) is not int or value['deviceBytes'] != size or size > 8 * 1024**4
+            or type(value['clusterBytes']) is not int or not sector <= value['clusterBytes'] <= 65536
+            or value['clusterBytes'] & (value['clusterBytes'] - 1)
+            or type(value['volumeBytes']) is not int or not sector <= value['volumeBytes'] <= size
+            or size - value['volumeBytes'] >= value['clusterBytes']
+            or (value['volumeBytes'] - sector) % value['clusterBytes']
+            or type(value['minimumBytes']) is not int or not 0 < value['minimumBytes'] <= value['volumeBytes']
+            or value['minimumBytes'] % sector
+            or not isinstance(value['inspectionFingerprint'], str)
+            or not re.fullmatch('[0-9a-f]{64}', value['inspectionFingerprint'])):
+        raise ValueError('Invalid NTFS inspection geometry')
+    return dict(value)
 
 
 def read_request(fd):
@@ -449,6 +494,73 @@ class System:
 
     def platform_supported(self):
         return platform.machine() == "x86_64" and Path("/sys/firmware/efi").is_dir()
+
+    def inspect_ntfs(self, snapshot, source):
+        """Bind the private reader to one observed partition under the lease."""
+        worker = manual_module()
+        fd = None
+        try:
+            path, number = worker.partition_descriptor(snapshot, source)
+            fd = os.open(path, os.O_RDONLY | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+            if (worker.partition_descriptor(snapshot, source, fd) != (path, number)
+                    or struct.unpack('=I', fcntl.ioctl(fd, 0x1268, bytes(4)))[0] != snapshot['logicalSectorBytes']):
+                raise ValueError('Source partition changed')
+            size = (source['endSector'] - source['startSector'] + 1) * snapshot['logicalSectorBytes']
+            value = self.ntfs_worker(fd, size, snapshot['logicalSectorBytes'])
+            if (worker.partition_descriptor(snapshot, source, fd) != (path, number)
+                    or struct.unpack('=I', fcntl.ioctl(fd, 0x1268, bytes(4)))[0] != snapshot['logicalSectorBytes']):
+                raise ValueError('Source partition changed')
+            return normalize_ntfs_inspection(value, snapshot, source)
+        except (OSError, ValueError, TypeError, KeyError):
+            fail('AMBIGUOUS_TOPOLOGY', 'NTFS source could not be safely inspected.')
+        finally:
+            if fd is not None: os.close(fd)
+
+    def ntfs_worker(self, fd, size, sector):
+        lease = getattr(self, 'lease_fd', None)
+        if type(lease) is not int or lease < 3 or lease == fd or not stat.S_ISREG(os.fstat(lease).st_mode):
+            fail('UNSAFE_LOCK', 'NTFS inspection requires the installation lease.')
+        ntfs_args = (*NTFS_ARGV, str(fd), str(size), str(sector))
+        process = subprocess.Popen(ntfs_args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            close_fds=True, pass_fds=(fd, lease), env={**CHILD_ENV, 'RO_INSTALLER_LEASE_FD': str(lease)},
+            start_new_session=True)
+        streams = [process.stdout, process.stderr]; output = bytearray(); total = 0
+        deadline = time.monotonic() + NTFS_TIMEOUT
+        try:
+            while streams:
+                remaining = deadline - time.monotonic()
+                ready = select.select(streams, [], [], max(0, remaining))[0]
+                if remaining <= 0 or not ready:
+                    fail('SYSTEM_ERROR', 'NTFS inspection exceeded its deadline.')
+                for stream in ready:
+                    chunk = os.read(stream.fileno(), 1024); total += len(chunk)
+                    if total > 2048:
+                        fail('AMBIGUOUS_TOPOLOGY', 'NTFS inspection output exceeded its safety limit.')
+                    if not chunk: streams.remove(stream)
+                    elif stream is process.stdout: output.extend(chunk)
+            # Reserve the leader PID until its process group has been stopped.
+            # Popen.poll/wait here would reap it and allow PID/PGID reuse.
+            while True:
+                status = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG)
+                if status is not None: break
+                if time.monotonic() >= deadline:
+                    fail('SYSTEM_ERROR', 'NTFS inspection exceeded its deadline.')
+                time.sleep(0.01)
+            if status.si_code != os.CLD_EXITED or status.si_status != 0:
+                fail('AMBIGUOUS_TOPOLOGY', 'NTFS metadata could not be verified.')
+            try:
+                return json.loads(output, object_pairs_hook=unique_object,
+                                  parse_constant=lambda _: fail('AMBIGUOUS_TOPOLOGY', 'Invalid NTFS number.'))
+            except (HelperError, ValueError, UnicodeError, TypeError, RecursionError):
+                fail('AMBIGUOUS_TOPOLOGY', 'Invalid NTFS inspection result.')
+        except OSError:
+            fail('SYSTEM_ERROR', 'NTFS inspection transport failed.')
+        finally:
+            try: os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError: pass
+            try: process.wait(timeout=1)
+            except subprocess.TimeoutExpired: pass  # An uninterruptible child retains its lease.
+            process.stdout.close(); process.stderr.close()
 
     def audit(self):
         return {"effectiveUid": os.geteuid(), "architecture": platform.machine(),
@@ -938,6 +1050,23 @@ def handle(request, system, emit=lambda _: None):
                 except (ValueError,TypeError,KeyError):fail('AMBIGUOUS_TOPOLOGY','Invalid GPT snapshot.')
                 if request.operation=='probe-free-space':return {'snapshot':snapshot}
                 if snapshot['tableFingerprint']!=request.table_fingerprint:fail('DEVICE_CHANGED','Partition table changed since selection.')
+                if request.operation == 'assess-ntfs-shrink':
+                    proposal = {'schemaVersion': 1, 'snapshot': snapshot, **request.ntfs_choices}
+                    try:
+                        # Structural rejection before expensive filesystem inspection.
+                        preliminary = gpt_module().ntfs_shrink_plan({**proposal, 'minimumFilesystemBytes': 1})
+                    except (ValueError, TypeError, KeyError):
+                        fail('INVALID_REQUEST', 'Unsupported NTFS shrink geometry.')
+                    inspection = system.inspect_ntfs(snapshot, preliminary['source'])
+                    try:
+                        inspection = normalize_ntfs_inspection(inspection, snapshot, preliminary['source'])
+                        computed = gpt_module().ntfs_shrink_plan({**proposal, 'minimumFilesystemBytes': inspection['minimumBytes']})
+                    except (ValueError, TypeError, KeyError):
+                        fail('AMBIGUOUS_TOPOLOGY', 'NTFS source has insufficient verified capacity.')
+                    fresh = system.gpt_snapshot(before)
+                    if not same_plan_value(snapshot, fresh) or validate_device(system, request.disk) != before:
+                        fail('DEVICE_CHANGED', 'Device changed during NTFS assessment.')
+                    return {'plan': computed, 'inspection': inspection}
                 if request.operation == 'validate-manual-plan':
                     try:gpt_module().manual_plan(snapshot,request.manual_choices)
                     except (ValueError,TypeError,KeyError):fail('INVALID_REQUEST','Invalid manual allocation.')

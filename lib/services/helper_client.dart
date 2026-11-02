@@ -1,3 +1,5 @@
+import '../models/ntfs_shrink_assessment.dart';
+import '../models/ntfs_shrink_installation_plan.dart';
 import '../models/manual_installation_plan.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -181,6 +183,58 @@ class HelperClient {
       throw const HelperException('PROTOCOL_ERROR');
     }
     return proposed;
+  }
+
+  Future<NtfsShrinkAssessment> assessNtfsShrink({
+    required GptDiskSnapshot snapshot,
+    required int sourceNumber,
+    required int espNumber,
+    required int rootBytes,
+  }) async {
+    if (protocolVersion != 2) throw const HelperException('INVALID_REQUEST');
+    try {
+      // A structural check only; the helper must independently inspect NTFS.
+      NtfsShrinkInstallationPlan.build(
+        snapshot: snapshot,
+        sourceNumber: sourceNumber,
+        espNumber: espNumber,
+        rootBytes: rootBytes,
+        minimumFilesystemBytes: 1,
+      );
+    } on FormatException {
+      throw const HelperException('INVALID_REQUEST');
+    }
+    final result = await _call({
+      'protocolVersion': 2,
+      'operation': 'assess-ntfs-shrink',
+      'disk': snapshot.device.path,
+      'expectedDevice': snapshot.device.expected,
+      'tableFingerprint': snapshot.tableFingerprint,
+      'sourceNumber': sourceNumber,
+      'espNumber': espNumber,
+      'rootBytes': rootBytes,
+    });
+    try {
+      if (!exactFields(result, {
+        'protocolVersion',
+        'type',
+        'operation',
+        'ok',
+        'plan',
+        'inspection',
+      })) {
+        throw const FormatException('Invalid assessment result');
+      }
+      return NtfsShrinkAssessment.fromJson(
+        {'plan': result['plan'], 'inspection': result['inspection']},
+        snapshot: snapshot,
+        sourceNumber: sourceNumber,
+        espNumber: espNumber,
+        rootBytes: rootBytes,
+      );
+    } on FormatException {
+      throw const HelperException('PROTOCOL_ERROR');
+    }
   }
 
   Future<void> installManualPlan(
