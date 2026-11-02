@@ -288,6 +288,17 @@ installation lease. Assessment does not grant resize authority. Private ownershi
 proofs, a target-size dry run, writer validation and failure handling remain
 required before alongside execution can be enabled.
 
+A separate private `inspect_resized_fd` primitive validates a completed resize
+before any future GPT update. It binds protected boot fields to the captured
+original record, requires the exact decimal target geometry and matching backup
+at the target end, and checks MFT/Mirror bounds. It accepts exactly the
+resize-produced dirty bit while retaining the hibernation and journal checks.
+Its allocation probe uses `--info --no-action --force` only after that post-state
+check; initial eligibility still uses the strict clean-state path without force.
+Metadata and boot records must remain stable across inspection. This primitive
+has no CLI mode or write authority; dependency qualification and writer/failure
+integration are still required.
+
 ### Read-only manual validation (helper v2)
 
 `validate-manual-plan` accepts `disk`, `expectedDevice`, `tableFingerprint` and
