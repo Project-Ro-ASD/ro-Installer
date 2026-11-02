@@ -15,6 +15,8 @@ BuildArch:      x86_64
 # taken from the Fedora buildroot repositories.
 BuildRequires:  clang
 BuildRequires:  binutils
+BuildRequires:  dbus-daemon
+BuildRequires:  %{_libdir}/libsystemd.so.0
 BuildRequires:  cmake
 BuildRequires:  ninja-build
 BuildRequires:  gtk3-devel
@@ -37,6 +39,8 @@ Requires:       gtk3
 Requires:       libX11
 Requires:       polkit
 Requires:       python3
+Requires:       %{_libdir}/libsystemd.so.0
+Requires:       systemd
 Requires:       util-linux
 Requires:       btrfs-progs
 Requires:       dosfstools

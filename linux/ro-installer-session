@@ -84,6 +84,73 @@ def helper_module():
     return module
 
 
+class PowerInhibitError(RuntimeError):
+    pass
+
+
+def _power_fd(lib):
+    """Take our own CLOEXEC reference to logind's borrowed reply descriptor."""
+    pointer = ctypes.c_void_p
+    def bind(name, arguments, result=ctypes.c_int):
+        function = getattr(lib, name)
+        function.argtypes = arguments
+        function.restype = result
+        return function
+    new_bus = bind('sd_bus_new', [ctypes.POINTER(pointer)])
+    address = bind('sd_bus_set_address', [pointer, ctypes.c_char_p])
+    client = bind('sd_bus_set_bus_client', [pointer, ctypes.c_int])
+    start = bind('sd_bus_start', [pointer])
+    timeout = bind('sd_bus_set_method_call_timeout', [pointer, ctypes.c_uint64])
+    call = bind('sd_bus_call_method', [pointer, ctypes.c_char_p, ctypes.c_char_p,
+        ctypes.c_char_p, ctypes.c_char_p, pointer, ctypes.POINTER(pointer), ctypes.c_char_p])
+    read = bind('sd_bus_message_read', [pointer, ctypes.c_char_p])
+    unref_message = bind('sd_bus_message_unref', [pointer], pointer)
+    unref_bus = bind('sd_bus_unref', [pointer], pointer)
+    bus, reply = pointer(), pointer()
+    descriptor = ctypes.c_int(-1)
+    owned = None
+    try:
+        try:
+            if new_bus(ctypes.byref(bus)) < 0 or not bus:
+                raise RuntimeError('system bus unavailable')
+            if address(bus, b'unix:path=/run/dbus/system_bus_socket') < 0 or client(bus, 1) < 0:
+                raise RuntimeError('system bus setup failed')
+            if timeout(bus, 5_000_000) < 0:
+                raise RuntimeError('bus deadline unavailable')
+            if start(bus) < 0:
+                raise RuntimeError('system bus connection failed')
+            result = call(bus, b'org.freedesktop.login1', b'/org/freedesktop/login1',
+                b'org.freedesktop.login1.Manager', b'Inhibit', None, ctypes.byref(reply), b'ssss',
+                ctypes.c_char_p(b'sleep:shutdown'), ctypes.c_char_p(b'Ro Installer'),
+                ctypes.c_char_p(b'Installation in progress'), ctypes.c_char_p(b'block'))
+            if result < 0 or not reply or read(reply, b'h', ctypes.byref(descriptor)) != 1 or descriptor.value < 3:
+                raise RuntimeError('power inhibition unavailable')
+            owned = fcntl.fcntl(descriptor.value, fcntl.F_DUPFD_CLOEXEC, 3)
+        finally:
+            try:
+                if reply: unref_message(reply)
+            finally:
+                if bus: unref_bus(bus)
+    except BaseException:
+        if owned is not None: os.close(owned)
+        raise
+    return owned
+
+
+@contextlib.contextmanager
+def power_inhibitor():
+    # Root session owns this capability through engine and descendant cleanup.
+    # No GUI environment selects a bus, provider, action or inhibitor mode.
+    try:
+        descriptor = _power_fd(ctypes.CDLL('/usr/lib64/libsystemd.so.0'))
+    except Exception:
+        raise PowerInhibitError('POWER_INHIBIT_FAILED') from None
+    try:
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def private_namespace():
     before = os.readlink('/proc/self/ns/mnt')
     os.unshare(os.CLONE_NEWNS)
@@ -409,13 +476,19 @@ def main():
                 error='NAMESPACE_FAILED'
                 raise
             record_event(recorder,'namespace.end',operation='namespace',status='success',duration=0)
-            directory=tempfile.mkdtemp(prefix='session-',dir=gate.LOCK_DIRECTORY)
             try:
-                session=Supervisor(gate,lease,before,namespace,directory,recorder=recorder)
-                env[SESSION_ENV]=session.path
-                result=session.run(argv,env)
-            finally:
-                shutil.rmtree(directory)
+                with power_inhibitor():
+                    directory=tempfile.mkdtemp(prefix='session-',dir=gate.LOCK_DIRECTORY)
+                    try:
+                        session=Supervisor(gate,lease,before,namespace,directory,recorder=recorder)
+                        env[SESSION_ENV]=session.path
+                        result=session.run(argv,env)
+                    finally:
+                        shutil.rmtree(directory)
+            except PowerInhibitError:
+                error='POWER_INHIBIT_FAILED'
+                warn(error)
+                raise
             # Checkpoint and publish before optional reboot, with the original
             # installation lease still held. The engine cannot reboot first.
             publish_report(recorder,result,mode,mode_report,error)
