@@ -3,6 +3,7 @@ import '../services/disk_service.dart';
 import '../services/helper_protocol.dart';
 import '../models/approved_full_disk_plan.dart';
 import '../models/free_space_installation_plan.dart';
+import '../models/manual_installation_plan.dart';
 import '../l10n/installer_translation_catalog.dart';
 
 class InstallerState extends ChangeNotifier {
@@ -52,6 +53,8 @@ class InstallerState extends ChangeNotifier {
     _confirmedPlan = null;
     _freeSpaceProposal = null;
     _confirmedFreeSpacePlan = null;
+    _manualProposal = null;
+    _confirmedManualPlan = null;
   }
 
   ApprovedFullDiskPlan? _confirmedPlan;
@@ -89,6 +92,36 @@ class InstallerState extends ChangeNotifier {
     return true;
   }
 
+  ManualInstallationPlan? _manualProposal, _confirmedManualPlan;
+  ManualInstallationPlan? get selectedManualPlan => _manualProposal;
+  ManualInstallationPlan? get confirmedManualPlan => _confirmedManualPlan;
+  bool selectManualPlan(ManualInstallationPlan plan) {
+    if (installationActive ||
+        partitionMethod != 'manual' ||
+        selectedDisk != plan.snapshot.device.path ||
+        fileSystem != 'btrfs') {
+      return false;
+    }
+    clearConfirmation();
+    _manualProposal = plan;
+    notifyListeners();
+    return true;
+  }
+
+  bool confirmManualPlan(ManualInstallationPlan plan, int revision) {
+    if (installationActive ||
+        revision != _diskSelectionRevision ||
+        !identical(plan, _manualProposal) ||
+        partitionMethod != 'manual' ||
+        selectedDisk != plan.snapshot.device.path ||
+        fileSystem != 'btrfs') {
+      return false;
+    }
+    _confirmedDevice = plan.snapshot.device;
+    _confirmedManualPlan = plan;
+    return true;
+  }
+
   int _diskSelectionRevision = 0;
   int get diskSelectionRevision => _diskSelectionRevision;
   void clearConfirmation() {
@@ -97,6 +130,8 @@ class InstallerState extends ChangeNotifier {
     _confirmedPlan = null;
     _freeSpaceProposal = null;
     _confirmedFreeSpacePlan = null;
+    _manualProposal = null;
+    _confirmedManualPlan = null;
   }
 
   bool confirmPlan(ApprovedFullDiskPlan plan, int revision) {
@@ -222,7 +257,7 @@ class InstallerState extends ChangeNotifier {
     if (installationActive) return;
     clearConfirmation();
     selectedFreeSpace = {};
-    if (!const ['full', 'free_space'].contains(method)) {
+    if (!const ['full', 'free_space', 'manual'].contains(method)) {
       notifyListeners();
       return;
     }

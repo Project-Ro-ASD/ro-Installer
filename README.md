@@ -167,7 +167,7 @@ its older protocol compatibility remain unchanged.
 ### Manual storage planning
 
 `ManualInstallationPlan` is a pure, immutable planning model used by helper v2
-and the installation engine. The GUI editor is not yet connected. Legacy
+and the installation engine. The GUI editor selects these typed roles. Legacy
 `manualPartitions` maps cannot authorize execution. Read-only validation and
 installation admission are separate operations.
 
@@ -287,8 +287,15 @@ There is no delete, shrink, filesystem-preserving root reuse, separate-home or
 disk-swap execution path. A failed append is reported without attempting a
 whole-table rollback. The legacy manual-map executor has been removed.
 
-The public API and backend are connected; the typed GUI editor and its
-confirmation flow remain a separate integration step.
+The GUI reads a fresh GPT inventory and lets the user select existing EFI/root
+partitions or specify aligned new ranges in a listed free extent, using integer
+MiB offsets and sizes. Existing ESPs default to reuse; formatting is an explicit
+choice. The helper validates the typed proposal before the confirmation dialog.
+The dialog identifies both targets, sizes and create/format/reuse actions, and
+warns about root data loss and the selected EFI policy. Changing the disk, mode,
+range or format choice invalidates approval, including an already open dialog.
+Installation sends the same compact intent through helper v2 and requires its
+terminal installed-success result.
 
 The standard automatic Ro-ASD profile is x86_64, UEFI, GPT, and Btrfs, with ZRAM
 and no dedicated disk swap partition. The standard rollback-aware Btrfs layout is:
@@ -305,7 +312,7 @@ and no dedicated disk swap partition. The standard rollback-aware Btrfs layout i
 is mounted at `/boot/efi`.
 
 Full-disk erase and create-only free-space installation have GUI flows. Manual
-installation has a helper v2 backend and awaits GUI integration. Alongside
+installation has a typed GUI and helper v2 execution contract. Alongside
 shrink, replace-existing-OS, reinstall-preserve-home and LUKS remain future
 milestones. Manual installation may later support ext4/XFS targets; these
 filesystems are valid for reliable normal Ro-ASD operation, but Ro-ASD must not

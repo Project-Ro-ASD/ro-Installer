@@ -489,5 +489,21 @@
   "install_copy_efi": "EFI",
   "disk_full_plan_summary": "整盘方案：清除所有数据；创建 512 MiB FAT32 EFI 分区，其余空间使用 Btrfs。不创建磁盘交换分区。",
   "disk_free_space_probe": "读取未分配空间",
-  "disk_free_space_limit": "此磁盘的分区数量超过安全安装上限。"
+  "disk_free_space_limit": "此磁盘的分区数量超过安全安装上限。",
+  "manual_method": "手动分区",
+  "manual_caption": "选择 EFI 和根分区；不调整大小或删除分区。",
+  "manual_new": "新建分区",
+  "manual_existing": "现有分区",
+  "manual_erase": "格式化并清除",
+  "manual_reuse": "复用 EFI",
+  "manual_root_warning": "所选根分区上的所有数据（包括 /home）将被清除。未选中的分区保持不变。",
+  "manual_esp_warning": "格式化 EFI 会清除所有启动文件；其他系统可能无法启动。",
+  "manual_reuse_warning": "复用 EFI 会保留现有文件并添加新的启动目录。已有 EFI/fedora 目录时会拒绝操作。",
+  "manual_confirm": "确认手动安装",
+  "manual_install": "清除所选目标并安装",
+  "manual_format_esp": "格式化此 EFI（清除所有启动文件）",
+  "manual_no_target": "没有合适的目标",
+  "manual_start": "起点 (MiB)",
+  "manual_size": "大小 (MiB)",
+  "manual_invalid": "选择两个不重叠的目标。新范围必须位于列出的空闲区域内；EFI ≥512 MiB，根分区 ≥40 GiB。"
 }

@@ -489,5 +489,21 @@
   "install_copy_efi": "EFI",
   "disk_full_plan_summary": "ディスク全体：すべてのデータを消去し、512 MiB の FAT32 EFI と残りの領域に Btrfs を作成します。スワップパーティションは作成しません。",
   "disk_free_space_probe": "空き領域を読み取る",
-  "disk_free_space_limit": "このディスクのパーティション数は安全なインストール上限を超えています。"
+  "disk_free_space_limit": "このディスクのパーティション数は安全なインストール上限を超えています。",
+  "manual_method": "手動パーティション設定",
+  "manual_caption": "EFI とルートを選択します。サイズ変更や削除は行いません。",
+  "manual_new": "新規パーティション",
+  "manual_existing": "既存パーティション",
+  "manual_erase": "フォーマットして消去",
+  "manual_reuse": "EFI を再利用",
+  "manual_root_warning": "選択したルートの /home を含む全データが消去されます。選択していないパーティションは変更されません。",
+  "manual_esp_warning": "EFI のフォーマットは全起動ファイルを消去します。他のシステムが起動しなくなる場合があります。",
+  "manual_reuse_warning": "EFI の再利用は既存ファイルを保持し、新しい起動ディレクトリを追加します。既存の EFI/fedora は拒否されます。",
+  "manual_confirm": "手動インストールの確認",
+  "manual_install": "選択した対象を消去してインストール",
+  "manual_format_esp": "この EFI をフォーマット（全起動ファイルを消去）",
+  "manual_no_target": "利用できる対象なし",
+  "manual_start": "開始位置 (MiB)",
+  "manual_size": "サイズ (MiB)",
+  "manual_invalid": "重ならない対象を2つ選択してください。新規範囲は表示された空き領域内に収めます。EFI ≥512 MiB、ルート ≥40 GiB。"
 }

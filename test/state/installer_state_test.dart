@@ -213,10 +213,12 @@ void main() {
       expect(state.selectedFreeSpace, isEmpty);
 
       state.updatePartitionMethod('manual');
-      expect(state.partitionMethod, 'free_space');
+      expect(state.partitionMethod, 'manual');
+      expect(state.selectedManualPlan, isNull);
+      expect(state.confirmedManualPlan, isNull);
 
       state.updatePartitionMethod('alongside');
-      expect(state.partitionMethod, 'free_space');
+      expect(state.partitionMethod, 'manual');
     });
   });
 }

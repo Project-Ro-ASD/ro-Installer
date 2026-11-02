@@ -489,5 +489,21 @@
   "install_copy_efi": "EFI",
   "disk_full_plan_summary": "Tam disk planı: tüm veriler silinir; 512 MiB FAT32 EFI ve kalan alanda Btrfs oluşturulur. Diskte swap bölümü oluşturulmaz.",
   "disk_free_space_probe": "Boş alanları oku",
-  "disk_free_space_limit": "Bu diskin bölüm sayısı güvenli kurulum sınırını aşıyor."
+  "disk_free_space_limit": "Bu diskin bölüm sayısı güvenli kurulum sınırını aşıyor.",
+  "manual_method": "Manuel bölümleme",
+  "manual_caption": "EFI ve root seçin; yeniden boyutlandırma veya silme yok.",
+  "manual_new": "Yeni bölüm",
+  "manual_existing": "Mevcut bölüm",
+  "manual_erase": "Biçimlendir ve sil",
+  "manual_reuse": "EFI’yi kullan",
+  "manual_root_warning": "Seçilen root üzerindeki /home dahil tüm veriler silinecek. Seçilmeyen bölümler değişmez.",
+  "manual_esp_warning": "EFI biçimlendirilirse tüm boot dosyaları silinir; diğer sistemler açılmayabilir.",
+  "manual_reuse_warning": "EFI yeniden kullanımı mevcut dosyaları korur ve yeni boot dizini ekler. Mevcut EFI/fedora dizini kabul edilmez.",
+  "manual_confirm": "Manuel kurulumu onayla",
+  "manual_install": "Seçili hedefleri sil ve kur",
+  "manual_format_esp": "Bu EFI bölümünü biçimlendir (tüm boot dosyalarını sil)",
+  "manual_no_target": "Uygun hedef yok",
+  "manual_start": "Başlangıç (MiB)",
+  "manual_size": "Boyut (MiB)",
+  "manual_invalid": "Çakışmayan iki hedef seçin. Yeni aralıklar listelenen boşluğa sığmalı; EFI ≥512 MiB, root ≥40 GiB olmalı."
 }

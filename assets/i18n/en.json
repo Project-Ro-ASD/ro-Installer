@@ -489,5 +489,21 @@
   "install_copy_efi": "EFI",
   "disk_full_plan_summary": "Full-disk plan: erase all data; create a 512 MiB FAT32 EFI partition and Btrfs in the remaining space. No disk swap partition.",
   "disk_free_space_probe": "Read free space",
-  "disk_free_space_limit": "This disk has more partitions than the safe installation limit."
+  "disk_free_space_limit": "This disk has more partitions than the safe installation limit.",
+  "manual_method": "Manual partitioning",
+  "manual_caption": "Select EFI and root; no resizing or deletion.",
+  "manual_new": "New partition",
+  "manual_existing": "Existing partition",
+  "manual_erase": "Format and erase",
+  "manual_reuse": "Reuse EFI",
+  "manual_root_warning": "All data on the selected root, including /home, will be erased. Unselected partitions remain unchanged.",
+  "manual_esp_warning": "Formatting EFI erases all its boot files; other systems may no longer boot.",
+  "manual_reuse_warning": "EFI reuse preserves existing files and adds a new boot directory. An existing EFI/fedora directory is rejected.",
+  "manual_confirm": "Confirm manual installation",
+  "manual_install": "Erase selected targets and install",
+  "manual_format_esp": "Format this EFI partition (erase all boot files)",
+  "manual_no_target": "No eligible target",
+  "manual_start": "Start (MiB)",
+  "manual_size": "Size (MiB)",
+  "manual_invalid": "Choose two non-overlapping targets. New ranges must fit a listed gap; EFI ≥512 MiB and root ≥40 GiB."
 }

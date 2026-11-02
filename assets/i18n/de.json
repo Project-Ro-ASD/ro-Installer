@@ -489,5 +489,21 @@
   "install_copy_efi": "EFI",
   "disk_full_plan_summary": "Gesamter Datenträger: alle Daten löschen; 512 MiB FAT32-EFI und Btrfs im übrigen Speicher erstellen. Keine Swap-Partition.",
   "disk_free_space_probe": "Freien Speicher lesen",
-  "disk_free_space_limit": "Die Anzahl der Partitionen überschreitet die sichere Installationsgrenze."
+  "disk_free_space_limit": "Die Anzahl der Partitionen überschreitet die sichere Installationsgrenze.",
+  "manual_method": "Manuelle Partitionierung",
+  "manual_caption": "EFI und Root wählen; keine Größenänderung oder Löschung.",
+  "manual_new": "Neue Partition",
+  "manual_existing": "Vorhandene Partition",
+  "manual_erase": "Formatieren und löschen",
+  "manual_reuse": "EFI wiederverwenden",
+  "manual_root_warning": "Alle Daten auf der gewählten Root-Partition einschließlich /home werden gelöscht. Nicht ausgewählte Partitionen bleiben unverändert.",
+  "manual_esp_warning": "EFI-Formatierung löscht alle Startdateien; andere Systeme starten möglicherweise nicht mehr.",
+  "manual_reuse_warning": "EFI-Wiederverwendung erhält Dateien und ergänzt ein neues Startverzeichnis. Ein vorhandenes EFI/fedora wird abgelehnt.",
+  "manual_confirm": "Manuelle Installation bestätigen",
+  "manual_install": "Gewählte Ziele löschen und installieren",
+  "manual_format_esp": "Diese EFI-Partition formatieren (alle Startdateien löschen)",
+  "manual_no_target": "Kein geeignetes Ziel",
+  "manual_start": "Beginn (MiB)",
+  "manual_size": "Größe (MiB)",
+  "manual_invalid": "Zwei überlappungsfreie Ziele wählen. Neue Bereiche müssen in eine angezeigte Lücke passen; EFI ≥512 MiB, Root ≥40 GiB."
 }
