@@ -192,6 +192,22 @@ remain disjoint and fit unused GPT slots. Slots are assigned deterministically
 with ESP first; the post-create inventory must fit the 32-partition probe limit.
 There is no delete, resize, root-preservation, separate-home or disk-swap plan.
 
+### Confirmed full-disk device readiness
+
+After partition creation, confirmed full-disk installs run the existing
+`partprobe` and `udevadm settle` steps, then verify readiness instead of sleeping
+unconditionally. The isolated GPT reader checks both GPT copies, device identity
+and kernel partition geometry. The engine requires exactly the approved EFI/root
+roles, types, attributes, capacity and writer-specific boundaries. `sgdisk` uses
+the last usable sector; the `parted` fallback ends at the preceding MiB boundary.
+
+Transient probe failures receive bounded retries and command timeouts. A readable
+wrong layout, changed device, expired retry window or revoked approval stops the
+stage before formatting. Target identity is checked before the probe and again
+before acceptance. This replaces the fixed two-second delay for confirmed full
+installs; legacy full and other storage modes retain their existing readiness
+paths. Hardware performance gains require separate measurement.
+
 ### NTFS shrink planning
 
 `NtfsShrinkInstallationPlan` is a pure proposal for a future alongside path.

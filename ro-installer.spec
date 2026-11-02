@@ -27,6 +27,7 @@ BuildRequires:  acl
 BuildRequires:  util-linux
 BuildRequires:  dosfstools
 BuildRequires:  btrfs-progs
+BuildRequires:  parted
 
 Requires:       gtk3
 Requires:       libX11
