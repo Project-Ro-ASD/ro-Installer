@@ -299,6 +299,23 @@ Metadata and boot records must remain stable across inspection. This primitive
 has no CLI mode or write authority; dependency qualification and writer/failure
 integration are still required.
 
+A private `prepare_resize_target` primitive now binds an exact MiB-aligned
+shrink target to a fresh inspection, keeps the 40 GiB retained-source floor and 1 GiB
+headroom above the observed minimum, and requires a successful fixed
+`ntfsresize --no-action -P --size` trial. Geometry, boot/metadata, the inspection
+fingerprint and the toolchain are checked again before returning preparation
+evidence. No CLI or helper operation exposes this primitive.
+
+Preparation requires `ntfsresize` and both owning Fedora x86_64 packages
+(`ntfsprogs`, `ntfs-3g-libs`) to agree on release, epoch and build revision,
+with a calendar release of at least
+[2026.9.28](https://github.com/tuxera/ntfs-3g/releases/tag/2026.9.28).
+Unknown, older or mismatched packages fail closed; this is a compatibility gate,
+not executable integrity attestation. Existing read-only assessment remains
+available with its current dependencies. Future write admission must regenerate
+preparation under the caller's exclusive device/lease checks and still requires
+a validated write boundary, post-checks and failure handling.
+
 ### Read-only manual validation (helper v2)
 
 `validate-manual-plan` accepts `disk`, `expectedDevice`, `tableFingerprint` and

@@ -1,6 +1,7 @@
 #!/usr/bin/python3 -I
 """Private read-only NTFS inspection primitive; not installation admission."""
 import ctypes as c
+import datetime
 import fcntl
 import hashlib
 import json
@@ -244,14 +245,21 @@ class NativeNtfs:
                 raise ValueError('Read-only NTFS metadata close failed')
 
 
-def run_tool(kind, fd):
+def run_tool(kind, fd, *, target_bytes=None):
+    if kind == 'resize-target' and (type(target_bytes) is not int
+            or not 1048576 <= target_bytes <= MAX_BYTES or target_bytes % 1048576):
+        raise ValueError('Invalid read-only NTFS target')
     node = f'/proc/self/fd/{fd}'
     argv = {'signature': ('/usr/sbin/blkid', '-p', '-o', 'export', '--', node),
             'minimum': ('/usr/bin/ntfsresize', '--info', '--no-action', '-P', node),
             # Post-check only: allow the independently verified dirty bit for a
             # read-only allocation scan. Initial eligibility never uses force.
-            'resized-minimum': ('/usr/bin/ntfsresize', '--info', '--no-action', '--force', '-P', node)}[kind]
-    inherited = [fd]
+            'resized-minimum': ('/usr/bin/ntfsresize', '--info', '--no-action', '--force', '-P', node),
+            'resize-version': ('/usr/bin/ntfsresize', '--version'),
+            'resize-packages': ('/usr/bin/rpm', '-qf', '--qf', '%{NAME}|%{EPOCHNUM}|%{VERSION}|%{RELEASE}|%{ARCH}\n',
+                                '/usr/bin/ntfsresize', LIBRARY),
+            'resize-target': ('/usr/bin/ntfsresize', '--no-action', '-P', '--size', str(target_bytes), node)}[kind]
+    inherited = [] if kind in {'resize-version', 'resize-packages'} else [fd]
     lease = os.environ.get('RO_INSTALLER_LEASE_FD')
     if lease is not None:
         if not re.fullmatch('[0-9]{1,6}', lease):
@@ -263,8 +271,8 @@ def run_tool(kind, fd):
     process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         close_fds=True, pass_fds=tuple(sorted(set(inherited))), env={'PATH':'/usr/sbin:/usr/bin','LC_ALL':'C'})
     streams = [process.stdout, process.stderr]; output = bytearray(); total = 0
-    limit = 4096 if kind == 'signature' else 65536
-    deadline = time.monotonic() + (2 if kind == 'signature' else 90)
+    limit = 4096 if kind in {'signature', 'resize-version', 'resize-packages'} else 65536
+    deadline = time.monotonic() + (5 if kind == 'resize-packages' else 2 if kind in {'signature', 'resize-version'} else 90)
     try:
         while streams:
             remaining = deadline - time.monotonic()
@@ -283,6 +291,85 @@ def run_tool(kind, fd):
     finally:
         if process.poll() is None: process.kill()
         process.wait(); process.stdout.close(); process.stderr.close()
+
+
+def qualify_resize_toolchain(version_output, package_output):
+    """Compatibility gate for future writes, not package integrity attestation."""
+    if len(version_output) > 4096 or len(package_output) > 4096 or b'\0' in version_output + package_output:
+        raise ValueError('Invalid NTFS toolchain output')
+    def release(value):
+        if not re.fullmatch(r'[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}', value):
+            raise ValueError('Unrecognized NTFS release')
+        try:
+            return datetime.date(*(int(part) for part in value.split('.')))
+        except ValueError:
+            raise ValueError('Invalid NTFS release date') from None
+    lines = version_output.decode('utf-8', errors='strict').splitlines()
+    match = re.fullmatch(r'ntfsresize v([0-9.]+) \(libntfs-3g\)', lines[0] if lines else '')
+    if match is None or sum(line.startswith('ntfsresize v') for line in lines) != 1:
+        raise ValueError('Unrecognized NTFS resize version')
+    version = release(match[1])
+    if version < datetime.date(2026, 9, 28):
+        raise ValueError('Unsupported NTFS resize release')
+    packages = {}
+    for line in package_output.decode('ascii', errors='strict').splitlines():
+        fields = line.split('|')
+        if (len(fields) != 5 or fields[0] not in {'ntfsprogs', 'ntfs-3g-libs'} or fields[0] in packages
+                or not re.fullmatch(r'0|[1-9][0-9]{0,7}', fields[1])
+                or not re.fullmatch(r'[0-9][A-Za-z0-9._+~^\-]{0,63}', fields[3]) or fields[4] != 'x86_64'
+                or release(fields[2]) != version):
+            raise ValueError('Mismatched NTFS dependency package')
+        packages[fields[0]] = fields[1:]
+    if set(packages) != {'ntfsprogs', 'ntfs-3g-libs'} or packages['ntfsprogs'] != packages['ntfs-3g-libs']:
+        raise ValueError('NTFS dependencies must have matching EVR and architecture')
+    epoch, name, revision, arch = packages['ntfsprogs']
+    return {'version': name, 'epoch': int(epoch), 'release': revision, 'arch': arch}
+
+
+def validate_resize_target_test(raw, inspection, target_bytes, sector):
+    if len(raw) > 65536 or b'\0' in raw:
+        raise ValueError('Invalid NTFS target test output')
+    text = raw.decode('utf-8', errors='strict')
+    def field(pattern):
+        values = re.findall(pattern, text, re.M)
+        if len(values) != 1: raise ValueError('Ambiguous NTFS target test')
+        return int(values[0])
+    device = field(r'^Current device size\s*: ([0-9]+) bytes \([0-9]+ MB\)$')
+    volume = field(r'^Current volume size\s*: ([0-9]+) bytes \([0-9]+ MB\)$')
+    cluster = field(r'^Cluster size\s*: ([0-9]+) bytes$')
+    target = field(r'^New volume size\s*: ([0-9]+) bytes \([0-9]+ MB\)$')
+    if (device != inspection['deviceBytes'] or volume != inspection['volumeBytes']
+            or cluster != inspection['clusterBytes'] or target != ((target_bytes-sector)//cluster)*cluster+sector
+            or len(re.findall(r'^The read-only test run ended successfully\.$', text, re.M)) != 1):
+        raise ValueError('NTFS target test does not match preparation')
+
+
+def prepare_resize_target(fd, size, sector, target_bytes, expected_fingerprint):
+    """Private read-only preparation; the caller owns identity, exclusion and lease.
+
+    A future writer must regenerate this evidence at its mutation boundary.
+    No CLI mode exposes this primitive or accepts caller-provided minimums.
+    """
+    if (fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDONLY
+            or type(size) is not int or not 1048576 <= size <= MAX_BYTES or sector not in (512, 4096)
+            or type(target_bytes) is not int or not 40*1024**3 <= target_bytes < size or target_bytes % 1048576
+            or not isinstance(expected_fingerprint, str) or not re.fullmatch('[0-9a-f]{64}', expected_fingerprint)):
+        raise ValueError('Invalid NTFS target preparation')
+    toolchain = qualify_resize_toolchain(run_tool('resize-version', None), run_tool('resize-packages', None))
+    inspection = inspect_fd(fd, size, sector)
+    if (inspection['inspectionFingerprint'] != expected_fingerprint
+            or target_bytes < inspection['minimumBytes'] + 1024**3):
+        raise ValueError('Stale or insufficient NTFS target capacity')
+    before = boot_sector(fd, size, sector); native = NativeNtfs(); metadata = native.metadata(fd)
+    validate_resize_target_test(run_tool('resize-target', fd, target_bytes=target_bytes), inspection, target_bytes, sector)
+    if (boot_sector(fd, size, sector) != before or native.metadata(fd) != metadata or inspect_fd(fd, size, sector) != inspection
+            or qualify_resize_toolchain(run_tool('resize-version', None), run_tool('resize-packages', None)) != toolchain):
+        raise ValueError('NTFS source or toolchain changed during preparation')
+    result = {'schemaVersion': 1, 'deviceBytes': size, 'targetBytes': target_bytes,
+              'inspectionFingerprint': expected_fingerprint, 'toolchain': toolchain}
+    digest = hashlib.sha256(b'ro-ntfs-target-preparation-v1\0' + before[0] + metadata
+                            + json.dumps(result, sort_keys=True).encode())
+    return {**result, 'preparationFingerprint': digest.hexdigest()}
 
 
 def _info_fields(raw):

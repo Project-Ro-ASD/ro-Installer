@@ -106,6 +106,8 @@ run_check "identity-bound NTFS assessment and leased child cleanup" \
   python3 -B test/scripts/ntfs_assessment_test.py
 run_check "post-resize NTFS boot geometry and read-only allocation checks" \
   python3 -B test/scripts/ntfs_postresize_test.py
+run_check "qualified NTFS target preparation and read-only dry run" \
+  python3 -B test/scripts/ntfs_target_preparation_test.py
 run_check "read-only NTFS metadata and regular-file integrity" \
   python3 -B test/scripts/ntfs_readonly_test.py
 run_check "bounded EFI source budget and descriptor identity" \
