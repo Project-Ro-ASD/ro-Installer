@@ -28,6 +28,8 @@ BuildRequires:  util-linux
 BuildRequires:  dosfstools
 BuildRequires:  btrfs-progs
 BuildRequires:  parted
+BuildRequires:  ntfsprogs
+BuildRequires:  ntfs-3g-libs
 
 Requires:       gtk3
 Requires:       libX11
@@ -40,6 +42,7 @@ Requires:       gdisk
 Requires:       %{_sbindir}/sgdisk
 Requires:       parted
 Requires:       %{_sbindir}/ntfsresize
+Requires:       %{_libdir}/libntfs-3g.so.89
 Requires:       rsync
 Requires:       NetworkManager
 Requires:       %{_bindir}/udevadm
@@ -100,6 +103,8 @@ install -Dm644 linux/ro_installer_gpt.py \
     %{buildroot}%{_libexecdir}/ro_installer_gpt.py
 install -Dm644 linux/ro_installer_manual.py \
     %{buildroot}%{_libexecdir}/ro_installer_manual.py
+install -Dm644 linux/ro_installer_ntfs.py \
+    %{buildroot}%{_libexecdir}/ro_installer_ntfs.py
 install -Dm644 linux/ro-installer-observability.json \
     %{buildroot}%{_libexecdir}/ro-installer-observability.json
 install -Dm755 linux/ro-installer-export \
@@ -119,6 +124,7 @@ install -Dm755 linux/ro-installer-export \
 %attr(0644,root,root) %{_libexecdir}/ro_installer_records.py
 %attr(0644,root,root) %{_libexecdir}/ro_installer_gpt.py
 %attr(0644,root,root) %{_libexecdir}/ro_installer_manual.py
+%attr(0644,root,root) %{_libexecdir}/ro_installer_ntfs.py
 %attr(0644,root,root) %{_libexecdir}/ro-installer-observability.json
 %attr(0755,root,root) %{_libexecdir}/ro-installer-helper
 %attr(0644,root,root) %{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy

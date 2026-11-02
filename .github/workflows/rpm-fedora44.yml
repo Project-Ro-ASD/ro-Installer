@@ -57,6 +57,8 @@ jobs:
             dosfstools \
             btrfs-progs \
             parted \
+            ntfsprogs \
+            ntfs-3g-libs \
             ripgrep
 
       - name: Install pinned Flutter SDK
