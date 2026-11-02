@@ -231,9 +231,21 @@ GPT partition type alone does not establish NTFS, clean state, lack of encryptio
 or safe Windows shutdown.
 
 The model performs no disk or filesystem IO and grants no execution authority.
-Alongside installation remains rejected by the engine/helper. Authoritative
-read-only filesystem assessment, restricted metadata proofs, resize failure
-handling and GUI confirmation require separate integration.
+Alongside installation remains rejected by the engine/helper. Restricted metadata
+proofs, resize failure handling and GUI confirmation require separate integration.
+
+The helper v2 `assess-ntfs-shrink` operation accepts only the selected disk
+identity, observed GPT fingerprint, source/ESP numbers and requested root size.
+Under the installation lease it rebuilds the geometry, opens the exact source
+partition read-only/exclusively, checks its sysfs/FD identity and sector size,
+and runs the bounded private reader with that descriptor. Device/GPT and source
+identity are checked again before returning the computed intent and inspection.
+The caller cannot supply a filesystem minimum, descriptor or execution plan.
+Worker children inherit the lease; the process group is stopped before its
+leader is reaped. The response is assessment data, not permission to resize or
+a filesystem eligibility check for the ESP. `HelperClient.assessNtfsShrink`
+reconstructs the Dart plan from the returned minimum and rejects a response that
+does not match the selected snapshot and exact intent.
 
 ### Read-only NTFS inspection primitive
 
@@ -254,11 +266,10 @@ paths and diagnostics do not. The fingerprint covers the inspected fields, not
 all filesystem data. The fixed metadata flags follow the
 [exported volume API](https://github.com/tuxera/ntfs-3g/blob/edge/include/ntfs-3g/volume.h).
 
-The packaged worker is mode 0644 and has no public helper operation. Its caller
-must still establish the source partition identity, exclusive source FD, installer
-lease, current GPT and the exact shrink proposal. This primitive does not grant resize authority;
-private ownership proofs, a target-size dry run, writer validation and failure
-handling remain required before alongside execution can be enabled.
+The packaged worker is mode 0644; the helper assessment binds its source FD and
+installation lease. Assessment does not grant resize authority. Private ownership
+proofs, a target-size dry run, writer validation and failure handling remain
+required before alongside execution can be enabled.
 
 ### Read-only manual validation (helper v2)
 

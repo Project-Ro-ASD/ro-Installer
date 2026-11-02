@@ -17,6 +17,7 @@ EXPORT = "/usr/libexec/ro-installer-export"
 RECORDS = "/usr/libexec/ro_installer_records.py"
 GPT = "/usr/libexec/ro_installer_gpt.py"
 MANUAL = "/usr/libexec/ro_installer_manual.py"
+NTFS = "/usr/libexec/ro_installer_ntfs.py"
 SCHEMA = "/usr/libexec/ro-installer-observability.json"
 POLICY = "/usr/share/polkit-1/actions/org.roasd.installer.helper.policy"
 
@@ -72,7 +73,9 @@ def check_package(rpm):
         if (path.startswith("/etc/sudoers") or path.startswith("/etc/polkit-1/rules.d/")
                 or path.startswith("/usr/share/polkit-1/rules.d/")):
             raise ValueError("installer RPM must not ship sudoers or live-only allow rules")
-    for path, permissions in ((HELPER, 0o755), (BACKEND, 0o755), (SESSION, 0o755), (EXPORT, 0o755), (RECORDS, 0o644), (GPT, 0o644), (MANUAL, 0o644), (SCHEMA, 0o644), (POLICY, 0o644)):
+    for path, permissions in ((HELPER, 0o755), (BACKEND, 0o755), (SESSION, 0o755), (EXPORT, 0o755), (RECORDS, 0o644), (GPT, 0o644), (MANUAL, 0o644), (NTFS, 0o644), (SCHEMA, 0o644), (POLICY, 0o644)):
+        if path not in files:
+            raise ValueError("required helper payload is missing")
         mode, user, group = files[path]
         if not stat.S_ISREG(mode) or stat.S_IMODE(mode) != permissions or (user, group) != ("root", "root"):
             raise ValueError("helper payload ownership, type or mode is incorrect")
@@ -92,6 +95,8 @@ def check_package(rpm):
         raise ValueError('GPT worker must use isolated system Python')
     if not extract_member(rpm,MANUAL).startswith(b'#!/usr/bin/python3 -I\n'):
         raise ValueError('Manual worker must use isolated system Python')
+    if not extract_member(rpm, NTFS).startswith(b'#!/usr/bin/python3 -I\n'):
+        raise ValueError('NTFS worker must use isolated system Python')
     session = extract_member(rpm, SESSION)
     if not session.startswith(b"#!/usr/bin/python3 -I\n"):
         raise ValueError("session must use isolated system Python")

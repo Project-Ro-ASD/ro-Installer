@@ -781,8 +781,8 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
                     self.assertNotIn(node.func.attr, {"system", "popen", "execv", "execve", "spawnv"})
                     if isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess":
                         process_calls.append(node)
-        self.assertEqual(len(process_calls), 3)
-        self.assertEqual({call.args[0].id for call in process_calls}, {"LSBLK_ARGV", "BACKEND_ARGV", "gpt_args"})
+        self.assertEqual(len(process_calls), 4)
+        self.assertEqual({call.args[0].id for call in process_calls}, {"LSBLK_ARGV", "BACKEND_ARGV", "gpt_args", "ntfs_args"})
         gpt_args=next(node.value for node in ast.walk(tree) if isinstance(node,ast.Assign) and any(isinstance(target,ast.Name) and target.id=='gpt_args' for target in node.targets))
         self.assertIsInstance(gpt_args,ast.Tuple)
         self.assertEqual(len(gpt_args.elts),3)
@@ -792,6 +792,15 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
         self.assertEqual(ast.unparse(gpt_args.elts[2]),"json.dumps(device.public(), separators=(',', ':'))")
         self.assertEqual(helper.GPT_ARGV,('/usr/bin/python3','-I','/usr/libexec/ro_installer_gpt.py','--probe'))
         self.assertEqual(helper.MANUAL_ARGV,('/usr/bin/python3','-I','/usr/libexec/ro_installer_manual.py'))
+        self.assertEqual(helper.NTFS_ARGV,('/usr/bin/python3','-I','/usr/libexec/ro_installer_ntfs.py','--check-fd'))
+        ntfs_args=next(node.value for node in ast.walk(tree) if isinstance(node,ast.Assign) and any(isinstance(target,ast.Name) and target.id=='ntfs_args' for target in node.targets))
+        self.assertEqual(ast.unparse(ntfs_args), '(*NTFS_ARGV, str(fd), str(size), str(sector))')
+        ntfs_call=next(call for call in process_calls if call.args[0].id=='ntfs_args')
+        keywords={k.arg:ast.unparse(k.value) for k in ntfs_call.keywords}
+        self.assertEqual(keywords['pass_fds'],'(fd, lease)')
+        self.assertEqual(keywords['start_new_session'],'True')
+        self.assertEqual(keywords['close_fds'],'True')
+
         for call in process_calls:
             self.assertEqual(call.func.attr, "Popen")
             self.assertFalse(any(keyword.arg == "shell" for keyword in call.keywords))
@@ -810,12 +819,36 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
             shutil.copy2(ROOT / "linux/ro-installer-helper", top / "SOURCES/helper")
             shutil.copy2(ROOT / "linux/ro_installer_gpt.py", top / "SOURCES/gpt")
             shutil.copy2(ROOT / "linux/ro_installer_manual.py", top / "SOURCES/manual")
+            shutil.copy2(ROOT / "linux/ro_installer_ntfs.py", top / "SOURCES/ntfs")
             shutil.copy2(ROOT / "linux/ro-installer-session", top / "SOURCES/session")
             shutil.copy2(ROOT / "linux/ro-installer-export", top / "SOURCES/export")
             shutil.copy2(ROOT / "linux/ro_installer_records.py", top / "SOURCES/records")
             shutil.copy2(ROOT / "linux/ro-installer-observability.json", top / "SOURCES/schema")
             shutil.copy2(ROOT / "linux/org.roasd.installer.helper.policy", top / "SOURCES/policy")
-            for release, mode, gpt_mode, manual_mode in (("1", "0755", "0644", "0644"), ("2", "0777", "0644", "0644"), ("3", "0755", "0666", "0644"), ("4", "0755", "0644", "0666")):
+            cases = [
+                ("0755", "0644", "0644", "0644", "root", "normal"),
+                ("0777", "0644", "0644", "0644", "root", "normal"),
+                ("0755", "0666", "0644", "0644", "root", "normal"),
+                ("0755", "0644", "0666", "0644", "root", "normal"),
+                ("0755", "0644", "0644", "0666", "root", "normal"),
+                ("0755", "0644", "0644", "0755", "root", "normal"),
+                ("0755", "0644", "0644", "0644", "nobody", "normal"),
+                ("0755", "0644", "0644", "0644", "root", "missing"),
+                ("0755", "0644", "0644", "0644", "root", "bad-shebang"),
+                ("0755", "0644", "0644", "0644", "root", "symlink"),
+            ]
+            for release_number, (mode, gpt_mode, manual_mode, ntfs_mode, ntfs_user, ntfs_kind) in enumerate(cases, 1):
+                release = str(release_number)
+                ntfs_install = f'install -Dm644 %{{_sourcedir}}/ntfs %{{buildroot}}{package.NTFS}'
+                ntfs_listing = f'%attr({ntfs_mode},{ntfs_user},root) {package.NTFS}'
+                if ntfs_kind == 'missing':
+                    ntfs_install = ntfs_listing = ''
+                elif ntfs_kind == 'symlink':
+                    ntfs_install = f'ln -s ro_installer_gpt.py %{{buildroot}}{package.NTFS}'
+                if ntfs_kind == 'bad-shebang':
+                    (top / 'SOURCES/ntfs').write_bytes(b'#!/usr/bin/env python3\n')
+                else:
+                    shutil.copy2(ROOT / 'linux/ro_installer_ntfs.py', top / 'SOURCES/ntfs')
                 spec = top / "SPECS/fixture.spec"
                 spec.write_text(f'''Name: helper-payload-fixture
 Version: 1
@@ -830,6 +863,7 @@ install -Dm755 %{{_sourcedir}}/export %{{buildroot}}{package.EXPORT}
 install -Dm644 %{{_sourcedir}}/records %{{buildroot}}{package.RECORDS}
 install -Dm644 %{{_sourcedir}}/gpt %{{buildroot}}{package.GPT}
 install -Dm644 %{{_sourcedir}}/manual %{{buildroot}}{package.MANUAL}
+{ntfs_install}
 install -Dm644 %{{_sourcedir}}/schema %{{buildroot}}{package.SCHEMA}
 install -Dm755 %{{_sourcedir}}/session %{{buildroot}}{package.SESSION}
 install -Dm755 %{{_sourcedir}}/helper %{{buildroot}}{package.HELPER}
@@ -840,6 +874,7 @@ install -Dm644 %{{_sourcedir}}/policy %{{buildroot}}{package.POLICY}
 %attr(0644,root,root) {package.RECORDS}
 %attr({gpt_mode},root,root) {package.GPT}
 %attr({manual_mode},root,root) {package.MANUAL}
+{ntfs_listing}
 %attr(0644,root,root) {package.SCHEMA}
 %attr(0755,root,root) {package.SESSION}
 %attr({mode},root,root) {package.HELPER}
@@ -851,7 +886,7 @@ install -Dm644 %{{_sourcedir}}/policy %{{buildroot}}{package.POLICY}
                                        text=True, capture_output=True, timeout=60)
                 self.assertEqual(built.returncode, 0, built.stderr)
                 rpm = next((top / "RPMS").rglob(f"*-1-{release}*.rpm"))
-                if mode == "0755" and gpt_mode == "0644" and manual_mode == "0644":
+                if release_number == 1:
                     self.assertTrue(package.check_package(rpm)["ok"])
                 else:
                     with self.assertRaises(ValueError):
