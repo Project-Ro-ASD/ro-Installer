@@ -721,8 +721,9 @@ class VerifiedMountSession implements MountSession {
       final rows = await _read();
       if (_unsafe || !_known(rows)) {
         _attempted = true;
-        return _report = const CleanupReport(
+        return _report = CleanupReport(
           false,
+          remaining: _targets(rows).map((m) => m.target).toList(),
           reason: 'Unverified mount ownership; no unmount attempted',
         );
       }
