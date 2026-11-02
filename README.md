@@ -208,6 +208,15 @@ before acceptance. This replaces the fixed two-second delay for confirmed full
 installs; legacy full and other storage modes retain their existing readiness
 paths. Hardware performance gains require separate measurement.
 
+### Create-only free-space readiness
+
+After create-only free-space partitioning, readiness uses the exact GPT/kernel
+inventory and preservation proof instead of an unconditional two-second delay.
+A ready disk proceeds immediately; unsuccessful worker reads receive bounded
+retries, while readable wrong identities, geometry or metadata fail immediately.
+Whole-device identity and the captured approval are rechecked before accepting
+the layout. Formatting retains its separate fresh-layout checks.
+
 ### NTFS shrink planning
 
 `NtfsShrinkInstallationPlan` is a pure proposal for a future alongside path.

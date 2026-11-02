@@ -1,3 +1,4 @@
+import 'free_space_readiness.dart';
 import 'full_disk_readiness.dart';
 import 'manual_partitioning.dart';
 import 'dart:convert';
@@ -5,7 +6,6 @@ import 'dart:convert';
 import '../../models/storage_plan.dart';
 import '../../models/approved_full_disk_plan.dart';
 import '../../models/free_space_installation_plan.dart';
-import '../../models/gpt_disk_snapshot.dart';
 import '../../models/standard_storage_layout.dart';
 import '../storage_topology_guard.dart';
 import 'stage_context.dart';
@@ -686,13 +686,18 @@ class PartitioningStage {
       if (!result.started || result.exitCode != 0) {
         return StageResult.fail('Boş alanda bölüm oluşturulamadı.');
       }
-      final rescan = await _rescanDisk(ctx, selectedDisk);
-      if (rescan != null) return rescan;
-      final after = await ctx.probeFreeSpaceMetadata();
-      final layout = approved.verifyCreated(
-        GptDiskSnapshot.fromJson(after['snapshot']),
-        after['preservationFingerprint'] as String,
+      final rescan = await _rescanDisk(
+        ctx,
+        selectedDisk,
+        verifiedFreeSpace: true,
       );
+      if (rescan != null) return rescan;
+      final layout = ctx.isMock
+          ? await readCreatedFreeSpaceLayout(ctx)
+          : await waitForFreeSpaceLayout(ctx);
+      if (layout == null) {
+        return StageResult.fail('Onaylanan boş alan yerleşimi hazır değil.');
+      }
       ctx.bindCreatedFreeSpaceLayout(layout);
       ctx.state['_resolvedRootPart'] = layout.rootPath;
       ctx.state['_resolvedEfiPart'] = layout.espPath;
@@ -1340,6 +1345,7 @@ class PartitioningStage {
     StageContext ctx,
     String selectedDisk, {
     FullDiskPartitionWriter? fullWriter,
+    bool verifiedFreeSpace = false,
   }) async {
     if (!await ctx.runCmd(
       'partprobe',
@@ -1367,9 +1373,10 @@ class PartitioningStage {
             !await waitForFullDiskLayout(ctx, writer: fullWriter)) {
           return StageResult.fail('Onaylanan tam disk yerleşimi hazır değil.');
         }
-      } else {
+      } else if (!verifiedFreeSpace) {
         await Future.delayed(const Duration(seconds: 2));
       }
+      // The free-space path next verifies exact GPT/kernel layout with retries.
     }
     return null;
   }
