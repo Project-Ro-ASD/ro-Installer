@@ -216,7 +216,11 @@ separately, rather than presenting changed geometry with an old fingerprint.
 The proposal binds one Microsoft basic-data source, an existing reusable ESP,
 and one newly allocated Btrfs root slot. Only the source end may move; recovery
 and other partitions keep their positions. A contiguous following gap can reduce
-the required shrink, and sufficient free space rejects shrink as unnecessary.
+the required shrink. Any MiB-aligned free extent large enough for the requested
+root rejects shrink as unnecessary, including gaps elsewhere on the disk.
+The Python `ntfs_shrink_plan` independently reconstructs the same intent from a
+normalized snapshot. Shared fixtures check both implementations against fixed
+geometry and rejection cases, including 512-byte and 4096-byte sectors.
 
 New root ranges align to MiB boundaries and retain the temporary 40 GiB root
 floor. The source must retain at least 40 GiB and at least 1 GiB above the supplied

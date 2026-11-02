@@ -1,0 +1,3320 @@
+[
+  {
+    "name": "512: following gap",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 2097152,
+        "endSector": 335544319,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 285212671,
+        "minimumFilesystemBytes": 53687091200,
+        "retainedBytes": 144955146240
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 2048,
+        "endSector": 1050623,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 285212672,
+        "endSector": 419430399,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "512: no following gap",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 335544320,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 2097152,
+        "endSector": 335544319,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 201326591,
+        "minimumFilesystemBytes": 53687091200,
+        "retainedBytes": 102005473280
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 2048,
+        "endSector": 1050623,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 201326592,
+        "endSector": 335544319,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "512: exact measured minimum headroom",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 143881404416,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 2097152,
+        "endSector": 335544319,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 285212671,
+        "minimumFilesystemBytes": 143881404416,
+        "retainedBytes": 144955146240
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 2048,
+        "endSector": 1050623,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 285212672,
+        "endSector": 419430399,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "512: exact retained floor",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 170724950016,
+      "minimumFilesystemBytes": 41875931136,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 2097152,
+        "endSector": 335544319,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 85983231,
+        "minimumFilesystemBytes": 41875931136,
+        "retainedBytes": 42949672960
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 2048,
+        "endSector": 1050623,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 85983232,
+        "endSector": 419430399,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "512: discard unaligned gap tail",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430401,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 2097152,
+        "endSector": 335544319,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 285212671,
+        "minimumFilesystemBytes": 53687091200,
+        "retainedBytes": 144955146240
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 2048,
+        "endSector": 1050623,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 285212672,
+        "endSector": 419430399,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "512: unordered observed inventory",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 2097152,
+        "endSector": 335544319,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 285212671,
+        "minimumFilesystemBytes": 53687091200,
+        "retainedBytes": 144955146240
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 2048,
+        "endSector": 1050623,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 285212672,
+        "endSector": 419430399,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "512: following free gap fits",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 42949672960,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: unrelated free gap fits",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 44023414784,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: minimum headroom one byte short",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 143881404417,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: retained floor one GiB short",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 171798691840,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: root not MiB aligned",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476737,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: root below floor",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 41875931136,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: minimum exceeds original",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 171798691840,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: selected source absent",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 4,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: roles identical",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 2,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: protected source",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000001"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: protected ESP",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "8000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: small ESP",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1048575,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: source not aligned",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097153,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "512: GPT slots exhausted",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 3,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 3,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: following gap",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 262144,
+        "endSector": 41943039,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 35651583,
+        "minimumFilesystemBytes": 53687091200,
+        "retainedBytes": 144955146240
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 256,
+        "endSector": 131327,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 35651584,
+        "endSector": 52428799,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "4096: no following gap",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 41943040,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 262144,
+        "endSector": 41943039,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 25165823,
+        "minimumFilesystemBytes": 53687091200,
+        "retainedBytes": 102005473280
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 256,
+        "endSector": 131327,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 25165824,
+        "endSector": 41943039,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "4096: exact measured minimum headroom",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 143881404416,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 262144,
+        "endSector": 41943039,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 35651583,
+        "minimumFilesystemBytes": 143881404416,
+        "retainedBytes": 144955146240
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 256,
+        "endSector": 131327,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 35651584,
+        "endSector": 52428799,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "4096: exact retained floor",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 170724950016,
+      "minimumFilesystemBytes": 41875931136,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 262144,
+        "endSector": 41943039,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 10747903,
+        "minimumFilesystemBytes": 41875931136,
+        "retainedBytes": 42949672960
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 256,
+        "endSector": 131327,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 10747904,
+        "endSector": 52428799,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "4096: discard unaligned gap tail",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428801,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 262144,
+        "endSector": 41943039,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 35651583,
+        "minimumFilesystemBytes": 53687091200,
+        "retainedBytes": 144955146240
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 256,
+        "endSector": 131327,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 35651584,
+        "endSector": 52428799,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "4096: unordered observed inventory",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": {
+      "schemaVersion": 1,
+      "layoutVersion": 1,
+      "mode": "alongside_ntfs_shrink",
+      "device": {
+        "path": "/dev/nvme0n1",
+        "majorMinor": "259:0",
+        "size": 274877906944,
+        "diskSequence": 11
+      },
+      "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileSystem": "btrfs",
+      "diskSwap": false,
+      "subvolumes": {
+        "root": "/",
+        "home": "/home",
+        "var_log": "/var/log",
+        "var_cache": "/var/cache",
+        "var_tmp": "/var/tmp"
+      },
+      "source": {
+        "number": 2,
+        "startSector": 262144,
+        "endSector": 41943039,
+        "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+        "partitionGuid": "33333333-3333-3333-3333-333333333333",
+        "attributesHex": "0000000000000000",
+        "newEndSector": 35651583,
+        "minimumFilesystemBytes": 53687091200,
+        "retainedBytes": 144955146240
+      },
+      "esp": {
+        "number": 1,
+        "startSector": 256,
+        "endSector": 131327,
+        "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        "partitionGuid": "22222222-2222-2222-2222-222222222222",
+        "attributesHex": "0000000000000000",
+        "formatOnInstall": false
+      },
+      "root": {
+        "number": 3,
+        "startSector": 35651584,
+        "endSector": 52428799,
+        "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        "formatOnInstall": true
+      }
+    }
+  },
+  {
+    "name": "4096: following free gap fits",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 42949672960,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: unrelated free gap fits",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 44023414784,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: minimum headroom one byte short",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 143881404417,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: retained floor one GiB short",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 171798691840,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: root not MiB aligned",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476737,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: root below floor",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 41875931136,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: minimum exceeds original",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 171798691840,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: selected source absent",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 4,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: roles identical",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 2,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: protected source",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000001"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: protected ESP",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "8000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: small ESP",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131071,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: source not aligned",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262145,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "4096: GPT slots exhausted",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 4096,
+        "firstUsableSector": 256,
+        "lastUsableSector": 67108858,
+        "entryCount": 3,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 67108859,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 3,
+            "startSector": 52428800,
+            "endSector": 55050239,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema schemaVersion=True",
+    "input": {
+      "schemaVersion": true,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema rootBytes=True",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": true,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema minimumFilesystemBytes=True",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": true,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema sourceNumber=True",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": true,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema espNumber=True",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": true,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema rootBytes=68719476736.0",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736.0,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      }
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema sourceEnd=42",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      },
+      "sourceEnd": 42
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema confirmedPlan={}",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      },
+      "confirmedPlan": {}
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema commands=[]",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      },
+      "commands": []
+    },
+    "intent": null
+  },
+  {
+    "name": "strict schema safeForWrite=True",
+    "input": {
+      "schemaVersion": 1,
+      "sourceNumber": 2,
+      "espNumber": 1,
+      "rootBytes": 68719476736,
+      "minimumFilesystemBytes": 53687091200,
+      "snapshot": {
+        "schemaVersion": 1,
+        "device": {
+          "path": "/dev/nvme0n1",
+          "majorMinor": "259:0",
+          "size": 274877906944,
+          "diskSequence": 11
+        },
+        "logicalSectorBytes": 512,
+        "firstUsableSector": 2048,
+        "lastUsableSector": 536870878,
+        "entryCount": 128,
+        "entryBytes": 128,
+        "primaryEntriesLba": 2,
+        "backupEntriesLba": 536870879,
+        "diskGuid": "11111111-1111-1111-1111-111111111111",
+        "tableFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "partitions": [
+          {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000"
+          },
+          {
+            "number": 7,
+            "startSector": 419430400,
+            "endSector": 440401919,
+            "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+            "partitionGuid": "44444444-4444-4444-4444-444444444444",
+            "attributesHex": "0000000000000000"
+          }
+        ]
+      },
+      "safeForWrite": true
+    },
+    "intent": null
+  }
+]
