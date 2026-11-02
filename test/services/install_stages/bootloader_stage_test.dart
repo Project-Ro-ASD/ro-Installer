@@ -152,7 +152,7 @@ void main() {
         expect((await fixture.run(bootloaderKernelInstallScript)).exitCode, 0);
         expect(fixture.calls, [
           'dracut\t-f\t${fixture.root.path}/boot/initramfs-$version.img\t$version',
-          'kernel-install\tadd\t$version\t${fixture.root.path}/boot/vmlinuz-$version',
+          'kernel-install\tadd\t$version\t${fixture.root.path}/boot/vmlinuz-$version\t${fixture.root.path}/boot/initramfs-$version.img',
         ]);
         expect(
           (await fixture.run(postInstallKernelImageValidationScript)).exitCode,
@@ -215,8 +215,27 @@ void main() {
       fixture.candidate('6.4-other', tree: 'lib', imageLocation: 'modules');
       expect((await fixture.run(bootloaderDracutScript)).exitCode, 0);
       expect((await fixture.run(bootloaderKernelInstallScript)).exitCode, 0);
-      expect(fixture.calls.last, endsWith('/lib/modules/6.4-other/vmlinuz'));
+      expect(fixture.calls.last.split('\t').sublist(3), [
+        '${fixture.root.path}/lib/modules/6.4-other/vmlinuz',
+        '${fixture.root.path}/boot/initramfs-6.4-other.img',
+      ]);
     });
+    for (final kind in ['missing', 'empty', 'symlink']) {
+      test(
+        'kernel-install refuses $kind generated initrd before invoking plugins',
+        () async {
+          final fixture = KernelFixture();
+          addTearDown(fixture.dispose);
+          fixture.candidate('6.1-custom');
+          final initrd = '${fixture.root.path}/boot/initramfs-6.1-custom.img';
+          if (kind == 'empty') File(initrd).writeAsStringSync('');
+          if (kind == 'symlink') Link(initrd).createSync('vmlinuz-6.1-custom');
+          final result = await fixture.run(bootloaderKernelInstallScript);
+          expect(result.exitCode, isNot(0));
+          expect(fixture.calls, isEmpty);
+        },
+      );
+    }
     for (final incomplete in [false, true]) {
       test('no complete candidate fails closed (stray=$incomplete)', () async {
         final fixture = KernelFixture();
@@ -243,6 +262,13 @@ void main() {
         addTearDown(fixture.dispose);
         fixture.candidate('6.1-custom');
         fixture.candidate('6.2-custom');
+        if (tool == 'kernel-install') {
+          for (final version in ['6.1-custom', '6.2-custom']) {
+            File(
+              '${fixture.root.path}/boot/initramfs-$version.img',
+            ).writeAsStringSync('prepared initramfs');
+          }
+        }
         final script = tool == 'dracut'
             ? bootloaderDracutScript
             : bootloaderKernelInstallScript;

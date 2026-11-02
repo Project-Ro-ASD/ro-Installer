@@ -94,6 +94,7 @@ jobs:
             gtk3-devel \
             pkgconf-pkg-config \
             python3 \
+            dracut \
             kmod \
             util-linux \
             dosfstools \

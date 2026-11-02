@@ -225,6 +225,14 @@ void main() {
     test('depmod failure ${entry.key} aborts preparation', () async {
       final fixture = IndexFixture(depmod);
       addTearDown(fixture.dispose);
+      if (entry.key == 'after kernel-install') {
+        // This phase receives the preceding dracut stage's completed images.
+        for (final version in IndexFixture.versions) {
+          File(
+            '${fixture.root.path}/boot/initramfs-$version.img',
+          ).writeAsStringSync('prepared initramfs');
+        }
+      }
       final result = await fixture.run(entry.value, failPhase: 'prepare');
       expect(result.exitCode, 23, reason: '${result.stderr}');
       expect(

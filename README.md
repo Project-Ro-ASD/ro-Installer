@@ -404,6 +404,14 @@ and no dedicated disk swap partition. The standard rollback-aware Btrfs layout i
 | `var_cache` | `/var/cache` |
 | `var_tmp` | `/var/tmp` |
 
+For each complete prepared kernel, the installer regenerates its initramfs and
+passes that exact nonempty, readable regular file to `kernel-install add`.
+Fedora's packaged dracut plugin then skips duplicate generation. The pre-dracut
+and post-plugin `depmod` calls retain their narrow `0022` masks; other work keeps
+the inherited restrictive mask. Missing, empty or symlink initramfs output stops
+boot preparation before plugins run. A real-package plugin regression checks
+this reuse behavior alongside the I01 kernel-index tests.
+
 `/boot` belongs inside the root Btrfs snapshot scope. The ESP remains FAT32 and
 is mounted at `/boot/efi`.
 
@@ -1030,6 +1038,8 @@ Git errors in a checkout fail acceptance. CI checks the real checkout before
 RPM build; RPM `%check` also checks the extracted source tree.
 
 Stable acceptance requires real `depmod` and `modprobe` (Fedora package `kmod`).
+The initramfs-reuse regression also requires the packaged Fedora
+`50-dracut.install` plugin (`dracut`); it is a required check, not an optional skip.
 The dedicated I01 acceptance runner requires all four kernel-index regressions
 to complete successfully with zero skips, in addition to the full Flutter
 suite. The two optional physical-log corpus tests remain separately reported

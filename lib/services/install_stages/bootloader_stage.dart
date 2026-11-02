@@ -8,7 +8,10 @@ const bootloaderKernelInstallScript =
 candidates="$(discover_prepared_kernels)"
 while IFS="$(printf '\t')" read -r kver image; do
   echo "Preparing BLS entry for kernel: $kver"
-  kernel-install add "$kver" "$image"
+  initrd="/boot/initramfs-$kver.img"
+  [ -f "$initrd" ] && [ -s "$initrd" ] && [ -r "$initrd" ] && [ ! -L "$initrd" ] || exit 1
+  # Fedora's dracut plugin skips regeneration when an initrd is supplied.
+  kernel-install add "$kver" "$image" "$initrd"
   # Plugins may run depmod again with the inherited restrictive mask.
   # Only depmod gets 0022; kernel-install and all its other plugins keep 0077.
   (umask 022; exec depmod -a "$kver")
