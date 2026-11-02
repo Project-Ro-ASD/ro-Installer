@@ -103,6 +103,57 @@ class PostResizeTests(unittest.TestCase):
              mock.patch.object(worker,'inspect_resized_fd') as inspect,redirect_stdout(output),redirect_stderr(output):
             self.assertEqual(worker.main(),2);inspect.assert_not_called()
         self.assertEqual(output.getvalue(),'')
+    def test_unexpected_physical_extents_refuse_before_native_or_boot_reads(self):
+        with tempfile.TemporaryDirectory() as td:
+            path=Path(td)/'normal';path.write_bytes(b'fixture');fd=os.open(path,os.O_RDONLY)
+            try:
+                for extent in (True,False,0,float(TARGET),str(TARGET),TARGET+512,OLD-512,OLD+1048576):
+                    with mock.patch.object(worker,'resized_boot_sector') as boot, \
+                         mock.patch.object(worker,'NativeNtfs') as native,mock.patch.object(worker,'run_tool') as tool:
+                        with self.assertRaises(ValueError):
+                            worker.inspect_resized_fd(fd,OLD,TARGET,512,boot_pair()[0],partition_bytes=extent)
+                        boot.assert_not_called();native.assert_not_called();tool.assert_not_called()
+            finally:os.close(fd)
+
+    def test_native_refreshed_partition_requires_explicit_exact_physical_target(self):
+        for sector in (512,4096):
+            with tempfile.TemporaryDirectory() as td:
+                path=Path(td)/'new-regular.img'
+                with path.open('xb') as stream:stream.truncate(OLD)
+                self.assertTrue(stat.S_ISREG(path.lstat().st_mode));self.assertFalse(path.is_symlink())
+                subprocess.run(['/usr/bin/mkntfs','-F','-Q','-s',str(sector),'-c','4096',str(path)],
+                               capture_output=True,check=True,timeout=20)
+                fd=os.open(path,os.O_RDONLY|os.O_CLOEXEC)
+                try:
+                    original,cluster=worker.boot_sector(fd,OLD,sector)
+                    # Fresh normal-file fixture, not MFT relocation or write
+                    # qualification of the old installed native release.
+                    self.assertLess(max(struct.unpack_from('<QQ',original,48))*cluster,TARGET)
+                    argv=['/usr/bin/ntfsresize','-P','--size',str(TARGET),str(path)]
+                    subprocess.run([argv[0],'--no-action',*argv[1:]],capture_output=True,check=True,timeout=20)
+                    subprocess.run(argv,input=b'y\n',capture_output=True,check=True,timeout=20)
+                    before=worker.inspect_resized_fd(fd,OLD,TARGET,sector,original)
+                    self.assertEqual(before,worker.inspect_resized_fd(fd,OLD,TARGET,sector,original,partition_bytes=OLD))
+                    with self.assertRaises(ValueError):
+                        worker.inspect_resized_fd(fd,OLD,TARGET,sector,original,partition_bytes=TARGET)
+                finally:os.close(fd)
+                # Model the kernel exposing the shorter partition; reopen the
+                # ordinary file just as a fresh source descriptor would be used.
+                with path.open('r+b') as stream:stream.truncate(TARGET)
+                fd=os.open(path,os.O_RDONLY|os.O_CLOEXEC)
+                try:
+                    with path.open('rb') as stream:checksum=hashlib.file_digest(stream,'sha256').hexdigest()
+                    after=worker.inspect_resized_fd(fd,OLD,TARGET,sector,original,partition_bytes=TARGET)
+                    self.assertEqual(after['deviceBytes'],TARGET)
+                    self.assertNotEqual(after['inspectionFingerprint'],before['inspectionFingerprint'])
+                    for key in ('volumeBytes','clusterBytes','minimumBytes','targetBytes','schemaVersion'):
+                        self.assertEqual(after[key],before[key])
+                    with self.assertRaises(ValueError):worker.inspect_resized_fd(fd,OLD,TARGET,sector,original)
+                    with self.assertRaises(ValueError):
+                        worker.inspect_resized_fd(fd,OLD,TARGET,sector,original,partition_bytes=OLD)
+                    with path.open('rb') as stream:self.assertEqual(hashlib.file_digest(stream,'sha256').hexdigest(),checksum)
+                finally:os.close(fd)
+
     def test_native_fresh_regular_images_are_validated_without_reader_writes(self):
         for sector in (512,4096):
             with tempfile.TemporaryDirectory() as td:
