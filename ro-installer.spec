@@ -14,6 +14,7 @@ BuildArch:      x86_64
 # The Flutter SDK is supplied by the build wrapper or CI rather than being
 # taken from the Fedora buildroot repositories.
 BuildRequires:  clang
+BuildRequires:  binutils
 BuildRequires:  cmake
 BuildRequires:  ninja-build
 BuildRequires:  gtk3-devel
@@ -68,6 +69,7 @@ export CXXFLAGS="${CXXFLAGS:-} -Wno-error=unused-command-line-argument -Wno-unus
 flutter pub get
 flutter build linux --release
 dart compile exe bin/privileged_backend.dart -o ro-installer-backend
+bash scripts/build-ntfs-bound-io.sh ro-installer-ntfs-bound-io.so
 
 %check
 bash scripts/check-stable.sh
@@ -104,6 +106,8 @@ install -Dm644 linux/ro_installer_gpt.py \
     %{buildroot}%{_libexecdir}/ro_installer_gpt.py
 install -Dm644 linux/ro_installer_manual.py \
     %{buildroot}%{_libexecdir}/ro_installer_manual.py
+install -Dm644 ro-installer-ntfs-bound-io.so \
+    %{buildroot}%{_libexecdir}/ro-installer-ntfs-bound-io.so
 install -Dm644 linux/ro_installer_ntfs.py \
     %{buildroot}%{_libexecdir}/ro_installer_ntfs.py
 install -Dm644 linux/ro-installer-observability.json \
@@ -126,6 +130,7 @@ install -Dm755 linux/ro-installer-export \
 %attr(0644,root,root) %{_libexecdir}/ro_installer_gpt.py
 %attr(0644,root,root) %{_libexecdir}/ro_installer_manual.py
 %attr(0644,root,root) %{_libexecdir}/ro_installer_ntfs.py
+%attr(0644,root,root) %{_libexecdir}/ro-installer-ntfs-bound-io.so
 %attr(0644,root,root) %{_libexecdir}/ro-installer-observability.json
 %attr(0755,root,root) %{_libexecdir}/ro-installer-helper
 %attr(0644,root,root) %{_datadir}/polkit-1/actions/org.roasd.installer.helper.policy

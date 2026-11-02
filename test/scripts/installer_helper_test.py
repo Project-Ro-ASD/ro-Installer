@@ -816,6 +816,8 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
             for directory in ("BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS", "tmp"):
                 (top / directory).mkdir()
             (top / "SOURCES/backend").write_bytes(b"\x7fELFpayload-fixture")
+            adapter_header = b'\x7fELF\x02\x01\x01' + bytes(9) + b'\x03\x00\x3e\x00'
+            (top / 'SOURCES/bound').write_bytes(adapter_header)
             shutil.copy2(ROOT / "linux/ro-installer-helper", top / "SOURCES/helper")
             shutil.copy2(ROOT / "linux/ro_installer_gpt.py", top / "SOURCES/gpt")
             shutil.copy2(ROOT / "linux/ro_installer_manual.py", top / "SOURCES/manual")
@@ -836,6 +838,11 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
                 ("0755", "0644", "0644", "0644", "root", "missing"),
                 ("0755", "0644", "0644", "0644", "root", "bad-shebang"),
                 ("0755", "0644", "0644", "0644", "root", "symlink"),
+                ("0755", "0644", "0644", "0644", "root", "bound-missing"),
+                ("0755", "0644", "0644", "0644", "root", "bound-symlink"),
+                ("0755", "0644", "0644", "0644", "root", "bound-mode"),
+                ("0755", "0644", "0644", "0644", "root", "bound-user"),
+                ("0755", "0644", "0644", "0644", "root", "bound-elf"),
             ]
             for release_number, (mode, gpt_mode, manual_mode, ntfs_mode, ntfs_user, ntfs_kind) in enumerate(cases, 1):
                 release = str(release_number)
@@ -849,6 +856,19 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
                     (top / 'SOURCES/ntfs').write_bytes(b'#!/usr/bin/env python3\n')
                 else:
                     shutil.copy2(ROOT / 'linux/ro_installer_ntfs.py', top / 'SOURCES/ntfs')
+                bound_install = f'install -Dm644 %{{_sourcedir}}/bound %{{buildroot}}{package.BOUND_IO}'
+                bound_listing = f'%attr(0644,root,root) {package.BOUND_IO}'
+                (top / 'SOURCES/bound').write_bytes(adapter_header)
+                if ntfs_kind == 'bound-missing':
+                    bound_install = bound_listing = ''
+                elif ntfs_kind == 'bound-symlink':
+                    bound_install = f'ln -s ro_installer_gpt.py %{{buildroot}}{package.BOUND_IO}'
+                elif ntfs_kind == 'bound-mode':
+                    bound_listing = f'%attr(0666,root,root) {package.BOUND_IO}'
+                elif ntfs_kind == 'bound-user':
+                    bound_listing = f'%attr(0644,nobody,root) {package.BOUND_IO}'
+                elif ntfs_kind == 'bound-elf':
+                    (top / 'SOURCES/bound').write_bytes(b'not a shared object')
                 spec = top / "SPECS/fixture.spec"
                 spec.write_text(f'''Name: helper-payload-fixture
 Version: 1
@@ -864,6 +884,7 @@ install -Dm644 %{{_sourcedir}}/records %{{buildroot}}{package.RECORDS}
 install -Dm644 %{{_sourcedir}}/gpt %{{buildroot}}{package.GPT}
 install -Dm644 %{{_sourcedir}}/manual %{{buildroot}}{package.MANUAL}
 {ntfs_install}
+{bound_install}
 install -Dm644 %{{_sourcedir}}/schema %{{buildroot}}{package.SCHEMA}
 install -Dm755 %{{_sourcedir}}/session %{{buildroot}}{package.SESSION}
 install -Dm755 %{{_sourcedir}}/helper %{{buildroot}}{package.HELPER}
@@ -875,6 +896,7 @@ install -Dm644 %{{_sourcedir}}/policy %{{buildroot}}{package.POLICY}
 %attr({gpt_mode},root,root) {package.GPT}
 %attr({manual_mode},root,root) {package.MANUAL}
 {ntfs_listing}
+{bound_listing}
 %attr(0644,root,root) {package.SCHEMA}
 %attr(0755,root,root) {package.SESSION}
 %attr({mode},root,root) {package.HELPER}

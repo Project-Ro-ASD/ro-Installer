@@ -47,6 +47,7 @@ jobs:
             curl \
             ca-certificates \
             clang \
+            binutils \
             cmake \
             ninja-build \
             gtk3-devel \
