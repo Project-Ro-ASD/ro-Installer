@@ -56,7 +56,17 @@ class MountingStage {
         }
         return StageResult.ok('Boş alan kurulumu bağlamaları tamamlandı.');
       case 'manual':
-        return _mountManualPartitions(ctx);
+        if (!ctx.usesStandardStorage || !await ctx.verifyManualLayoutNow()) {
+          return StageResult.fail('Manuel mount hedefleri değişti.');
+        }
+        if (!await _mountStandardRoot(ctx, ctx.rootPartition)) {
+          return StageResult.fail('Manuel root bağlanamadı.');
+        }
+        final esp = ctx.reusesEsp
+            ? await ctx.mountSession!.mountProtectedEsp()
+            : await _mountEfi(ctx, ctx.espPartition);
+        if (!esp) return StageResult.fail('Manuel EFI güvenli bağlanamadı.');
+        return StageResult.ok('Manuel hedefler doğrulanarak bağlandı.');
       default:
         return StageResult.fail(
           'Bilinmeyen bölümleme yöntemi: $partitionMethod',
@@ -138,101 +148,6 @@ class MountingStage {
       ctx.t(
         'stage_result_mount_alongside_done',
         'Alongside bağlama tamamlandı.',
-      ),
-    );
-  }
-
-  /// Manuel modda bağlama
-  Future<StageResult> _mountManualPartitions(StageContext ctx) async {
-    final manualPartitions = ctx.state['manualPartitions'] as List<dynamic>;
-
-    // Önce root (/) bölümünü bul ve bağla
-    final rootPart = manualPartitions.cast<Map<String, dynamic>?>().firstWhere(
-      (p) => p != null && p['isFreeSpace'] != true && p['mount'] == '/',
-      orElse: () => null,
-    );
-    if (rootPart == null) {
-      return StageResult.fail(
-        'Root partisiz bir sistem! / montaj noktasını bulamadım.',
-      );
-    }
-
-    final rootName = (rootPart['name'] ?? '').toString();
-    final rootFs = _normalizeFsType((rootPart['type'] ?? '').toString());
-    if (rootFs != 'btrfs') {
-      return StageResult.fail(
-        'Manuel kurulumda root bölümü Btrfs olmalıdır: $rootName ($rootFs)',
-      );
-    }
-    final hasDedicatedHome = manualPartitions.any(
-      (p) => p['isFreeSpace'] != true && p['mount'] == '/home',
-    );
-
-    if (!await _mountRoot(
-      ctx,
-      rootName,
-      rootFs,
-      createHomeSubvolume: rootFs == 'btrfs' && !hasDedicatedHome,
-    )) {
-      return StageResult.fail('Root bölümü bağlanamadı: $rootName');
-    }
-
-    // Kökten sonra diğer mount noktalarını derinliğe göre bağla.
-    final additionalMounts =
-        manualPartitions
-            .where(
-              (p) =>
-                  p['isFreeSpace'] != true &&
-                  p['mount'] != '/' &&
-                  p['mount'] != 'unmounted' &&
-                  p['mount'] != '[SWAP]',
-            )
-            .cast<Map<String, dynamic>>()
-            .toList()
-          ..sort((a, b) {
-            final mountA = (a['mount'] ?? '').toString();
-            final mountB = (b['mount'] ?? '').toString();
-            final depthCompare = _mountDepth(
-              mountA,
-            ).compareTo(_mountDepth(mountB));
-            if (depthCompare != 0) {
-              return depthCompare;
-            }
-            return mountA.compareTo(mountB);
-          });
-
-    for (final p in additionalMounts) {
-      final mntPoint = '/mnt${p['mount']}';
-      if (!await ctx.runCmd(
-        'mkdir',
-        ['-p', mntPoint],
-        ctx.log,
-        isMock: ctx.isMock,
-      )) {
-        return StageResult.fail('Bağlama noktası oluşturulamadı: $mntPoint');
-      }
-      if (!await _mount(
-        ctx,
-        [p['name'], mntPoint],
-        ctx.log,
-        isMock: ctx.isMock,
-      )) {
-        return StageResult.fail('Bölüm bağlanamadı: ${p['name']} → $mntPoint');
-      }
-    }
-
-    // SWAP bölümlerini aktif et
-    for (var p in manualPartitions) {
-      if (p['mount'] == '[SWAP]') {
-        await ctx.runCmd('swapon', [p['name']], ctx.log, isMock: ctx.isMock);
-      }
-    }
-
-    ctx.log('[AŞAMA 4] Manuel bölüm bağlama tamamlandı.');
-    return StageResult.ok(
-      ctx.t(
-        'stage_result_mount_manual_done',
-        'Manuel bölüm bağlama tamamlandı.',
       ),
     );
   }
@@ -384,21 +299,6 @@ class MountingStage {
     void Function(String) log, {
     bool isMock = false,
   }) => ctx.mountSession!.mount(args);
-
-  String _normalizeFsType(String fsType) {
-    switch (fsType) {
-      case 'vfat':
-        return 'fat32';
-      case 'swap':
-        return 'linux-swap';
-      default:
-        return fsType;
-    }
-  }
-
-  int _mountDepth(String mountPoint) {
-    return mountPoint.split('/').where((segment) => segment.isNotEmpty).length;
-  }
 
   String _partitionPath(String disk, int partitionNumber) {
     final needsP =

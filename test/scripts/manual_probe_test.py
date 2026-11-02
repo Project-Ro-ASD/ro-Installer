@@ -266,7 +266,9 @@ class FilesystemTests(unittest.TestCase):
         calls = [n for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute)
                  and isinstance(n.func.value,ast.Name) and n.func.value.id == 'subprocess']
         self.assertEqual(len(calls),1); self.assertEqual(calls[0].func.attr,'Popen')
-        self.assertEqual(calls[0].args[0].elts[0].value,'/usr/sbin/blkid')
+        self.assertEqual(calls[0].args[0].id,'argv')
+        programs={n.elts[0].value for n in ast.walk(tree) if isinstance(n,ast.Tuple) and n.elts and isinstance(n.elts[0],ast.Constant) and isinstance(n.elts[0].value,str) and n.elts[0].value.startswith('/usr/')}
+        self.assertEqual(programs,{'/usr/sbin/blkid','/usr/sbin/fsck.fat','/usr/bin/btrfs'})
         self.assertFalse(any(k.arg=='shell' for k in calls[0].keywords))
         for n in ast.walk(tree):
             if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and isinstance(n.func.value,ast.Name) and n.func.value.id=='os':

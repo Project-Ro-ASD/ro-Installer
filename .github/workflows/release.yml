@@ -97,6 +97,7 @@ jobs:
             kmod \
             util-linux \
             dosfstools \
+            btrfs-progs \
             ripgrep
 
       - name: Install pinned Flutter SDK

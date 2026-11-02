@@ -105,7 +105,9 @@ class StoragePlanBuilder {
       'free_space' => throw const StoragePlanException(
         'Verified FreeSpaceInstallationPlan required.',
       ),
-      'manual' => _manualOperations(state),
+      'manual' => throw const StoragePlanException(
+        'Verified ManualInstallationPlan required.',
+      ),
       _ => throw StoragePlanException('Bilinmeyen storage plan yöntemi: $mode'),
     };
 
@@ -181,86 +183,6 @@ class StoragePlanBuilder {
         destructive: true,
       ),
     ]);
-    return operations;
-  }
-
-  static List<StoragePlanOperation> _manualOperations(
-    Map<String, dynamic> state,
-  ) {
-    final manualPartitions =
-        state['manualPartitions'] as List<dynamic>? ?? const [];
-    if (manualPartitions.isEmpty) {
-      throw const StoragePlanException('Manuel storage plan boş olamaz.');
-    }
-
-    final operations = <StoragePlanOperation>[];
-    for (final rawPart in manualPartitions) {
-      if (rawPart is! Map<String, dynamic>) continue;
-      final deletedNames = rawPart['deletedPartitionNames'];
-      if (deletedNames is Iterable) {
-        for (final deletedName in deletedNames) {
-          final target = deletedName.toString();
-          if (target.isNotEmpty) {
-            operations.add(
-              StoragePlanOperation(
-                type: 'delete_partition',
-                target: target,
-                destructive: true,
-              ),
-            );
-          }
-        }
-      }
-      if (rawPart['isFreeSpace'] == true) continue;
-
-      final name = (rawPart['name'] ?? '').toString();
-      final mount = (rawPart['mount'] ?? 'unmounted').toString();
-      final fsType = (rawPart['type'] ?? '').toString();
-      final isNewPartition =
-          name == 'New Partition' || name.startsWith('New Partition');
-      final isResized = rawPart['isResized'] == true;
-      final formatOnInstall = rawPart.containsKey('formatOnInstall')
-          ? rawPart['formatOnInstall'] == true
-          : rawPart['isPlanned'] == true;
-      if (mount == '/boot/efi' && fsType != 'fat32' && fsType != 'vfat') {
-        throw StoragePlanException('EFI bolumu FAT32 olmalidir: $name');
-      }
-      if (mount == '[SWAP]' && fsType != 'linux-swap' && fsType != 'swap') {
-        throw StoragePlanException('Swap bolumu linux-swap olmalidir: $name');
-      }
-      if (mount != 'unmounted' &&
-          mount != '/boot/efi' &&
-          mount != '[SWAP]' &&
-          fsType != 'btrfs') {
-        throw StoragePlanException(
-          'Mount edilen manuel bolumler Btrfs olmalidir: $name ($fsType)',
-        );
-      }
-      final operationType = isNewPartition
-          ? 'create_partition'
-          : isResized
-          ? 'resize_partition'
-          : formatOnInstall
-          ? 'format_partition'
-          : 'keep';
-      operations.add(
-        StoragePlanOperation(
-          type: operationType,
-          target: name,
-          destructive: operationType != 'keep',
-          details: {
-            'mount': mount,
-            'fsType': fsType,
-            'formatOnInstall': formatOnInstall,
-            'isResized': isResized,
-            if (rawPart['sizeBytes'] != null) 'sizeBytes': rawPart['sizeBytes'],
-            if (rawPart['startSector'] != null)
-              'startSector': rawPart['startSector'],
-            if (rawPart['endSector'] != null) 'endSector': rawPart['endSector'],
-          },
-        ),
-      );
-    }
     return operations;
   }
 

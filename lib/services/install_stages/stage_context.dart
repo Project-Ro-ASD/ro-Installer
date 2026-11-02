@@ -1,3 +1,4 @@
+import '../../models/approved_manual_plan.dart';
 import '../install_observation.dart';
 import '../copy_progress.dart';
 import '../helper_protocol.dart';
@@ -31,6 +32,7 @@ class StageContext {
     this.onCopyProgress,
     this.approvedPlan,
     this.approvedFreeSpacePlan,
+    this.approvedManualPlan,
   });
 
   /// Kurulum yapılandırma verisi (disk, storage layout, Installer UI language hint)
@@ -66,6 +68,102 @@ class StageContext {
   final void Function(CopyProgress)? onCopyProgress;
   final ApprovedFullDiskPlan? approvedPlan;
   final ApprovedFreeSpacePlan? approvedFreeSpacePlan;
+  final ApprovedManualPlan? approvedManualPlan;
+  CreatedManualLayout? _createdManualLayout;
+  CreatedManualLayout? get createdManualLayout => _createdManualLayout;
+  bool get reusesEsp => approvedManualPlan?.plan.esp.formatOnInstall == false;
+  void bindCreatedManualLayout(CreatedManualLayout layout) {
+    if (approvedManualPlan == null ||
+        !samePlanValue(approvedManualPlan!.json, layout.approved.json)) {
+      throw const FormatException('Unowned manual layout');
+    }
+    mountSession?.bindCreatedManualLayout(layout);
+    _createdManualLayout = layout;
+  }
+
+  Future<bool> formattedManualEspFitsSource() async {
+    final plan = approvedManualPlan!.plan;
+    final bytes =
+        (plan.esp.endSector - plan.esp.startSector + 1) *
+        plan.snapshot.logicalSectorBytes;
+    try {
+      final result = await commandRunner.run('/usr/bin/python3', [
+        '-I',
+        '/usr/libexec/ro_installer_manual.py',
+        '--new-efi-budget',
+        '$bytes',
+      ], timeout: const Duration(seconds: 10));
+      if (!result.started ||
+          result.exitCode != 0 ||
+          utf8.encode(result.stdout).length > 4096) {
+        return false;
+      }
+      final value = decodeProtocolObject(result.stdout);
+      return exactFields(value, {
+            'requiredBytes',
+            'availableBytes',
+            'sourceBytes',
+            'fileCount',
+            'clusterBytes',
+            'sufficient',
+          }) &&
+          value['availableBytes'] is int &&
+          value['availableBytes'] == bytes &&
+          value['sufficient'] == true &&
+          value['clusterBytes'] is int &&
+          value['clusterBytes'] == 1048576 &&
+          value['requiredBytes'] is int &&
+          value['sourceBytes'] is int &&
+          value['sourceBytes'] > 0 &&
+          value['sourceBytes'] <= 1073741824 &&
+          value['requiredBytes'] >= value['sourceBytes'] + 16777216 &&
+          value['requiredBytes'] <= bytes &&
+          value['fileCount'] is int &&
+          value['fileCount'] >= 2 &&
+          value['fileCount'] <= 4096;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>> probeManualMetadata() async {
+    final approved = approvedManualPlan!;
+    final result = await commandRunner.run('/usr/bin/python3', [
+      '-I',
+      '/usr/libexec/ro_installer_manual.py',
+      '--layout',
+      approved.plan.snapshot.device.path,
+      jsonEncode(approved.plan.snapshot.device.json),
+      jsonEncode(approved.newSlots),
+    ], timeout: const Duration(seconds: 12));
+    if (!result.started ||
+        result.exitCode != 0 ||
+        utf8.encode(result.stdout).length > 8192) {
+      throw const FormatException('Manual metadata probe failed');
+    }
+    final value = decodeProtocolObject(result.stdout);
+    if (!exactFields(value, {'snapshot', 'preservationFingerprint'}) ||
+        value['preservationFingerprint'] is! String) {
+      throw const FormatException('Invalid manual metadata proof');
+    }
+    return value;
+  }
+
+  Future<bool> verifyManualLayoutNow() async {
+    if (_createdManualLayout == null || !approvedStateMatches) return false;
+    try {
+      final value = await probeManualMetadata();
+      return samePlanValue(
+            value['snapshot'],
+            _createdManualLayout!.snapshot.json,
+          ) &&
+          value['preservationFingerprint'] ==
+              approvedManualPlan!.preservationFingerprint;
+    } catch (_) {
+      return false;
+    }
+  }
+
   CreatedFreeSpaceLayout? _createdFreeSpaceLayout;
   CreatedFreeSpaceLayout? get createdFreeSpaceLayout => _createdFreeSpaceLayout;
   void bindCreatedFreeSpaceLayout(CreatedFreeSpaceLayout layout) {
@@ -80,11 +178,15 @@ class StageContext {
   bool get approvedStateMatches =>
       matchesApprovedPlan(state, expected: approvedPlan) &&
       (approvedFreeSpacePlan == null ||
-          approvedFreeSpacePlan!.matchesState(state));
+          approvedFreeSpacePlan!.matchesState(state)) &&
+      (approvedManualPlan == null || approvedManualPlan!.matchesState(state));
   bool get usesStandardStorage =>
       approvedStateMatches &&
       (state['fileSystem'] ?? 'btrfs') == 'btrfs' &&
       ((state['partitionMethod'] ?? 'full') == 'full' ||
+          (state['partitionMethod'] == 'manual' &&
+              approvedManualPlan != null &&
+              _createdManualLayout != null) ||
           (state['partitionMethod'] == 'free_space' &&
               approvedFreeSpacePlan != null &&
               _createdFreeSpaceLayout != null &&
@@ -94,10 +196,14 @@ class StageContext {
     return '$disk${disk.contains('nvme') || disk.contains('mmcblk') || disk.contains('loop') ? 'p' : ''}$number';
   }
 
-  String get rootPartition => state['partitionMethod'] == 'free_space'
+  String get rootPartition => state['partitionMethod'] == 'manual'
+      ? _createdManualLayout!.rootPath
+      : state['partitionMethod'] == 'free_space'
       ? _createdFreeSpaceLayout!.rootPath
       : _fullPartition(2);
-  String get espPartition => state['partitionMethod'] == 'free_space'
+  String get espPartition => state['partitionMethod'] == 'manual'
+      ? _createdManualLayout!.espPath
+      : state['partitionMethod'] == 'free_space'
       ? _createdFreeSpaceLayout!.espPath
       : _fullPartition(1);
   Future<Map<String, dynamic>> probeFreeSpaceMetadata() async {

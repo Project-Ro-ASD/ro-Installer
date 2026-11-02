@@ -1,3 +1,4 @@
+import '../models/approved_manual_plan.dart';
 import 'install_observation.dart';
 import 'copy_progress.dart';
 import '../models/approved_full_disk_plan.dart';
@@ -186,10 +187,10 @@ class InstallService {
     // Fail closed before disk preparation; never reinterpret another mode as full.
     if ((state['partitionMethod'] ?? 'full') != 'full' &&
         !(state['partitionMethod'] == 'free_space' &&
-            state.containsKey('_approvedFreeSpacePlan'))) {
-      log(
-        'Desteklenmeyen kurulum modu; disk işlemleri başlatılmadı.',
-      );
+            state.containsKey('_approvedFreeSpacePlan')) &&
+        !(state['partitionMethod'] == 'manual' &&
+            state.containsKey('_approvedManualPlan'))) {
+      log('Desteklenmeyen kurulum modu; disk işlemleri başlatılmadı.');
       lastOutcome = InstallOutcome(
         primaryFailure: 'UNSUPPORTED_MODE',
         cleanup: const CleanupReport(true),
@@ -204,7 +205,20 @@ class InstallService {
     }
     ApprovedFullDiskPlan? approvedPlan;
     ApprovedFreeSpacePlan? approvedFreeSpacePlan;
+    ApprovedManualPlan? approvedManualPlan;
     try {
+      if (state['partitionMethod'] == 'manual') {
+        approvedManualPlan = ApprovedManualPlan.fromJson(
+          state['_approvedManualPlan'],
+        );
+        if (!approvedManualPlan.matchesState(state) ||
+            state.containsKey('_approvedFullDiskPlan') ||
+            state.containsKey('_approvedFreeSpacePlan')) {
+          throw const FormatException('Stale manual plan');
+        }
+      } else if (state.containsKey('_approvedManualPlan')) {
+        throw const FormatException('Wrong mode');
+      }
       if (state['partitionMethod'] == 'free_space') {
         approvedFreeSpacePlan = ApprovedFreeSpacePlan.fromJson(
           state['_approvedFreeSpacePlan'],
@@ -374,7 +388,8 @@ class InstallService {
             }) {
               final String? operation = args.contains(bootloaderDracutScript)
                   ? 'bootloader.dracut'
-                  : args.contains(bootloaderKernelInstallScript)
+                  : (args.contains(bootloaderKernelInstallScript) ||
+                        args.contains(bootloaderManualKernelInstallScript))
                   ? 'bootloader.kernel-install'
                   : args.contains('grub2-mkconfig')
                   ? 'bootloader.grub-config'
@@ -397,10 +412,13 @@ class InstallService {
         onCopyProgress: onCopyProgress,
         approvedPlan: approvedPlan,
         approvedFreeSpacePlan: approvedFreeSpacePlan,
+        approvedManualPlan: approvedManualPlan,
         beforeFirstMutation: () async {
           if (!matchesApprovedPlan(state, expected: approvedPlan) ||
               (approvedFreeSpacePlan != null &&
-                  !approvedFreeSpacePlan.matchesState(state))) {
+                  !approvedFreeSpacePlan.matchesState(state)) ||
+              (approvedManualPlan != null &&
+                  !approvedManualPlan.matchesState(state))) {
             throw const FormatException('Stale plan');
           }
           await mountSession!.validateTarget(disk, commit: true);
@@ -417,6 +435,24 @@ class InstallService {
         log(
           'Kurulum öncesi güvenlik kontrolleri başarısız; disk değiştirilmedi.',
         );
+        return false;
+      }
+
+      if (approvedManualPlan != null &&
+          !approvedManualPlan.plan.esp.formatOnInstall &&
+          !await mountSession.inspectEspReuse(approvedManualPlan)) {
+        primaryFailure = 'PREFLIGHT_FAILED';
+        log(
+          'Mevcut EFI kapasitesi veya sahipliği doğrulanamadı; disk değiştirilmedi.',
+        );
+        return false;
+      }
+
+      if (approvedManualPlan != null &&
+          approvedManualPlan.plan.esp.formatOnInstall &&
+          !await ctx.formattedManualEspFitsSource()) {
+        primaryFailure = 'PREFLIGHT_FAILED';
+        log('Seçilen EFI alanı kaynak boot dosyaları için yeterli değil.');
         return false;
       }
 

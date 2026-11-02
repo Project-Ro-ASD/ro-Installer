@@ -17,6 +17,9 @@ $candidates
 CANDIDATES
 ''';
 
+final bootloaderManualKernelInstallScript = bootloaderKernelInstallScript
+    .replaceAll('kernel-install add', 'kernel-install --boot-path=/boot add');
+
 const bootloaderDracutScript =
     'set -e\n$preparedKernelDiscoveryScript'
     r'''
@@ -49,6 +52,9 @@ class BootloaderStage {
   const BootloaderStage();
 
   Future<StageResult> execute(StageContext ctx) async {
+    if (ctx.reusesEsp && !await ctx.mountSession!.verifyProtectedEsp()) {
+      return StageResult.fail('EFI yazı koruması geçersiz.');
+    }
     if (!ctx.usesStandardStorage) {
       return StageResult.fail(
         'Bootloader requires the standard full/Btrfs layout.',
@@ -105,7 +111,7 @@ class BootloaderStage {
         return StageResult.fail('EFI bölümü /mnt/boot/efi\'ye bağlı değil.');
       }
     }
-    if (ctx.state['partitionMethod'] == 'free_space' &&
+    if (const ['free_space', 'manual'].contains(ctx.state['partitionMethod']) &&
         !ctx.isMock &&
         efiCheckResult.stdout.trim() != ctx.espPartition) {
       return StageResult.fail('EFI kaynağı onaylanan yeni bölümle eşleşmiyor.');
@@ -156,7 +162,7 @@ GRUB_TERMINAL_OUTPUT="console"
 GRUB_CMDLINE_LINUX="rhgb quiet"
 GRUB_DISABLE_RECOVERY="true"
 GRUB_ENABLE_BLSCFG=true
-GRUB_DISABLE_OS_PROBER=${ctx.state['partitionMethod'] == 'free_space' ? 'true' : 'false'}
+GRUB_DISABLE_OS_PROBER=${ctx.state['partitionMethod'] != 'full' ? 'true' : 'false'}
 EOF
       ''',
     ], '/etc/default/grub yazılamadı.');
@@ -190,7 +196,9 @@ EOF
       '/mnt',
       'sh',
       '-c',
-      bootloaderKernelInstallScript,
+      ctx.approvedManualPlan != null
+          ? bootloaderManualKernelInstallScript
+          : bootloaderKernelInstallScript,
     ], 'kernel-install başarısız oldu.');
     if (kernelInstallResult != null) return kernelInstallResult;
 
@@ -260,12 +268,17 @@ EOF
     }
 
     final isFree = ctx.state['partitionMethod'] == 'free_space';
-    final efiDisk = isFree
+    final manual = ctx.approvedManualPlan;
+    final efiDisk = manual != null
+        ? manual.plan.snapshot.device.path
+        : isFree
         ? ctx.approvedFreeSpacePlan!.plan.snapshot.device.path
         : ctx.isMock
         ? '/dev/vda'
         : efiDevice!.disk;
-    final efiPartNum = isFree
+    final efiPartNum = manual != null
+        ? '${manual.plan.esp.number}'
+        : isFree
         ? '${ctx.approvedFreeSpacePlan!.plan.espNumber}'
         : ctx.isMock
         ? '1'

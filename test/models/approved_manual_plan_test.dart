@@ -220,27 +220,33 @@ void main() {
       }
     },
   );
-  test(
-    'private manual facts alone cannot start production installation',
-    () async {
-      final plan = approved(fixtures()[0]);
-      final runner = FakeCommandRunner(defaultSuccess: false);
-      final service = InstallService(commandRunner: runner);
-      expect(
-        await service.runInstall(
-          {
-            'selectedDisk': '/dev/vda',
-            'partitionMethod': 'manual',
-            'fileSystem': 'btrfs',
-            '_approvedManualPlan': plan.json,
-          },
-          (_, _) {},
-          (_) {},
-        ),
-        false,
-      );
-      expect(service.lastOutcome!.primaryFailure, 'UNSUPPORTED_MODE');
-      expect(runner.commandLog, isEmpty);
-    },
-  );
+  test('private manual facts do not bypass platform admission', () async {
+    final plan = approved(fixtures()[0]);
+    final runner = FakeCommandRunner(defaultSuccess: false)
+      ..addResponse('uname', ['-m'], stdout: 'aarch64')
+      ..addResponse('test', ['-d', '/sys/firmware/efi']);
+    final service = InstallService(commandRunner: runner);
+    expect(
+      await service.runInstall(
+        {
+          'selectedDisk': '/dev/vda',
+          'partitionMethod': 'manual',
+          'fileSystem': 'btrfs',
+          '_approvedManualPlan': plan.json,
+        },
+        (_, _) {},
+        (_) {},
+      ),
+      false,
+    );
+    expect(service.lastOutcome!.primaryFailure, 'UNSUPPORTED_PLATFORM');
+    expect(
+      runner.commandLog.where(
+        (c) =>
+            c.command.startsWith('mkfs.') ||
+            const ['sfdisk', 'sgdisk', 'wipefs', 'mount'].contains(c.command),
+      ),
+      isEmpty,
+    );
+  });
 }

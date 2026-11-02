@@ -89,6 +89,24 @@ class BudgetTests(unittest.TestCase):
                 with mock.patch.object(local_os,'fstatvfs',side_effect=[fs,changed]):
                     with self.assertRaises(ValueError):worker.mounted_esp_budget(str(path),number)
 
+    def test_formatted_esp_cli_uses_fixed_source_and_conservative_allocation(self):
+        with tempfile.TemporaryDirectory() as td:
+            path=source(Path(td)/'source')
+            with mock.patch.object(worker,'EFI_SOURCE',str(path)),mock.patch.object(worker.os,'geteuid',return_value=0):
+                for available in [512*1048576,worker.gpt.MAX_BYTES]:
+                    out=io.StringIO()
+                    with mock.patch.object(worker.sys,'argv',['worker','--new-efi-budget',str(available)]),redirect_stdout(out):
+                        self.assertEqual(worker.main(),0)
+                    value=json.loads(out.getvalue())
+                    self.assertEqual(value['clusterBytes'],1048576)
+                    self.assertEqual(value['availableBytes'],available)
+                    self.assertTrue(value['sufficient'])
+                for available in ['-1','0',str(512*1048576-1),str(worker.gpt.MAX_BYTES+1),'true']:
+                    out=io.StringIO()
+                    with mock.patch.object(worker.sys,'argv',['worker','--new-efi-budget',available]),redirect_stdout(out):
+                        self.assertEqual(worker.main(),2)
+                    self.assertEqual(out.getvalue(),'')
+
     def test_private_cli_emits_only_fixed_numeric_budget_or_silent_failure(self):
         value={'requiredBytes':20000000,'availableBytes':30000000,'sourceBytes':1000,'fileCount':2,'clusterBytes':4096,'sufficient':True}
         out=io.StringIO()

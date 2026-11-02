@@ -253,6 +253,9 @@ class PostInstallValidationStage {
   const PostInstallValidationStage();
 
   Future<StageResult> execute(StageContext ctx) async {
+    if (ctx.reusesEsp && !await ctx.mountSession!.verifyProtectedEsp()) {
+      return StageResult.fail('EFI yazı koruması değişti.');
+    }
     if (!ctx.usesStandardStorage) {
       return StageResult.fail(
         'Technical validation requires full/Btrfs storage.',

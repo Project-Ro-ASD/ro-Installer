@@ -22,7 +22,9 @@ bool isValidInstallerHandoff(
   Object? metadata, {
   String expectedMode = 'full',
 }) {
-  if (!const ['full', 'free_space'].contains(expectedMode)) return false;
+  if (!const ['full', 'free_space', 'manual'].contains(expectedMode)) {
+    return false;
+  }
   if (seed is! Map || metadata is! Map) return false;
   final language = seed['installer_ui_language_hint'];
   if (seed.length != 2 ||

@@ -187,6 +187,36 @@ def manual_choice(value):
     return dict(value)
 
 
+def manual_intent_choices(value, expected):
+    if (not isinstance(value,dict) or set(value)!={'schemaVersion','layoutVersion','mode','device','tableFingerprint','fileSystem','diskSwap','subvolumes','esp','root'}
+            or type(value['schemaVersion']) is not int or value['schemaVersion']!=1
+            or type(value['layoutVersion']) is not int or value['layoutVersion']!=1
+            or value['mode']!='manual' or value['fileSystem']!='btrfs' or value['diskSwap'] is not False
+            or identity(value['device'])!=identity(expected)
+            or not isinstance(value['tableFingerprint'],str) or not re.fullmatch('[0-9a-f]{64}',value['tableFingerprint'])
+            or value['subvolumes']!={'root':'/','home':'/home','var_log':'/var/log','var_cache':'/var/cache','var_tmp':'/var/tmp'}):
+        raise ValueError('Invalid manual intent')
+    choices={}
+    for role in ('esp','root'):
+        row=value[role]
+        fields={'source','number','startSector','endSector','typeGuid','fileSystem','mountPoint','formatOnInstall'}
+        if not isinstance(row,dict):raise ValueError('Invalid manual binding')
+        if row.get('source')=='existing':fields|={'partitionGuid','attributesHex'}
+        if set(row)!=fields or type(row['formatOnInstall']) is not bool:raise ValueError('Invalid manual binding')
+        integer(row['number'],1,4096);start=integer(row['startSector'],0,MAX_BYTES);integer(row['endSector'],start,MAX_BYTES)
+        if (row['typeGuid']!=('c12a7328-f81f-11d2-ba4b-00a0c93ec93b' if role=='esp' else '0fc63daf-8483-4772-8e79-3d69d8477de4')
+                or row['fileSystem']!=('fat32' if role=='esp' else 'btrfs') or row['mountPoint']!=('/boot/efi' if role=='esp' else '/')
+                or (role=='root' or row['source']=='create') and row['formatOnInstall'] is not True):
+            raise ValueError('Unsupported manual binding')
+        if row['source']=='existing':
+            guid(row['partitionGuid'])
+            if row['attributesHex']!='0000000000000000':raise ValueError('Unsupported attributes')
+            choices[role]=manual_choice({'source':'existing','number':row['number'],'formatOnInstall':row['formatOnInstall']})
+        else:
+            choices[role]=manual_choice({'source':row['source'],'startSector':row['startSector'],'endSector':row['endSector']})
+    return choices
+
+
 def manual_plan(snapshot, choices):
     s = normalize_snapshot(snapshot)
     if not isinstance(choices, dict) or set(choices) != {'esp', 'root'}:

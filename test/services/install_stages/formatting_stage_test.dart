@@ -53,9 +53,9 @@ void main() {
       expect(state['_resolvedRootPart'], '/dev/sda2');
       expect(state.containsKey('_resolvedSwapPart'), isFalse);
       expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda2']), true);
-      final storagePlan = jsonDecode(
-        state['_formatStoragePlan'] as String,
-      ) as Map<String, dynamic>;
+      final storagePlan =
+          jsonDecode(state['_formatStoragePlan'] as String)
+              as Map<String, dynamic>;
       final destructiveTypes =
           (storagePlan['destructiveOperations'] as List<dynamic>)
               .map((entry) => (entry as Map<String, dynamic>)['type'])
@@ -167,150 +167,48 @@ void main() {
     });
   });
 
-  group('FormattingStage — manual', () {
-    test('planlanan bölümler sırayla biçimlendirilir', () async {
-      final fake = FakeCommandRunner();
-      final state = {
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'manual',
-        'fileSystem': 'btrfs',
-        'manualPartitions': [
-          {
-            'name': '/dev/sda1',
-            'type': 'fat32',
-            'mount': '/boot/efi',
-            'isPlanned': true,
-            'isFreeSpace': false,
-            'formatOnInstall': true,
-          },
-          {
-            'name': '/dev/sda2',
-            'type': 'btrfs',
-            'mount': '/',
-            'isPlanned': true,
-            'isFreeSpace': false,
-            'formatOnInstall': true,
-          },
-          {
-            'name': '/dev/sda3',
-            'type': 'linux-swap',
-            'mount': '[SWAP]',
-            'isPlanned': true,
-            'isFreeSpace': false,
-            'formatOnInstall': true,
-          },
-        ],
-      };
-      final ctx = makeContext(state, fake);
-
-      final stage = const FormattingStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, true);
-      expect(fake.wasCalledWith('mkfs.fat', ['-F32', '/dev/sda1']), true);
-      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda2']), true);
-      expect(fake.wasCalledWith('mkswap', ['/dev/sda3']), true);
-    });
-
-    test('isPlanned=false olan bölümler atlanır', () async {
-      final fake = FakeCommandRunner();
-      final state = {
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'manual',
-        'fileSystem': 'btrfs',
-        'manualPartitions': [
-          {
-            'name': '/dev/sda1',
-            'type': 'ntfs',
-            'mount': 'unmounted',
-            'isPlanned': false,
-            'isFreeSpace': false,
-            'formatOnInstall': false,
-          },
-          {
-            'name': '/dev/sda2',
-            'type': 'btrfs',
-            'mount': '/',
-            'isPlanned': true,
-            'isFreeSpace': false,
-            'formatOnInstall': true,
-          },
-        ],
-      };
-      final ctx = makeContext(state, fake);
-
-      final stage = const FormattingStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, true);
-      // sda1 formatlanmamalı (isPlanned=false)
-      expect(fake.wasCommandCalled('mkfs.ntfs'), false);
-      // sda2 formatlanmalı
-      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda2']), true);
-    });
-
-    test(
-      'manual modda desteklenmeyen planlı dosya sistemi reddedilir',
-      () async {
-        final fake = FakeCommandRunner();
-        final state = {
+  group('FormattingStage — unapproved manual input', () {
+    for (final part in [
+      {
+        'name': '/dev/sda1',
+        'type': 'fat32',
+        'mount': '/boot/efi',
+        'isPlanned': true,
+        'formatOnInstall': true,
+      },
+      {
+        'name': '/dev/sda2',
+        'type': 'btrfs',
+        'mount': '/',
+        'isPlanned': true,
+        'formatOnInstall': true,
+      },
+      {
+        'name': '/dev/sda2',
+        'type': 'ext4',
+        'mount': '/',
+        'isPlanned': true,
+        'formatOnInstall': true,
+      },
+      {
+        'name': '/dev/sda1',
+        'type': 'fat32',
+        'mount': '/boot/efi',
+        'isPlanned': true,
+        'formatOnInstall': false,
+      },
+    ]) {
+      test('legacy flags cannot authorize formatting: $part', () async {
+        final runner = FakeCommandRunner();
+        final ctx = makeContext({
           'selectedDisk': '/dev/sda',
           'partitionMethod': 'manual',
           'fileSystem': 'btrfs',
-          'manualPartitions': [
-            {
-              'name': '/dev/sda2',
-              'type': 'ext4',
-              'mount': '/',
-              'isPlanned': true,
-              'isFreeSpace': false,
-              'formatOnInstall': true,
-            },
-          ],
-        };
-        final ctx = makeContext(state, fake);
-
-        final result = await const FormattingStage().execute(ctx);
-
-        expect(result.success, false);
-        expect(result.message, contains('Btrfs'));
-        expect(fake.wasCommandCalled('mkfs.ext4'), false);
-      },
-    );
-
-    test('formatOnInstall=false olan atanmis bolumler korunur', () async {
-      final fake = FakeCommandRunner();
-      final state = {
-        'selectedDisk': '/dev/sda',
-        'partitionMethod': 'manual',
-        'fileSystem': 'btrfs',
-        'manualPartitions': [
-          {
-            'name': '/dev/sda1',
-            'type': 'fat32',
-            'mount': '/boot/efi',
-            'isPlanned': true,
-            'isFreeSpace': false,
-            'formatOnInstall': false,
-          },
-          {
-            'name': '/dev/sda2',
-            'type': 'btrfs',
-            'mount': '/',
-            'isPlanned': true,
-            'isFreeSpace': false,
-            'formatOnInstall': true,
-          },
-        ],
-      };
-      final ctx = makeContext(state, fake);
-
-      final stage = const FormattingStage();
-      final result = await stage.execute(ctx);
-
-      expect(result.success, true);
-      expect(fake.wasCalledWith('mkfs.fat', ['-F32', '/dev/sda1']), false);
-      expect(fake.wasCalledWith('mkfs.btrfs', ['-f', '/dev/sda2']), true);
-    });
+          'manualPartitions': [part],
+        }, runner);
+        expect((await const FormattingStage().execute(ctx)).success, false);
+        expect(runner.commandLog, isEmpty);
+      });
+    }
   });
 }
