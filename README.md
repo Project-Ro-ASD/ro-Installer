@@ -550,6 +550,15 @@ binary can continue only when it is the exact inode of the already-running root
 parent executable. Active target disks are rejected on both paths, without global
 swapoff or force-unmounting user resources.
 
+After namespace setup, the root session acquires a blocking logind inhibitor for
+sleep and shutdown through the fixed system-bus socket. It owns a close-on-exec
+copy of the returned descriptor through engine execution and owned-child cleanup,
+then releases it before an optional successful-install reboot. Acquisition has a
+bounded method deadline; failure prevents engine startup and is recorded as
+`POWER_INHIBIT_FAILED`. GUI and root-auto share this behavior. The inhibitor
+covers ordinary power-management requests; it cannot prevent forced power loss.
+Native descriptor-ownership regressions use a private D-Bus and synthetic replies.
+
 Before stage 1, read-only preflight checks source topology and required EFI/system
 files, runtime tools, target capacity and the existing
 `/usr/lib/ro-asd/release.json` Ro-ASD/Fedora 44 x86_64 metadata contract. This is

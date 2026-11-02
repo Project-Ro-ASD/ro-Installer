@@ -1,4 +1,5 @@
 """Session supervisor boundaries. No real /mnt or physical disk operations."""
+import contextlib
 import importlib.machinery
 import importlib.util
 import os
@@ -80,15 +81,16 @@ class NamespaceTests(unittest.TestCase):
 
     def test_namespace_initialization_failure_never_starts_engine(self):
         gate=mock.MagicMock()
-        with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session,'records_module',side_effect=RuntimeError('store fixture unavailable')),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',side_effect=PermissionError),mock.patch.object(session,'Supervisor') as supervisor:
+        with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session,'records_module',side_effect=RuntimeError('store fixture unavailable')),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',side_effect=PermissionError),mock.patch.object(session,'Supervisor') as supervisor,mock.patch.object(session,'power_inhibitor') as inhibitor:
             self.assertEqual(session.main(),9)
             supervisor.assert_not_called()
+            inhibitor.assert_not_called()
 
     def test_root_auto_preserves_profile_options_without_gui_environment_override(self):
         gate=mock.MagicMock()
         with tempfile.TemporaryDirectory() as td:
             gate.LOCK_DIRECTORY=td
-            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session,'records_module',side_effect=RuntimeError('store fixture unavailable')),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture','RO_INSTALLER_VM_TEST_MODE':'1','LD_PRELOAD':'untrusted','PYTHONPATH':'untrusted','PATH':'untrusted'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'Supervisor') as supervisor:
+            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session,'records_module',side_effect=RuntimeError('store fixture unavailable')),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture','RO_INSTALLER_VM_TEST_MODE':'1','LD_PRELOAD':'untrusted','PYTHONPATH':'untrusted','PATH':'untrusted'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'power_inhibitor',return_value=contextlib.nullcontext()),mock.patch.object(session,'Supervisor') as supervisor:
                 supervisor.return_value.run.return_value=0
                 self.assertEqual(session.main(),0)
                 argv,env=supervisor.return_value.run.call_args.args
@@ -106,7 +108,7 @@ class NamespaceTests(unittest.TestCase):
         module=SimpleNamespace(Recorder=mock.Mock(return_value=record),valid_report=lambda _:False)
         with tempfile.TemporaryDirectory() as td:
             gate.LOCK_DIRECTORY=td
-            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture','RO_INSTALLER_AUTO_REBOOT':'1','RO_INSTALLER_LOG_DIR':'SECRET_SENTINEL'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'records_module',return_value=module),mock.patch.object(session,'Supervisor') as supervisor,mock.patch.object(session.subprocess,'run',side_effect=lambda *a,**k:order.append('reboot')) as reboot:
+            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture','RO_INSTALLER_AUTO_REBOOT':'1','RO_INSTALLER_LOG_DIR':'SECRET_SENTINEL'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'power_inhibitor',return_value=contextlib.nullcontext()),mock.patch.object(session,'records_module',return_value=module),mock.patch.object(session,'Supervisor') as supervisor,mock.patch.object(session.subprocess,'run',side_effect=lambda *a,**k:order.append('reboot')) as reboot:
                 supervisor.return_value.run.return_value=0
                 self.assertEqual(session.main(),0)
                 env=supervisor.return_value.run.call_args.args[1]
@@ -121,7 +123,7 @@ class NamespaceTests(unittest.TestCase):
         module=SimpleNamespace(Recorder=mock.Mock(return_value=record),valid_report=lambda _:True)
         with tempfile.TemporaryDirectory() as td:
             gate.LOCK_DIRECTORY=td
-            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'records_module',return_value=module),mock.patch.object(session,'Supervisor') as supervisor,mock.patch.object(session.sys.stdout,'write',side_effect=BrokenPipeError),mock.patch.object(session.sys.stderr,'write',side_effect=BrokenPipeError):
+            with mock.patch.object(session.os,'geteuid',return_value=0),mock.patch.object(session.os,'setsid'),mock.patch.object(session.sys,'argv',['session','--auto']),mock.patch.dict(session.os.environ,{'RO_INSTALLER_AUTO_PROFILE':'fixture'},clear=True),mock.patch.object(session,'helper_module',return_value=gate),mock.patch.object(session,'private_namespace',return_value=('before','after')),mock.patch.object(session,'power_inhibitor',return_value=contextlib.nullcontext()),mock.patch.object(session,'records_module',return_value=module),mock.patch.object(session,'Supervisor') as supervisor,mock.patch.object(session.sys.stdout,'write',side_effect=BrokenPipeError),mock.patch.object(session.sys.stderr,'write',side_effect=BrokenPipeError):
                 supervisor.return_value.run.return_value=0
                 self.assertEqual(session.main(),0)
                 record.close.assert_called_once()

@@ -48,6 +48,8 @@ jobs:
             ca-certificates \
             clang \
             binutils \
+            dbus-daemon \
+            systemd-libs \
             cmake \
             ninja-build \
             gtk3-devel \
