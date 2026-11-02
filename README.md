@@ -247,6 +247,14 @@ a filesystem eligibility check for the ESP. `HelperClient.assessNtfsShrink`
 reconstructs the Dart plan from the returned minimum and rejects a response that
 does not match the selected snapshot and exact intent.
 
+For future writer integration, `verified_ntfs_snapshot` computes a distinct raw
+GPT preservation proof that masks only the selected source's eight-byte end
+field, one new root entry and the dependent CRCs. Names, source identity/start,
+other entries, PMBR and reserved-array padding stay protected. The separate
+`verify_ntfs_created_layout` check requires the exact planned source end, root
+geometry and allocated GUID as well as an unchanged proof. These are pure
+verification primitives; they do not add a worker CLI or enable installation.
+
 ### Read-only NTFS inspection primitive
 
 The root-only `ro_installer_ntfs.py` worker accepts an inherited read-only block

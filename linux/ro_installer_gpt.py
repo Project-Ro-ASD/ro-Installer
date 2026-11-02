@@ -82,7 +82,7 @@ def normalize_snapshot(value, expected=None):
     return result
 
 
-def read_snapshot(read, device, sector, preserve_slots=None):
+def read_snapshot(read, device, sector, preserve_slots=None, *, ntfs_layout=None):
     device=identity(device)
     if sector not in (512,4096) or device['size'] % sector:raise ValueError('Unsupported sector geometry')
     total=device['size']//sector
@@ -131,6 +131,10 @@ def read_snapshot(read, device, sector, preserve_slots=None):
     snapshot=normalize_snapshot({'schemaVersion':1,'device':device,'logicalSectorBytes':sector,'firstUsableSector':first,
         'lastUsableSector':last,'entryCount':count,'entryBytes':entry,'primaryEntriesLba':p_lba,'backupEntriesLba':b_lba,
         'diskGuid':str(uuid.UUID(bytes_le=primary[9])),'tableFingerprint':digest.hexdigest(),'partitions':parts},device)
+    if ntfs_layout is not None:
+        if preserve_slots is not None:
+            raise ValueError('Conflicting GPT preservation policies')
+        return _ntfs_preservation(snapshot, (mbr, ph, p_array, b_array, bh), ntfs_layout)
     if preserve_slots is None:return snapshot
     if (not isinstance(preserve_slots,list) or len(preserve_slots)>2
             or any(type(n) is not int or not 1<=n<=count for n in preserve_slots) or len(set(preserve_slots))!=len(preserve_slots)):
@@ -143,6 +147,50 @@ def read_snapshot(read, device, sector, preserve_slots=None):
     proof=hashlib.sha256(b'ro-gpt-preservation-v1\0'+struct.pack('<QQQQ',device['size'],sector,p_lba,b_lba))
     for raw in masked:proof.update(struct.pack('<Q',len(raw)));proof.update(raw)
     return {'snapshot':snapshot,'preservationFingerprint':proof.hexdigest()}
+
+
+def _ntfs_preservation(snapshot, metadata, layout):
+    """Mask only source-end bytes and one root slot, never the whole source.
+
+    This raw proof must be paired with exact planned geometry/GUID verification;
+    it neither proves filesystem safety nor authorizes a write.
+    """
+    if not isinstance(layout, dict) or set(layout) != {'sourceNumber', 'rootNumber'}:
+        raise ValueError('Invalid NTFS preservation slots')
+    source = integer(layout['sourceNumber'], 1, snapshot['entryCount'])
+    root = integer(layout['rootNumber'], 1, snapshot['entryCount'])
+    rows = {p['number']: p for p in snapshot['partitions']}
+    if (source == root or source not in rows
+            or rows[source]['typeGuid'] != 'ebd0a0a2-b9e5-4433-87c0-68b6b72699c7'
+            or rows[source]['attributesHex'] != '0000000000000000'
+            or root in rows and (rows[root]['typeGuid'] != '0fc63daf-8483-4772-8e79-3d69d8477de4'
+                                  or rows[root]['attributesHex'] != '0000000000000000')):
+        raise ValueError('Unsupported NTFS preservation binding')
+    masked = [bytearray(raw) for raw in metadata]
+    for raw in (masked[1], masked[4]):
+        raw[16:20] = bytes(4)  # Header CRC.
+        raw[88:92] = bytes(4)  # Entry-array CRC.
+    entry = snapshot['entryBytes']
+    for raw in (masked[2], masked[3]):
+        end_offset = (source - 1) * entry + 40
+        raw[end_offset:end_offset + 8] = bytes(8)
+        raw[(root - 1) * entry:root * entry] = bytes(entry)
+    disk = snapshot['device']
+    proof = hashlib.sha256(b'ro-gpt-ntfs-tail-preservation-v1\0' + struct.pack('<QQQQII',
+        disk['size'], snapshot['logicalSectorBytes'], snapshot['primaryEntriesLba'],
+        snapshot['backupEntriesLba'], source, root))
+    for raw in masked:
+        proof.update(struct.pack('<Q', len(raw))); proof.update(raw)
+    return {'snapshot': snapshot, 'preservationFingerprint': proof.hexdigest()}
+
+
+def verified_ntfs_snapshot(read, device, sector, source_number, root_number):
+    layout = {'sourceNumber': source_number, 'rootNumber': root_number}
+    first = read_snapshot(read, device, sector, ntfs_layout=layout)
+    second = read_snapshot(read, device, sector, ntfs_layout=layout)
+    if first != second:
+        raise ValueError('GPT changed during NTFS preservation probe')
+    return second
 
 
 def verified_snapshot(read, device, sector, preserve_slots=None):
@@ -240,6 +288,35 @@ def ntfs_shrink_plan(proposal):
                      'endSector': exclusive_end - 1,
                      'typeGuid': '0fc63daf-8483-4772-8e79-3d69d8477de4',
                      'formatOnInstall': True}}
+
+
+def verify_ntfs_created_layout(proposal, root_guid, preservation_fingerprint, observed):
+    """Pure final GPT check; filesystem resize and write admission are separate."""
+    plan = ntfs_shrink_plan(proposal)
+    before = normalize_snapshot(proposal['snapshot'])
+    root_guid = guid(root_guid)
+    if root_guid in {before['diskGuid'], *(p['partitionGuid'] for p in before['partitions'])}:
+        raise ValueError('Reused NTFS root allocation identity')
+    if (not isinstance(preservation_fingerprint, str)
+            or not re.fullmatch('[0-9a-f]{64}', preservation_fingerprint)
+            or not isinstance(observed, dict) or set(observed) != {'snapshot', 'preservationFingerprint'}
+            or observed['preservationFingerprint'] != preservation_fingerprint):
+        raise ValueError('Protected GPT metadata changed')
+    current = normalize_snapshot(observed['snapshot'], before['device'])
+    def header(snapshot):
+        return {key: value for key, value in snapshot.items() if key not in {'tableFingerprint', 'partitions'}}
+    if header(before) != header(current):
+        raise ValueError('GPT header geometry changed')
+    expected = []
+    for part in before['partitions']:
+        expected.append(dict(part, endSector=plan['source']['newEndSector'])
+                        if part['number'] == plan['source']['number'] else dict(part))
+    expected.append({key: value for key, value in plan['root'].items() if key != 'formatOnInstall'})
+    expected[-1].update(partitionGuid=root_guid, attributesHex='0000000000000000')
+    expected.sort(key=lambda part: part['startSector'])
+    if current['partitions'] != expected:
+        raise ValueError('Created NTFS layout differs from the bound plan')
+    return current
 
 
 def manual_choice(value):
