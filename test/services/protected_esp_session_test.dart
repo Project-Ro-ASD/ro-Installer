@@ -388,7 +388,20 @@ void main() {
           g.add('$base/EFI/Microsoft', device: '8:99', root: '/', type: 'vfat');
         }
         expect(await s.verifyProtectedEsp(), false);
-        expect((await s.cleanup()).success, false);
+        final before = g.commandLog.where((c) => c.command == 'umount').length;
+        final report = await s.cleanup();
+        expect(report.success, false);
+        expect(g.commandLog.where((c) => c.command == 'umount').length, before);
+        if (change != 'namespace') {
+          expect(report.remaining, containsAll(['/mnt', base, owned]));
+          if (change == 'foreign') {
+            expect(report.remaining, contains('$base/EFI/Microsoft'));
+          }
+          expect(identical(await s.cleanup(), report), true);
+        } else {
+          // An unreadable/unverified namespace cannot supply a trusted inventory.
+          expect(report.reason, 'Session cleanup verification failed');
+        }
       }
     },
   );

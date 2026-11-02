@@ -312,6 +312,10 @@ void main() {
       runner.lastOutcome!.cleanup.reason,
       contains('Unverified mount ownership'),
     );
+    expect(
+      runner.lastOutcome!.cleanup.remaining,
+      containsAll(['/mnt', e.base, e.owned]),
+    );
     expect(g.rows.where((m) => m.target == e.base), hasLength(1));
   });
   test('collision or insufficient space prevents any disk mutation', () async {
