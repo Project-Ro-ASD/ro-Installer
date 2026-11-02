@@ -498,7 +498,11 @@ files, runtime tools, target capacity and the existing
 compatibility validation, not cryptographic source attestation. No new Compose
 marker is required. The inherited 40 GiB root safety floor is temporary, not a
 measured image-size guarantee. Device identity and empty target inventory are
-rechecked before the first mutation, retaining the helper ready/continue handshake.
+rechecked before the first mutation, retaining the helper ready/continue handshake. The
+fixed runtime-tool catalogue is checked by one shell invocation using positional
+arguments and `command -v`; tool discovery never executes the discovered tools.
+Its aggregate timing uses `preflight.tools`, while historical per-tool timing IDs
+remain accepted when reading older session records.
 
 A typed mount session records only validated resources it creates, including
 partial rbind results. Foreign `/mnt` mounts, replaced IDs, changed namespaces and
