@@ -1,3 +1,4 @@
+import 'package:ro_installer/services/install_preflight.dart';
 import 'dart:convert';
 import 'package:test/test.dart';
 import 'package:ro_installer/services/command_runner.dart';
@@ -90,14 +91,21 @@ void noMutation(PipelineGraph graph) => expect(
   isEmpty,
 );
 void main() {
-  for (final fault in ['rsync', 'efi-file', 'source', 'foreign', 'namespace']) {
+  for (final fault in [
+    'runtime-tools',
+    'efi-file',
+    'source',
+    'foreign',
+    'namespace',
+  ]) {
     test('real early gate $fault emits no stage or disk mutation', () async {
       final graph = PipelineGraph();
-      if (fault == 'rsync') {
-        graph.addResponse('sh', [
-          '-c',
-          'command -v rsync >/dev/null 2>&1',
-        ], exitCode: 1);
+      if (fault == 'runtime-tools') {
+        graph.addResponse(
+          'sh',
+          InstallPreflight.toolCheckArguments,
+          exitCode: 1,
+        );
       }
       if (fault == 'efi-file') {
         graph.addResponse('test', [
@@ -250,10 +258,7 @@ void main() {
     'GUI backend uses the actual shared preflight before ready/mutation',
     () async {
       final graph = PipelineGraph()
-        ..addResponse('sh', [
-          '-c',
-          'command -v rsync >/dev/null 2>&1',
-        ], exitCode: 1);
+        ..addResponse('sh', InstallPreflight.toolCheckArguments, exitCode: 1);
       final events = <Map<String, dynamic>>[];
       expect(
         await runPrivilegedBackend(

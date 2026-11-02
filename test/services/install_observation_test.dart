@@ -1,3 +1,4 @@
+import 'package:ro_installer/services/install_preflight.dart';
 import 'dart:convert';
 import 'package:test/test.dart';
 import 'package:ro_installer/services/install_observation.dart';
@@ -35,10 +36,11 @@ void main() {
         }
         if (fault == 'cleanup') graph.busy.add('/mnt/boot/efi');
         if (fault == 'preflight') {
-          graph.addResponse('sh', [
-            '-c',
-            'command -v rsync >/dev/null 2>&1',
-          ], exitCode: 1);
+          graph.addResponse(
+            'sh',
+            InstallPreflight.toolCheckArguments,
+            exitCode: 1,
+          );
         }
         final events = <Map<String, dynamic>>[];
         final service = InstallService(
@@ -84,6 +86,20 @@ void main() {
         }
         if (fault == 'preflight') {
           expect(ended, isEmpty);
+          final tools = payloads.where(
+            (e) =>
+                e['operationId'] == 'preflight.tools' &&
+                e['eventType'] == 'span.end',
+          );
+          expect(tools, hasLength(1));
+          expect(tools.single['status'], 'failed');
+          expect(
+            validSchema(
+              {...tools.single, 'operationId': 'preflight.tool.rsync'},
+              ['object', 'payload'],
+            ),
+            true,
+          );
           noMutation(graph);
         }
         if (fault == 'partition') expect(outcome['failedStage'], 2);

@@ -50,19 +50,28 @@ class InstallPreflight {
     'grub2-mkconfig',
     'efibootmgr',
   ];
+  // Names are fixed argv entries; the shell only checks them, never executes them.
+  static const toolCheckScript =
+      r'for tool in "$@"; do command -v "$tool" >/dev/null 2>&1 || exit 1; done';
+  static List<String> get toolCheckArguments => [
+    '-c',
+    toolCheckScript,
+    'ro-installer-preflight',
+    ...tools,
+  ];
   Future<bool> check(StageContext ctx) async {
     if (ctx.isMock) {
       return true; // Explicit simulation, never selected by GUI input.
     }
     try {
       await ctx.mountSession!.assertEmpty();
-      for (final tool in tools) {
-        final result = await _read(ctx, 'preflight.tool.$tool', 'sh', [
-          '-c',
-          'command -v $tool >/dev/null 2>&1',
-        ]);
-        if (!result.started || result.exitCode != 0) return false;
-      }
+      final available = await _read(
+        ctx,
+        'preflight.tools',
+        'sh',
+        toolCheckArguments,
+      );
+      if (!available.started || available.exitCode != 0) return false;
       final gpt = await _read(ctx, 'preflight.gpt.sgdisk', 'sh', [
         '-c',
         'command -v sgdisk >/dev/null 2>&1',
