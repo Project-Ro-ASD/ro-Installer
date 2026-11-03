@@ -397,6 +397,13 @@ read budget and unwinds its children/lease on cancellation. Dart binds the respo
 to the exact assessed source/target and keeps defensive exports; preparation grants
 no installation authority.
 
+The fixed read-only GPT probe also carries the NTFS-specific preservation proof
+through `--ntfs-layout`. It accepts only distinct source/root slot numbers,
+verifies both GPT copies twice and checks kernel layout and device geometry
+while retaining the read-only whole-device descriptor. The proof masks only
+the source end and new root slot, with their CRC fields; it must be paired
+with exact approved geometry/GUID checks and grants no write authority.
+
 Preparation requires `ntfsresize` and both owning Fedora x86_64 packages
 (`ntfsprogs`, `ntfs-3g-libs`) to agree on release, epoch and build revision,
 with a calendar release of at least

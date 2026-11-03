@@ -149,16 +149,30 @@ def read_snapshot(read, device, sector, preserve_slots=None, *, ntfs_layout=None
     return {'snapshot':snapshot,'preservationFingerprint':proof.hexdigest()}
 
 
+def _unique_ntfs_fields(pairs):
+    result = {}
+    for key,value in pairs:
+        if key in result:raise ValueError('Duplicate NTFS preservation field')
+        result[key]=value
+    return result
+
+
+def normalize_ntfs_layout(value, maximum=4096):
+    if not isinstance(value, dict) or set(value) != {'sourceNumber','rootNumber'}:
+        raise ValueError('Invalid NTFS preservation slots')
+    source, root = (integer(value[name],1,maximum) for name in ('sourceNumber','rootNumber'))
+    if source == root: raise ValueError('Overlapping NTFS preservation slots')
+    return {'sourceNumber':source,'rootNumber':root}
+
+
 def _ntfs_preservation(snapshot, metadata, layout):
     """Mask only source-end bytes and one root slot, never the whole source.
 
     This raw proof must be paired with exact planned geometry/GUID verification;
     it neither proves filesystem safety nor authorizes a write.
     """
-    if not isinstance(layout, dict) or set(layout) != {'sourceNumber', 'rootNumber'}:
-        raise ValueError('Invalid NTFS preservation slots')
-    source = integer(layout['sourceNumber'], 1, snapshot['entryCount'])
-    root = integer(layout['rootNumber'], 1, snapshot['entryCount'])
+    layout = normalize_ntfs_layout(layout, snapshot['entryCount'])
+    source, root = layout['sourceNumber'], layout['rootNumber']
     rows = {p['number']: p for p in snapshot['partitions']}
     if (source == root or source not in rows
             or rows[source]['typeGuid'] != 'ebd0a0a2-b9e5-4433-87c0-68b6b72699c7'
@@ -540,14 +554,19 @@ def verify_kernel_layout(snapshot):
     if actual!=expected:raise ValueError('Kernel and GPT partitions disagree')
 
 
-def probe_device(path, expected, preserve_slots=None):
+def probe_device(path, expected, preserve_slots=None, *, ntfs_layout=None):
     expected=identity(expected)
     if path!=expected['path']:raise ValueError('Device path mismatch')
+    if ntfs_layout is not None:
+        if preserve_slots is not None:raise ValueError('Conflicting preservation modes')
+        ntfs_layout=normalize_ntfs_layout(ntfs_layout)
     fd=os.open(path,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_EXCL)
     try:
         sector=fd_geometry(fd,expected)
-        snapshot=verified_snapshot(lambda offset,length:os.pread(fd,length,offset),expected,sector,preserve_slots)
-        verify_kernel_layout(snapshot if preserve_slots is None else snapshot['snapshot'])
+        read=lambda offset,length:os.pread(fd,length,offset)
+        snapshot=(verified_snapshot(read,expected,sector,preserve_slots) if ntfs_layout is None else
+            verified_ntfs_snapshot(read,expected,sector,ntfs_layout['sourceNumber'],ntfs_layout['rootNumber']))
+        verify_kernel_layout(snapshot if preserve_slots is None and ntfs_layout is None else snapshot['snapshot'])
         if fd_geometry(fd,expected)!=sector:raise ValueError('Sector geometry changed')
         return snapshot
     finally:os.close(fd)
@@ -556,14 +575,17 @@ def probe_device(path, expected, preserve_slots=None):
 def main():
     try:
         if os.geteuid()!=0 or len(sys.argv) not in (4,6) or sys.argv[1]!='--probe':return 2
-        slots=None
+        slots=ntfs_layout=None
         if len(sys.argv)==6:
-            if sys.argv[4]!='--preserve-slots':return 2
-            slots=json.loads(sys.argv[5])
-            if not isinstance(slots,list) or len(slots)!=2 or any(type(n) is not int or not 1<=n<=4096 for n in slots):return 2
-        snapshot=probe_device(sys.argv[2],json.loads(sys.argv[3]),slots)
+            if sys.argv[4]=='--preserve-slots':
+                slots=json.loads(sys.argv[5])
+                if not isinstance(slots,list) or len(slots)!=2 or any(type(n) is not int or not 1<=n<=4096 for n in slots):return 2
+            elif sys.argv[4]=='--ntfs-layout':ntfs_layout=normalize_ntfs_layout(json.loads(sys.argv[5],object_pairs_hook=_unique_ntfs_fields))
+            else:return 2
+        if ntfs_layout is None:snapshot=probe_device(sys.argv[2],json.loads(sys.argv[3]),slots)
+        else:snapshot=probe_device(sys.argv[2],json.loads(sys.argv[3]),ntfs_layout=ntfs_layout)
         raw=json.dumps(snapshot,separators=(',',':'))
-        if len(raw.encode())>(MAX_JSON if slots is None else 8191):return 2
+        if len(raw.encode())>(MAX_JSON if slots is None and ntfs_layout is None else 8191):return 2
         sys.stdout.write(raw+'\n');return 0
     except Exception:
         return 2  # No raw disk metadata, filenames or exception text on stderr.
