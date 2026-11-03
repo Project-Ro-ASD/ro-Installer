@@ -99,6 +99,8 @@ run_check "P0-04 helper v1/v2 compatibility and framing" \
   python3 -B test/scripts/helper_v2_test.py
 run_check "read-only GPT worker and helper admission" \
   python3 -B test/scripts/gpt_probe_test.py
+run_check "read-only NTFS GPT proof transport, binding and leased child cleanup" \
+  python3 -B test/scripts/ntfs_gpt_probe_test.py
 run_check "restricted NTFS GPT preservation and exact final geometry" \
   python3 -B test/scripts/ntfs_gpt_preservation_test.py
 run_check "private NTFS GPT commit ordering and partial-failure handling" \
