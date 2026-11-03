@@ -273,6 +273,17 @@ first, primary second. A future applier must durably flush the backup group befo
 touching the primary and verify the completed table. Planning performs no writes
 and supplies neither atomicity nor filesystem resize authority.
 
+A separate private `ro_installer_ntfs_commit.py` component regenerates those
+patches against a bound IO device and a caller-supplied source guard. It checks
+all intermediate metadata, flushes and reads back the backup before touching the
+primary, then verifies the complete final table. Short writes, flush/readback
+errors and identity refusal stop advancement without rollback. Failures retain
+phase, write-attempt and verified-copy state; descriptor cleanup preserves the
+primary failure. The production adapter owns a close-on-exec duplicate and
+requires a writable block FD with matching geometry/sequence. The caller must
+establish filesystem post-state, namespace and lease; this module has no CLI or
+installation admission.
+
 ### Read-only NTFS inspection primitive
 
 The root-only `ro_installer_ntfs.py` worker accepts an inherited read-only block

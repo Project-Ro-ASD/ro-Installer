@@ -18,6 +18,7 @@ RECORDS = "/usr/libexec/ro_installer_records.py"
 GPT = "/usr/libexec/ro_installer_gpt.py"
 MANUAL = "/usr/libexec/ro_installer_manual.py"
 NTFS = "/usr/libexec/ro_installer_ntfs.py"
+NTFS_COMMIT = "/usr/libexec/ro_installer_ntfs_commit.py"
 BOUND_IO = "/usr/libexec/ro-installer-ntfs-bound-io.so"
 SCHEMA = "/usr/libexec/ro-installer-observability.json"
 POLICY = "/usr/share/polkit-1/actions/org.roasd.installer.helper.policy"
@@ -74,7 +75,7 @@ def check_package(rpm):
         if (path.startswith("/etc/sudoers") or path.startswith("/etc/polkit-1/rules.d/")
                 or path.startswith("/usr/share/polkit-1/rules.d/")):
             raise ValueError("installer RPM must not ship sudoers or live-only allow rules")
-    for path, permissions in ((HELPER, 0o755), (BACKEND, 0o755), (SESSION, 0o755), (EXPORT, 0o755), (RECORDS, 0o644), (GPT, 0o644), (MANUAL, 0o644), (NTFS, 0o644), (BOUND_IO, 0o644), (SCHEMA, 0o644), (POLICY, 0o644)):
+    for path, permissions in ((HELPER, 0o755), (BACKEND, 0o755), (SESSION, 0o755), (EXPORT, 0o755), (RECORDS, 0o644), (GPT, 0o644), (MANUAL, 0o644), (NTFS, 0o644), (NTFS_COMMIT, 0o644), (BOUND_IO, 0o644), (SCHEMA, 0o644), (POLICY, 0o644)):
         if path not in files:
             raise ValueError("required helper payload is missing")
         mode, user, group = files[path]
@@ -98,6 +99,8 @@ def check_package(rpm):
         raise ValueError('Manual worker must use isolated system Python')
     if not extract_member(rpm, NTFS).startswith(b'#!/usr/bin/python3 -I\n'):
         raise ValueError('NTFS worker must use isolated system Python')
+    if not extract_member(rpm, NTFS_COMMIT).startswith(b'#!/usr/bin/python3 -I\n'):
+        raise ValueError('Private NTFS commit module must use isolated system Python')
     adapter = extract_member(rpm, BOUND_IO)
     if (len(adapter) < 20 or adapter[:7] != b'\x7fELF\x02\x01\x01'
             or adapter[16:20] != b'\x03\x00\x3e\x00'):

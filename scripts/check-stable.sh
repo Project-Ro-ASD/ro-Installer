@@ -101,6 +101,8 @@ run_check "read-only GPT worker and helper admission" \
   python3 -B test/scripts/gpt_probe_test.py
 run_check "restricted NTFS GPT preservation and exact final geometry" \
   python3 -B test/scripts/ntfs_gpt_preservation_test.py
+run_check "private NTFS GPT commit ordering and partial-failure handling" \
+  python3 -B test/scripts/ntfs_gpt_commit_test.py
 run_check "pure NTFS GPT update patches and independent normal-file parsing" \
   python3 -B test/scripts/ntfs_gpt_update_plan_test.py
 run_check "cross-language NTFS shrink geometry and free-space preference" \
