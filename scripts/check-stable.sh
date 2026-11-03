@@ -109,6 +109,8 @@ run_check "NTFS source ownership, kernel reread and refreshed filesystem checks"
   python3 -B test/scripts/ntfs_kernel_transition_test.py
 run_check "NTFS preparation/native/post-state/GPT transaction failure boundaries" \
   python3 -B test/scripts/ntfs_transaction_test.py
+run_check "canonical private NTFS approval and exact created-layout parity" \
+  python3 -B test/scripts/ntfs_approval_test.py
 run_check "cross-language NTFS shrink geometry and free-space preference" \
   python3 -B test/scripts/ntfs_shrink_plan_test.py
 run_check "manual installation admission and read-only filesystem checks" \

@@ -303,6 +303,14 @@ geometry before a snapshot is returned. Failed or completed objects cannot be
 run again. Callers still own the trusted session context, lease and installation
 admission; no helper operation or CLI exposes this private runner.
 
+`ApprovedNtfsShrinkPlan` and Python's `normalize_ntfs_approval` define the
+private helper/backend ownership envelope. They reconstruct the exact proposal
+and bind its intent to a fresh root GUID, GPT preservation proof, source
+inspection fingerprint and target preparation fingerprint. Shared mutation
+vectors keep integer types, unknown-field refusal and final GPT ownership checks
+in agreement. The dedicated `alongside_ntfs_shrink` state never matches the
+legacy alongside path; this contract supplies no public installation admission.
+
 ### Read-only NTFS inspection primitive
 
 The root-only `ro_installer_ntfs.py` worker accepts an inherited read-only block

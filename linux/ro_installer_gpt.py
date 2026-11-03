@@ -290,6 +290,33 @@ def ntfs_shrink_plan(proposal):
                      'formatOnInstall': True}}
 
 
+def normalize_ntfs_approval(value):
+    """Private helper/backend ownership, never public resize admission."""
+    if not isinstance(value, dict) or set(value) != {'proposal', 'approval'}:
+        raise ValueError('Invalid private NTFS approval')
+    proposal = value['proposal']
+    intent = ntfs_shrink_plan(proposal)
+    proposal = dict(proposal, snapshot=normalize_snapshot(proposal['snapshot']))
+    approval = value['approval']
+    fields = {'intent', 'rootGuid', 'preservationFingerprint', 'inspectionFingerprint', 'preparationFingerprint'}
+    if not isinstance(approval, dict) or set(approval) != fields:
+        raise ValueError('Invalid NTFS ownership')
+    root = guid(approval['rootGuid'])
+    snapshot = proposal['snapshot']
+    if root in {snapshot['diskGuid'], *(part['partitionGuid'] for part in snapshot['partitions'])}:
+        raise ValueError('Reused NTFS allocation identity')
+    fingerprints = {}
+    for name in ('preservationFingerprint', 'inspectionFingerprint', 'preparationFingerprint'):
+        observed = approval[name]
+        if not isinstance(observed, str) or not re.fullmatch('[0-9a-f]{64}', observed):
+            raise ValueError('Invalid NTFS fingerprint')
+        fingerprints[name] = observed
+    expected = {'intent': intent, 'rootGuid': root, **fingerprints}
+    if json.dumps(approval, sort_keys=True, allow_nan=False) != json.dumps(expected, sort_keys=True, allow_nan=False):
+        raise ValueError('NTFS ownership differs from the bound proposal')
+    return {'proposal': proposal, 'approval': expected}
+
+
 def verify_ntfs_created_layout(proposal, root_guid, preservation_fingerprint, observed):
     """Pure final GPT check; filesystem resize and write admission are separate."""
     plan = ntfs_shrink_plan(proposal)
