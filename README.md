@@ -311,6 +311,17 @@ vectors keep integer types, unknown-field refusal and final GPT ownership checks
 in agreement. The dedicated `alongside_ntfs_shrink` state never matches the
 legacy alongside path; this contract supplies no public installation admission.
 
+The isolated `ro_installer_ntfs_transaction.py --execute` worker accepts only a
+bounded private ownership/context frame. It discovers and duplicates the inherited
+installer lease without creating a replacement lock, checks its inode and runtime
+directory, and revalidates the private namespace, parent and authoritative disk
+topology at transaction boundaries. Its own power inhibitor surrounds media access;
+the root supervisor must retain the session inhibitor through descendant cleanup.
+Only the canonical whole-disk path is opened; source paths come from verified
+partition geometry. Results contain bounded snapshot/progress data, with no boot
+bytes or native diagnostics. The payload audit requires the root-owned isolated
+worker; public helper/backend installation admission is still separate.
+
 ### Read-only NTFS inspection primitive
 
 The root-only `ro_installer_ntfs.py` worker accepts an inherited read-only block
