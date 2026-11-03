@@ -397,6 +397,14 @@ read budget and unwinds its children/lease on cancellation. Dart binds the respo
 to the exact assessed source/target and keeps defensive exports; preparation grants
 no installation authority.
 
+A prepared target exports a defensive minimal confirmation containing only
+source/ESP/root-size selection, the exact displayed intent and inspection/
+preparation fingerprints. The Python matcher requires a separately observed
+proposal and fresh inspection fingerprint; it rejects stale geometry, minimums,
+identity and policy. A preparation fingerprint remains a claim until the guarded
+worker independently reproduces it before mutation. This contract adds no public
+installation operation.
+
 The fixed read-only GPT probe also carries the NTFS-specific preservation proof
 through `--ntfs-layout`. It accepts only distinct source/root slot numbers,
 verifies both GPT copies twice and checks kernel layout and device geometry

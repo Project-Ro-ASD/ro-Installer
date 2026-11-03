@@ -114,6 +114,22 @@ final class PreparedNtfsShrink {
       value['preparationFingerprint'] as String,
     );
   }
+
+  /// Public confirmation only; root-side checks must regenerate observed intent
+  /// and the worker must reproduce preparation before any filesystem mutation.
+  Map<String, dynamic> get confirmation => {
+    'selection': {
+      'sourceNumber': assessment.plan.source.number,
+      'espNumber': assessment.plan.esp.number,
+      'rootBytes': assessment.plan.rootBytes,
+    },
+    'intent': assessment.plan.intentJson,
+    'inspectionFingerprint': assessment.inspectionFingerprint,
+    'preparationFingerprint': preparationFingerprint,
+  };
+
+  bool matchesConfirmation(Object? value) => samePlanValue(confirmation, value);
+
   Map<String, dynamic> get json => {
     ...assessment.json,
     'preparation': {
