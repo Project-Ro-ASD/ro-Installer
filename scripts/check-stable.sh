@@ -117,6 +117,8 @@ run_check "post-resize NTFS boot geometry and read-only allocation checks" \
   python3 -B test/scripts/ntfs_postresize_test.py
 run_check "native NTFS descriptor binding and fail-closed adapter" \
   python3 -B test/scripts/ntfs_bound_io_test.py
+run_check "private NTFS native writer lifecycle on owned regular fixtures" \
+  python3 -B test/scripts/ntfs_native_runner_test.py
 run_check "qualified NTFS target preparation and read-only dry run" \
   python3 -B test/scripts/ntfs_target_preparation_test.py
 run_check "read-only NTFS metadata and regular-file integrity" \

@@ -1,11 +1,12 @@
 #!/usr/bin/python3 -I
-"""Private read-only NTFS inspection primitive; not installation admission."""
+"""Private NTFS primitives. The CLI is read-only, never installation admission."""
 import ctypes as c
 import datetime
 import fcntl
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import resource
 import select
@@ -20,6 +21,7 @@ LIBRARY = '/usr/lib64/libntfs-3g.so.89'
 BOUND_IO = '/usr/libexec/ro-installer-ntfs-bound-io.so'
 BOUND_ALIAS = '/proc/self/fd/ro-installer-ntfs-bound'
 MAX_BYTES = 8 * 1024**4
+RESIZE_TIMEOUT = 2 * 60 * 60
 RO_FORENSIC = 0x04000001
 sys.dont_write_bytecode = True
 FILLDIR = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_void_p, c.c_int, c.c_int, c.c_int64, c.c_uint64, c.c_uint)
@@ -311,6 +313,114 @@ def run_tool(kind, fd, *, target_bytes=None):
     finally:
         if process.poll() is None: process.kill()
         process.wait(); process.stdout.close(); process.stderr.close()
+
+
+class NativeResizeError(RuntimeError):
+    def __init__(self, started, phase, cleanup_failed=False):
+        super().__init__('NTFS_RESIZE_FAILED')
+        self.started, self.phase, self.cleanup_failed = started, phase, cleanup_failed
+
+
+def _resize_group_members(leader):
+    members = []
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit() or int(entry.name) == leader: continue
+        try:
+            fields = (entry/'stat').read_text().rsplit(')', 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if int(fields[2]) == leader and fields[0] not in ('Z', 'X'):
+            members.append(int(entry.name))
+    return members
+
+
+def run_native_resize(fd, size, sector, target_bytes, lease_fd):
+    """Private write invocation, not admission or filesystem completion proof.
+
+    Caller owns namespace, trusted lease, identity and fresh target preparation.
+    Its post-resize check must pass before any GPT write. Regular descriptors
+    support isolated fixtures; production transaction admission is block-only.
+    """
+    owned = process = None
+    started, failed, cleanup_failed, phase = False, True, False, 'admission'
+    try:
+        if (type(fd) is not int or fd < 3 or type(size) is not int
+                or type(target_bytes) is not int or not 1048576 <= target_bytes < size <= MAX_BYTES
+                or type(sector) is not int or sector not in (512, 4096) or size % sector or target_bytes % 1048576
+                or type(lease_fd) is not int or lease_fd < 3 or lease_fd == fd
+                or os.environ.get('RO_INSTALLER_LEASE_FD') != str(lease_fd)
+                or not stat.S_ISREG(os.fstat(lease_fd).st_mode)):
+            raise ValueError('Invalid native resize binding')
+        owned = fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 3)
+        flags, info = fcntl.fcntl(owned, fcntl.F_GETFL), os.fstat(owned)
+        if flags & os.O_ACCMODE != os.O_RDWR or flags & (os.O_PATH | os.O_APPEND):
+            raise ValueError('Writable positional source required')
+        if stat.S_ISBLK(info.st_mode):
+            actual_size = struct.unpack('=Q', fcntl.ioctl(owned, 0x80081272, bytes(8)))[0]
+            actual_sector = struct.unpack('=I', fcntl.ioctl(owned, 0x1268, bytes(4)))[0]
+            if (actual_size, actual_sector) != (size, sector): raise ValueError('Source extent changed')
+        elif not stat.S_ISREG(info.st_mode) or info.st_size != size:
+            raise ValueError('Unsupported source descriptor')
+        qualify_resize_toolchain(run_tool('resize-version', None), run_tool('resize-packages', None))
+        environment = {**bound_io_environment(owned), 'RO_INSTALLER_LEASE_FD': str(lease_fd)}
+        argv = ('/usr/bin/ntfsresize', '-P', '--size', str(target_bytes), BOUND_ALIAS)
+        phase = 'native'
+        process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            close_fds=True, pass_fds=(owned, lease_fd), env=environment, start_new_session=True)
+        started = True
+        try:
+            process.stdin.write(b'y\n')
+            process.stdin.close()
+        except BrokenPipeError:
+            pass  # Inspect the terminal status; refusal is never success.
+        streams, total, deadline = [process.stdout, process.stderr], 0, time.monotonic() + RESIZE_TIMEOUT
+        while streams:
+            remaining = deadline - time.monotonic()
+            ready = select.select(streams, [], [], max(0, remaining))[0]
+            if remaining <= 0 or not ready: raise ValueError('Native resize deadline')
+            for stream in ready:
+                chunk = os.read(stream.fileno(), 4096); total += len(chunk)
+                if total > 65536: raise ValueError('Native resize output limit')
+                if not chunk: streams.remove(stream)
+        while True:
+            status = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG)
+            if status is not None: break
+            if time.monotonic() >= deadline: raise ValueError('Native resize exit deadline')
+            time.sleep(0.01)
+        if (status.si_code != os.CLD_EXITED or status.si_status != 0 or _resize_group_members(process.pid)):
+            raise ValueError('Native resize did not finish alone successfully')
+        failed = False
+    except Exception:
+        failed = True
+    finally:
+        if process is not None:
+            # Keep the leader PID reserved until the owned group has stopped.
+            try:
+                try: os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                if _resize_group_members(process.pid): cleanup_failed = True
+            except Exception:
+                cleanup_failed = True
+            try: process.wait(timeout=1)
+            except subprocess.TimeoutExpired: cleanup_failed = True  # Survivor retains the lease.
+            except Exception: cleanup_failed = True
+            for stream in (process.stdin, process.stdout, process.stderr):
+                try: stream.close()
+                except Exception: cleanup_failed = True
+        if cleanup_failed:
+            if not failed: phase = 'cleanup'
+            failed = True
+        if not failed:
+            phase = 'flush'
+            try: os.fsync(owned)
+            except Exception: failed = True
+        if owned is not None:
+            try: os.close(owned)
+            except OSError:
+                if not failed: phase = 'cleanup'
+                cleanup_failed, failed = True, True
+    if failed: raise NativeResizeError(started, phase, cleanup_failed) from None
+    return True
 
 
 def qualify_resize_toolchain(version_output, package_output):

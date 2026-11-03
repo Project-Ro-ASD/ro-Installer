@@ -355,6 +355,15 @@ by both RPM packaging and native regressions; the worker and payload audit
 check its ownership, mode and ELF type. It is never configured as a global preload.
 This adapter does not grant write authority or complete alongside installation.
 
+A private `run_native_resize` primitive runs the qualified resize tool against
+its own duplicate of a writable source descriptor. It uses fixed arguments and
+confirmation input, bounds diagnostics and execution time, retains the lease in
+the owned process group, and flushes the source only after successful, quiescent
+exit. Failures report whether the native process started, without raw diagnostics.
+The caller must provide namespace, identity and fresh target preparation, then
+validate the resulting filesystem before any GPT write. This library primitive
+has no CLI or helper admission; alongside execution remains unavailable.
+
 ### Read-only manual validation (helper v2)
 
 `validate-manual-plan` accepts `disk`, `expectedDevice`, `tableFingerprint` and
