@@ -291,9 +291,17 @@ sector geometry at each boundary, and rechecks the exact GPT preimage before
 native start. Preparation must match the approved fingerprint. No GPT writes
 occur before successful source flush and filesystem validation. Canonical errors
 retain possible source modification and partial GPT progress without repair,
-retry or rollback. The returned snapshot proves metadata commit only: callers
-must close all original partition descriptions, refresh the kernel table and
-verify the shorter source before exposing installation targets.
+retry or rollback. The private result carries the verified snapshot and original
+boot/post-state provenance; these bytes never enter a public protocol payload.
+
+`BlockNtfsTransaction` owns the source opens and composes this core with kernel
+transition. It closes every source description before a single held-FD
+`BLKRRPART`, waits boundedly for the exact kernel inventory while checking GPT
+and whole-device identity, then reopens the shorter source read-only/exclusive.
+The post-reader must validate its exact physical target and unchanged filesystem
+geometry before a snapshot is returned. Failed or completed objects cannot be
+run again. Callers still own the trusted session context, lease and installation
+admission; no helper operation or CLI exposes this private runner.
 
 ### Read-only NTFS inspection primitive
 
