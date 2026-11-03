@@ -1,0 +1,501 @@
+{
+  "bases": [
+    {
+      "name": "512",
+      "proposal": {
+        "schemaVersion": 1,
+        "sourceNumber": 2,
+        "espNumber": 1,
+        "rootBytes": 68719476736,
+        "minimumFilesystemBytes": 53687091200,
+        "snapshot": {
+          "schemaVersion": 1,
+          "device": {
+            "path": "/dev/nvme0n1",
+            "majorMinor": "259:0",
+            "size": 274877906944,
+            "diskSequence": 11
+          },
+          "logicalSectorBytes": 512,
+          "firstUsableSector": 2048,
+          "lastUsableSector": 536870878,
+          "entryCount": 128,
+          "entryBytes": 128,
+          "primaryEntriesLba": 2,
+          "backupEntriesLba": 536870879,
+          "diskGuid": "11111111-1111-1111-1111-111111111111",
+          "tableFingerprint": "a0139e95a676fc722cdfcee07e0e59ae0fd4fc52ef7d6e5dab3c87f52682f1ed",
+          "partitions": [
+            {
+              "number": 1,
+              "startSector": 2048,
+              "endSector": 1050623,
+              "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+              "partitionGuid": "22222222-2222-2222-2222-222222222222",
+              "attributesHex": "0000000000000000"
+            },
+            {
+              "number": 2,
+              "startSector": 2097152,
+              "endSector": 335544319,
+              "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+              "partitionGuid": "33333333-3333-3333-3333-333333333333",
+              "attributesHex": "0000000000000000"
+            },
+            {
+              "number": 7,
+              "startSector": 419430400,
+              "endSector": 440401919,
+              "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+              "partitionGuid": "44444444-4444-4444-4444-444444444444",
+              "attributesHex": "0000000000000000"
+            }
+          ]
+        }
+      },
+      "response": {
+        "plan": {
+          "schemaVersion": 1,
+          "layoutVersion": 1,
+          "mode": "alongside_ntfs_shrink",
+          "device": {
+            "path": "/dev/nvme0n1",
+            "majorMinor": "259:0",
+            "size": 274877906944,
+            "diskSequence": 11
+          },
+          "tableFingerprint": "a0139e95a676fc722cdfcee07e0e59ae0fd4fc52ef7d6e5dab3c87f52682f1ed",
+          "fileSystem": "btrfs",
+          "diskSwap": false,
+          "subvolumes": {
+            "root": "/",
+            "home": "/home",
+            "var_log": "/var/log",
+            "var_cache": "/var/cache",
+            "var_tmp": "/var/tmp"
+          },
+          "source": {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000",
+            "newEndSector": 285212671,
+            "minimumFilesystemBytes": 53687091200,
+            "retainedBytes": 144955146240
+          },
+          "esp": {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000",
+            "formatOnInstall": false
+          },
+          "root": {
+            "number": 3,
+            "startSector": 285212672,
+            "endSector": 419430399,
+            "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+            "formatOnInstall": true
+          }
+        },
+        "inspection": {
+          "schemaVersion": 1,
+          "deviceBytes": 170724950016,
+          "volumeBytes": 170724946432,
+          "clusterBytes": 4096,
+          "minimumBytes": 53687091200,
+          "inspectionFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "preparation": {
+          "schemaVersion": 1,
+          "deviceBytes": 170724950016,
+          "targetBytes": 144955146240,
+          "inspectionFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "toolchain": {
+            "version": "2026.9.28",
+            "epoch": 2,
+            "release": "1.fc44",
+            "arch": "x86_64"
+          },
+          "preparationFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      }
+    },
+    {
+      "name": "4096",
+      "proposal": {
+        "schemaVersion": 1,
+        "sourceNumber": 2,
+        "espNumber": 1,
+        "rootBytes": 68719476736,
+        "minimumFilesystemBytes": 53687091200,
+        "snapshot": {
+          "schemaVersion": 1,
+          "device": {
+            "path": "/dev/nvme0n1",
+            "majorMinor": "259:0",
+            "size": 274877906944,
+            "diskSequence": 11
+          },
+          "logicalSectorBytes": 4096,
+          "firstUsableSector": 256,
+          "lastUsableSector": 67108858,
+          "entryCount": 128,
+          "entryBytes": 128,
+          "primaryEntriesLba": 2,
+          "backupEntriesLba": 67108859,
+          "diskGuid": "11111111-1111-1111-1111-111111111111",
+          "tableFingerprint": "539ae8cfc38efdb1fe43f750c543bfff1072170bb8bd13a5467f33cfff50fbcc",
+          "partitions": [
+            {
+              "number": 1,
+              "startSector": 256,
+              "endSector": 131327,
+              "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+              "partitionGuid": "22222222-2222-2222-2222-222222222222",
+              "attributesHex": "0000000000000000"
+            },
+            {
+              "number": 2,
+              "startSector": 262144,
+              "endSector": 41943039,
+              "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+              "partitionGuid": "33333333-3333-3333-3333-333333333333",
+              "attributesHex": "0000000000000000"
+            },
+            {
+              "number": 7,
+              "startSector": 52428800,
+              "endSector": 55050239,
+              "typeGuid": "de94bba4-06d1-4d40-a16a-bfd50179d6ac",
+              "partitionGuid": "44444444-4444-4444-4444-444444444444",
+              "attributesHex": "0000000000000000"
+            }
+          ]
+        }
+      },
+      "response": {
+        "plan": {
+          "schemaVersion": 1,
+          "layoutVersion": 1,
+          "mode": "alongside_ntfs_shrink",
+          "device": {
+            "path": "/dev/nvme0n1",
+            "majorMinor": "259:0",
+            "size": 274877906944,
+            "diskSequence": 11
+          },
+          "tableFingerprint": "539ae8cfc38efdb1fe43f750c543bfff1072170bb8bd13a5467f33cfff50fbcc",
+          "fileSystem": "btrfs",
+          "diskSwap": false,
+          "subvolumes": {
+            "root": "/",
+            "home": "/home",
+            "var_log": "/var/log",
+            "var_cache": "/var/cache",
+            "var_tmp": "/var/tmp"
+          },
+          "source": {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000",
+            "newEndSector": 35651583,
+            "minimumFilesystemBytes": 53687091200,
+            "retainedBytes": 144955146240
+          },
+          "esp": {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000",
+            "formatOnInstall": false
+          },
+          "root": {
+            "number": 3,
+            "startSector": 35651584,
+            "endSector": 52428799,
+            "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+            "formatOnInstall": true
+          }
+        },
+        "inspection": {
+          "schemaVersion": 1,
+          "deviceBytes": 170724950016,
+          "volumeBytes": 170724950016,
+          "clusterBytes": 4096,
+          "minimumBytes": 53687091200,
+          "inspectionFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "preparation": {
+          "schemaVersion": 1,
+          "deviceBytes": 170724950016,
+          "targetBytes": 144955146240,
+          "inspectionFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "toolchain": {
+            "version": "2026.9.28",
+            "epoch": 2,
+            "release": "1.fc44",
+            "arch": "x86_64"
+          },
+          "preparationFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "extra-response",
+      "path": [
+        "command"
+      ],
+      "value": "arbitrary",
+      "op": "set"
+    },
+    {
+      "name": "missing-preparation",
+      "path": [
+        "preparation"
+      ],
+      "value": null,
+      "op": "remove"
+    },
+    {
+      "name": "wrong-target",
+      "path": [
+        "preparation",
+        "targetBytes"
+      ],
+      "value": 144956194816,
+      "op": "set"
+    },
+    {
+      "name": "boolean-target",
+      "path": [
+        "preparation",
+        "targetBytes"
+      ],
+      "value": true,
+      "op": "set"
+    },
+    {
+      "name": "floating-target",
+      "path": [
+        "preparation",
+        "targetBytes"
+      ],
+      "value": 144955146240.0,
+      "op": "set"
+    },
+    {
+      "name": "wrong-device",
+      "path": [
+        "preparation",
+        "deviceBytes"
+      ],
+      "value": 1,
+      "op": "set"
+    },
+    {
+      "name": "stale-inspection",
+      "path": [
+        "preparation",
+        "inspectionFingerprint"
+      ],
+      "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "op": "set"
+    },
+    {
+      "name": "bad-preparation-fp",
+      "path": [
+        "preparation",
+        "preparationFingerprint"
+      ],
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "op": "set"
+    },
+    {
+      "name": "short-preparation-fp",
+      "path": [
+        "preparation",
+        "preparationFingerprint"
+      ],
+      "value": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "op": "set"
+    },
+    {
+      "name": "extra-preparation",
+      "path": [
+        "preparation",
+        "writer"
+      ],
+      "value": true,
+      "op": "set"
+    },
+    {
+      "name": "bad-schema",
+      "path": [
+        "preparation",
+        "schemaVersion"
+      ],
+      "value": true,
+      "op": "set"
+    },
+    {
+      "name": "inspection-drift",
+      "path": [
+        "inspection",
+        "minimumBytes"
+      ],
+      "value": 1,
+      "op": "set"
+    },
+    {
+      "name": "wrong-inspection-fp",
+      "path": [
+        "inspection",
+        "inspectionFingerprint"
+      ],
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "op": "set"
+    },
+    {
+      "name": "format-esp",
+      "path": [
+        "plan",
+        "esp",
+        "formatOnInstall"
+      ],
+      "value": true,
+      "op": "set"
+    },
+    {
+      "name": "tool-version-2026.2.25",
+      "path": [
+        "preparation",
+        "toolchain",
+        "version"
+      ],
+      "value": "2026.2.25",
+      "op": "set"
+    },
+    {
+      "name": "tool-version-2026.9.18",
+      "path": [
+        "preparation",
+        "toolchain",
+        "version"
+      ],
+      "value": "2026.9.18",
+      "op": "set"
+    },
+    {
+      "name": "tool-version-2026.2.30",
+      "path": [
+        "preparation",
+        "toolchain",
+        "version"
+      ],
+      "value": "2026.2.30",
+      "op": "set"
+    },
+    {
+      "name": "tool-version-2026.9.28-rc1",
+      "path": [
+        "preparation",
+        "toolchain",
+        "version"
+      ],
+      "value": "2026.9.28-rc1",
+      "op": "set"
+    },
+    {
+      "name": "tool-version-2026.13.1",
+      "path": [
+        "preparation",
+        "toolchain",
+        "version"
+      ],
+      "value": "2026.13.1",
+      "op": "set"
+    },
+    {
+      "name": "tool-release",
+      "path": [
+        "preparation",
+        "toolchain",
+        "release"
+      ],
+      "value": "bad release",
+      "op": "set"
+    },
+    {
+      "name": "tool-release-type",
+      "path": [
+        "preparation",
+        "toolchain",
+        "release"
+      ],
+      "value": 17,
+      "op": "set"
+    },
+    {
+      "name": "tool-epoch-bool",
+      "path": [
+        "preparation",
+        "toolchain",
+        "epoch"
+      ],
+      "value": true,
+      "op": "set"
+    },
+    {
+      "name": "tool-epoch-negative",
+      "path": [
+        "preparation",
+        "toolchain",
+        "epoch"
+      ],
+      "value": -1,
+      "op": "set"
+    },
+    {
+      "name": "tool-epoch-high",
+      "path": [
+        "preparation",
+        "toolchain",
+        "epoch"
+      ],
+      "value": 100000000,
+      "op": "set"
+    },
+    {
+      "name": "tool-architecture",
+      "path": [
+        "preparation",
+        "toolchain",
+        "arch"
+      ],
+      "value": "aarch64",
+      "op": "set"
+    },
+    {
+      "name": "tool-extra",
+      "path": [
+        "preparation",
+        "toolchain",
+        "signature"
+      ],
+      "value": "trusted",
+      "op": "set"
+    }
+  ]
+}
