@@ -105,6 +105,8 @@ run_check "private NTFS GPT commit ordering and partial-failure handling" \
   python3 -B test/scripts/ntfs_gpt_commit_test.py
 run_check "pure NTFS GPT update patches and independent normal-file parsing" \
   python3 -B test/scripts/ntfs_gpt_update_plan_test.py
+run_check "private NTFS worker frame, inherited lease and session boundaries" \
+  python3 -B test/scripts/ntfs_private_worker_test.py
 run_check "NTFS source ownership, kernel reread and refreshed filesystem checks" \
   python3 -B test/scripts/ntfs_kernel_transition_test.py
 run_check "NTFS preparation/native/post-state/GPT transaction failure boundaries" \

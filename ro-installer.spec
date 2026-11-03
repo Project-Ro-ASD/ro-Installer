@@ -112,6 +112,8 @@ install -Dm644 linux/ro_installer_manual.py \
     %{buildroot}%{_libexecdir}/ro_installer_manual.py
 install -Dm644 ro-installer-ntfs-bound-io.so \
     %{buildroot}%{_libexecdir}/ro-installer-ntfs-bound-io.so
+install -Dm644 linux/ro_installer_ntfs_transaction.py \
+    %{buildroot}%{_libexecdir}/ro_installer_ntfs_transaction.py
 install -Dm644 linux/ro_installer_ntfs_commit.py \
     %{buildroot}%{_libexecdir}/ro_installer_ntfs_commit.py
 install -Dm644 linux/ro_installer_ntfs.py \
@@ -136,6 +138,7 @@ install -Dm755 linux/ro-installer-export \
 %attr(0644,root,root) %{_libexecdir}/ro_installer_gpt.py
 %attr(0644,root,root) %{_libexecdir}/ro_installer_manual.py
 %attr(0644,root,root) %{_libexecdir}/ro_installer_ntfs.py
+%attr(0644,root,root) %{_libexecdir}/ro_installer_ntfs_transaction.py
 %attr(0644,root,root) %{_libexecdir}/ro_installer_ntfs_commit.py
 %attr(0644,root,root) %{_libexecdir}/ro-installer-ntfs-bound-io.so
 %attr(0644,root,root) %{_libexecdir}/ro-installer-observability.json

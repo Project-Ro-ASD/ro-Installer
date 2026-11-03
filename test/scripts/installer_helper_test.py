@@ -817,6 +817,7 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
                 (top / directory).mkdir()
             (top / "SOURCES/backend").write_bytes(b"\x7fELFpayload-fixture")
             shutil.copy2(ROOT / 'linux/ro_installer_ntfs_commit.py', top / 'SOURCES/commit')
+            shutil.copy2(ROOT / 'linux/ro_installer_ntfs_transaction.py', top / 'SOURCES/transaction')
             adapter_header = b'\x7fELF\x02\x01\x01' + bytes(9) + b'\x03\x00\x3e\x00'
             (top / 'SOURCES/bound').write_bytes(adapter_header)
             shutil.copy2(ROOT / "linux/ro-installer-helper", top / "SOURCES/helper")
@@ -849,6 +850,11 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
                 ("0755", "0644", "0644", "0644", "root", "commit-mode"),
                 ("0755", "0644", "0644", "0644", "root", "commit-user"),
                 ("0755", "0644", "0644", "0644", "root", "commit-shebang"),
+                ("0755", "0644", "0644", "0644", "root", "transaction-missing"),
+                ("0755", "0644", "0644", "0644", "root", "transaction-symlink"),
+                ("0755", "0644", "0644", "0644", "root", "transaction-mode"),
+                ("0755", "0644", "0644", "0644", "root", "transaction-user"),
+                ("0755", "0644", "0644", "0644", "root", "transaction-shebang"),
             ]
             for release_number, (mode, gpt_mode, manual_mode, ntfs_mode, ntfs_user, ntfs_kind) in enumerate(cases, 1):
                 release = str(release_number)
@@ -888,6 +894,19 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
                     commit_listing = f'%attr(0644,nobody,root) {package.NTFS_COMMIT}'
                 elif ntfs_kind == 'commit-shebang':
                     (top / 'SOURCES/commit').write_bytes(b'#!/usr/bin/env python3\n')
+                transaction_install = f'install -Dm644 %{{_sourcedir}}/transaction %{{buildroot}}{package.NTFS_TRANSACTION}'
+                transaction_listing = f'%attr(0644,root,root) {package.NTFS_TRANSACTION}'
+                shutil.copy2(ROOT / 'linux/ro_installer_ntfs_transaction.py', top / 'SOURCES/transaction')
+                if ntfs_kind == 'transaction-missing':
+                    transaction_install = transaction_listing = ''
+                elif ntfs_kind == 'transaction-symlink':
+                    transaction_install = f'ln -s ro_installer_gpt.py %{{buildroot}}{package.NTFS_TRANSACTION}'
+                elif ntfs_kind == 'transaction-mode':
+                    transaction_listing = f'%attr(0666,root,root) {package.NTFS_TRANSACTION}'
+                elif ntfs_kind == 'transaction-user':
+                    transaction_listing = f'%attr(0644,nobody,root) {package.NTFS_TRANSACTION}'
+                elif ntfs_kind == 'transaction-shebang':
+                    (top / 'SOURCES/transaction').write_bytes(b'#!/usr/bin/env python3\n')
                 spec = top / "SPECS/fixture.spec"
                 spec.write_text(f'''Name: helper-payload-fixture
 Version: 1
@@ -905,6 +924,7 @@ install -Dm644 %{{_sourcedir}}/manual %{{buildroot}}{package.MANUAL}
 {ntfs_install}
 {bound_install}
 {commit_install}
+{transaction_install}
 install -Dm644 %{{_sourcedir}}/schema %{{buildroot}}{package.SCHEMA}
 install -Dm755 %{{_sourcedir}}/session %{{buildroot}}{package.SESSION}
 install -Dm755 %{{_sourcedir}}/helper %{{buildroot}}{package.HELPER}
@@ -918,6 +938,7 @@ install -Dm644 %{{_sourcedir}}/policy %{{buildroot}}{package.POLICY}
 {ntfs_listing}
 {bound_listing}
 {commit_listing}
+{transaction_listing}
 %attr(0644,root,root) {package.SCHEMA}
 %attr(0755,root,root) {package.SESSION}
 %attr({mode},root,root) {package.HELPER}
