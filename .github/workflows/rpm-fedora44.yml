@@ -19,13 +19,60 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  real-namespace:
+    name: Real namespace acceptance on Fedora 44
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: fedora:44
+      # Only this disposable fixture job needs mount namespace capabilities.
+      # Keep Docker's default seccomp profile and the RPM build isolation.
+      options: --cap-add SYS_ADMIN --security-opt apparmor=unconfined
+    steps:
+      - name: Install namespace probe dependencies
+        run: dnf -y --setopt=install_weak_deps=False install git python3 util-linux
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Record namespace probe toolchain
+        shell: bash
+        run: |
+          mkdir -p outputs/namespace-acceptance
+          python3 --version > outputs/namespace-acceptance/toolchain.txt
+          rpm -q python3 util-linux >> outputs/namespace-acceptance/toolchain.txt
+          uname -r >> outputs/namespace-acceptance/toolchain.txt
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          fields = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
+          with Path('outputs/namespace-acceptance/toolchain.txt').open('a') as output:
+              output.write('CapEff=' + fields['CapEff'].strip() + '\nSeccomp=' + fields['Seccomp'].strip() + '\n')
+          assert int(fields['CapEff'].strip(), 16) & (1 << 21), 'SYS_ADMIN is required for the disposable fixture'
+          assert fields['Seccomp'].strip() == '2', 'Docker seccomp filtering must remain enabled'
+          PYTHON
+      - name: Require real namespace acceptance
+        run: bash scripts/check-namespace-ci.sh
+      - name: Preserve namespace acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ro-installer-namespace-fedora44
+          if-no-files-found: error
+          path: outputs/namespace-acceptance/
+
   build-rpm:
     name: Build ro-installer RPM on Fedora 44
+    needs: real-namespace
+    # Keep the existing required check failing, rather than skipped, on denial.
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     container:
       image: fedora:44
 
     steps:
+      - name: Require real namespace prerequisite
+        if: needs.real-namespace.result != 'success'
+        run: |
+          echo "::error::Real namespace acceptance must pass before RPM build."
+          exit 1
       - name: Install Fedora 44 build dependencies
         run: |
           dnf -y --setopt=install_weak_deps=False install \
@@ -97,21 +144,6 @@ jobs:
 
       - name: Check documentation policy in the real checkout
         run: python3 scripts/check-source-policy.py --mode checkout
-
-      - name: Real disposable namespace acceptance (explicit capability result)
-        shell: bash
-        run: |
-          mkdir -p outputs/namespace-acceptance
-          set +e
-          python3 -B test/scripts/namespace_acceptance.py > outputs/namespace-acceptance/result.json
-          result=$?
-          set -e
-          cat outputs/namespace-acceptance/result.json
-          if [ "$result" -eq 77 ]; then
-            echo "::warning::Real Linux namespace acceptance UNAVAILABLE; full P0-03 security acceptance remains NO-GO."
-          elif [ "$result" -ne 0 ]; then
-            exit "$result"
-          fi
 
       - name: Measure bounded observability overhead (synthetic)
         run: |
@@ -214,6 +246,5 @@ jobs:
             rpm-outputs/latest-rpm-path.txt
             rpm-outputs/latest-rpm-manifest.txt
             outputs/observability/
-            outputs/namespace-acceptance/
             outputs/release-contract-test/
             outputs/logs/01-build-rpm-*.log

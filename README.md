@@ -702,8 +702,13 @@ It uses only a fresh `/tmp` tree inside disposable user/mount namespaces, exerci
 the production namespace primitive, real nested rbind and individual cleanup, and
 checks that the parent mount inventory stayed unchanged. Exit 77 explicitly means
 UNAVAILABLE and full security acceptance **NO-GO**; it is never a passing isolation
-test. Fedora PR CI preserves the JSON and warns when kernel capabilities prevent
-this probe. Synthetic Dart mount graphs, real IPC/flock/child-lifetime fixtures and
+test. Fedora PR CI requires this probe in a dedicated ephemeral job with
+`SYS_ADMIN` and a per-container AppArmor exception for mounts. Docker's default
+seccomp filtering stays enabled, and the RPM build job retains its default
+isolation. An unavailable probe fails CI and the existing required build check; JSON
+and toolchain evidence have a separate artifact. A passing report requires the
+worker marker, all isolation/rbind/cleanup checks and distinct namespace IDs.
+Synthetic Dart mount graphs, real IPC/flock/child-lifetime fixtures and
 this Linux probe provide distinct evidence; none is a physical installation test.
 
 RPM stripping preserves only `/usr/libexec/ro-installer-backend`, because Dart
