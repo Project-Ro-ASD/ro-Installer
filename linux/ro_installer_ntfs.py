@@ -456,6 +456,17 @@ def qualify_resize_toolchain(version_output, package_output):
     return {'version': name, 'epoch': int(epoch), 'release': revision, 'arch': arch}
 
 
+class ResizeToolchainError(ValueError):
+    pass
+
+
+def qualified_resize_toolchain():
+    try:
+        return qualify_resize_toolchain(run_tool('resize-version', None), run_tool('resize-packages', None))
+    except Exception:
+        raise ResizeToolchainError('NTFS_TOOLS_UNSUPPORTED') from None
+
+
 def validate_resize_target_test(raw, inspection, target_bytes, sector):
     if len(raw) > 65536 or b'\0' in raw:
         raise ValueError('Invalid NTFS target test output')
@@ -474,18 +485,18 @@ def validate_resize_target_test(raw, inspection, target_bytes, sector):
         raise ValueError('NTFS target test does not match preparation')
 
 
-def prepare_resize_target(fd, size, sector, target_bytes, expected_fingerprint):
-    """Private read-only preparation; the caller owns identity, exclusion and lease.
+def _prepare_resize_evidence(fd, size, sector, target_bytes, expected_fingerprint):
+    """Read-only implementation; caller owns identity, exclusion and lease.
 
-    A future writer must regenerate this evidence at its mutation boundary.
-    No CLI mode exposes this primitive or accepts caller-provided minimums.
+    Return inspection and exact-target evidence from the same checked pass.
+    Preparation grants no resize authority and must be regenerated at mutation.
     """
     if (fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDONLY
             or type(size) is not int or not 1048576 <= size <= MAX_BYTES or sector not in (512, 4096)
             or type(target_bytes) is not int or not 40*1024**3 <= target_bytes < size or target_bytes % 1048576
             or not isinstance(expected_fingerprint, str) or not re.fullmatch('[0-9a-f]{64}', expected_fingerprint)):
         raise ValueError('Invalid NTFS target preparation')
-    toolchain = qualify_resize_toolchain(run_tool('resize-version', None), run_tool('resize-packages', None))
+    toolchain = qualified_resize_toolchain()
     inspection = inspect_fd(fd, size, sector)
     if (inspection['inspectionFingerprint'] != expected_fingerprint
             or target_bytes < inspection['minimumBytes'] + 1024**3):
@@ -493,13 +504,24 @@ def prepare_resize_target(fd, size, sector, target_bytes, expected_fingerprint):
     before = boot_sector(fd, size, sector); native = NativeNtfs(); metadata = native.metadata(fd)
     validate_resize_target_test(run_tool('resize-target', fd, target_bytes=target_bytes), inspection, target_bytes, sector)
     if (boot_sector(fd, size, sector) != before or native.metadata(fd) != metadata or inspect_fd(fd, size, sector) != inspection
-            or qualify_resize_toolchain(run_tool('resize-version', None), run_tool('resize-packages', None)) != toolchain):
+            or qualified_resize_toolchain() != toolchain):
         raise ValueError('NTFS source or toolchain changed during preparation')
     result = {'schemaVersion': 1, 'deviceBytes': size, 'targetBytes': target_bytes,
               'inspectionFingerprint': expected_fingerprint, 'toolchain': toolchain}
     digest = hashlib.sha256(b'ro-ntfs-target-preparation-v1\0' + before[0] + metadata
                             + json.dumps(result, sort_keys=True).encode())
-    return {**result, 'preparationFingerprint': digest.hexdigest()}
+    return {'inspection': inspection,
+            'preparation': {**result, 'preparationFingerprint': digest.hexdigest()}}
+
+
+def prepare_resize_target(fd, size, sector, target_bytes, expected_fingerprint):
+    """Private exact-target preparation, unchanged evidence/fingerprint contract."""
+    return _prepare_resize_evidence(fd, size, sector, target_bytes, expected_fingerprint)['preparation']
+
+
+def prepare_resize_evidence(fd, size, sector, target_bytes, expected_fingerprint):
+    """Read-only preparation plus its inspection, without another minimum scan."""
+    return _prepare_resize_evidence(fd, size, sector, target_bytes, expected_fingerprint)
 
 
 def _info_fields(raw):
@@ -588,21 +610,30 @@ def restrict_limit(kind, maximum):
 
 
 def main():
-    armed = False
+    armed, preparing = False, False
     try:
-        if os.geteuid() != 0 or len(sys.argv) != 5 or sys.argv[1] != '--check-fd': return 2
-        fd, size, sector = (int(v) for v in sys.argv[2:])
+        if os.geteuid() != 0: return 2
+        if len(sys.argv) == 5 and sys.argv[1] == '--check-fd':
+            fd, size, sector = (int(v) for v in sys.argv[2:])
+        elif len(sys.argv) == 7 and sys.argv[1] == '--prepare-fd':
+            fd, size, sector, target = (int(v) for v in sys.argv[2:6])
+            fingerprint, preparing = sys.argv[6], True
+        else: return 2
         if fd < 3 or not stat.S_ISBLK(os.fstat(fd).st_mode): return 2
         restrict_limit(resource.RLIMIT_CORE, 0)
         restrict_limit(resource.RLIMIT_AS, 1024**3)
-        restrict_limit(resource.RLIMIT_CPU, 120)
-        signal.alarm(120)
+        restrict_limit(resource.RLIMIT_CPU, 360 if preparing else 120)
+        signal.alarm(360 if preparing else 120)
         armed = True
-        result = inspect_fd(fd, size, sector)
+        result = (prepare_resize_evidence(fd, size, sector, target, fingerprint)
+                  if preparing else inspect_fd(fd, size, sector))
         raw = json.dumps(result, separators=(',', ':'))
-        if len(raw.encode()) > 1023: return 2
+        if len(raw.encode()) > (2047 if preparing else 1023): return 2
         sys.stdout.write(raw + '\n')
         return 0
+    except ResizeToolchainError:
+        if preparing: sys.stdout.write('{"error":"NTFS_TOOLS_UNSUPPORTED"}\n')
+        return 2
     except Exception:
         return 2
     finally:

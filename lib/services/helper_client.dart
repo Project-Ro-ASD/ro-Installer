@@ -1,4 +1,5 @@
 import '../models/ntfs_shrink_assessment.dart';
+import '../models/prepared_ntfs_shrink.dart';
 import '../models/ntfs_shrink_installation_plan.dart';
 import '../models/manual_installation_plan.dart';
 import 'dart:async';
@@ -53,12 +54,13 @@ class HelperClient {
   HelperClient({
     HelperProcessStarter? start,
     this.readTimeout = const Duration(minutes: 2),
+    this.preparationTimeout = const Duration(minutes: 7),
     this.protocolVersion = 1,
   }) : _start = start ?? _startNative;
   static final instance = HelperClient();
   final HelperProcessStarter _start;
   final int protocolVersion;
-  final Duration readTimeout;
+  final Duration readTimeout, preparationTimeout;
   static const executable = '/usr/bin/pkexec';
   static const arguments = [
     '--disable-internal-agent',
@@ -237,6 +239,44 @@ class HelperClient {
     }
   }
 
+  Future<PreparedNtfsShrink> prepareNtfsShrink(
+    NtfsShrinkAssessment assessment,
+  ) async {
+    if (protocolVersion != 2) throw const HelperException('INVALID_REQUEST');
+    final plan = assessment.plan;
+    final result = await _call({
+      'protocolVersion': 2,
+      'operation': 'prepare-ntfs-shrink',
+      'disk': plan.snapshot.device.path,
+      'expectedDevice': plan.snapshot.device.expected,
+      'tableFingerprint': plan.snapshot.tableFingerprint,
+      'sourceNumber': plan.source.number,
+      'espNumber': plan.esp.number,
+      'rootBytes': plan.rootBytes,
+      'inspectionFingerprint': assessment.inspectionFingerprint,
+    }, readLimit: preparationTimeout);
+    try {
+      if (!exactFields(result, {
+        'protocolVersion',
+        'type',
+        'operation',
+        'ok',
+        'plan',
+        'inspection',
+        'preparation',
+      })) {
+        throw const FormatException('Invalid preparation response');
+      }
+      return PreparedNtfsShrink.fromJson({
+        'plan': result['plan'],
+        'inspection': result['inspection'],
+        'preparation': result['preparation'],
+      }, expected: assessment);
+    } on FormatException {
+      throw const HelperException('PROTOCOL_ERROR');
+    }
+  }
+
   Future<void> installManualPlan(
     ManualInstallationPlan plan,
     void Function(double, String) onProgress, {
@@ -360,6 +400,7 @@ class HelperClient {
     void Function(double, String)? onProgress,
     void Function(SessionReport? report, String status)? onReport,
     void Function(CopyProgress)? onCopyProgress,
+    Duration? readLimit,
   }) async {
     if (protocolVersion != 1 && protocolVersion != 2) {
       throw const HelperException('INVALID_REQUEST');
@@ -422,7 +463,9 @@ class HelperClient {
       await process.closeInput();
       while (await (installing
           ? output.moveNext()
-          : output.moveNext().timeout(readTimeout - elapsed.elapsed))) {
+          : output.moveNext().timeout(
+              (readLimit ?? readTimeout) - elapsed.elapsed,
+            ))) {
         final chunk = output.current;
         outputBytes += chunk.length;
         if (outputBytes > helperOutputLimit) failure ??= 'OUTPUT_LIMIT';

@@ -382,7 +382,20 @@ shrink target to a fresh inspection, keeps the 40 GiB retained-source floor and 
 headroom above the observed minimum, and requires a successful fixed
 `ntfsresize --no-action -P --size` trial. Geometry, boot/metadata, the inspection
 fingerprint and the toolchain are checked again before returning preparation
-evidence. No CLI or helper operation exposes this primitive.
+evidence. The private writer retains this preparation contract and regenerates it
+at its mutation boundary.
+
+Helper v2 `prepare-ntfs-shrink` provides a read-only exact-target preparation step.
+It accepts the observed device/table/inspection fingerprints and minimal
+source/ESP/root choices, derives the target and minimum independently, and rechecks
+the source and GPT before returning numeric inspection plus preparation evidence.
+The root-only `--prepare-fd` inspector mode uses a verified read-only descriptor;
+it never invokes the writer. Returning the inspection from the same checked pass
+avoids an extra minimum-size scan. Unsupported toolchains produce the fixed
+`NTFS_TOOLS_UNSUPPORTED` result without diagnostics. Preparation has its own bounded
+read budget and unwinds its children/lease on cancellation. Dart binds the response
+to the exact assessed source/target and keeps defensive exports; preparation grants
+no installation authority.
 
 Preparation requires `ntfsresize` and both owning Fedora x86_64 packages
 (`ntfsprogs`, `ntfs-3g-libs`) to agree on release, epoch and build revision,

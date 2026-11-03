@@ -793,8 +793,13 @@ install -Dm755 %{{_sourcedir}}/backend %{{buildroot}}{package.BACKEND}
         self.assertEqual(helper.GPT_ARGV,('/usr/bin/python3','-I','/usr/libexec/ro_installer_gpt.py','--probe'))
         self.assertEqual(helper.MANUAL_ARGV,('/usr/bin/python3','-I','/usr/libexec/ro_installer_manual.py'))
         self.assertEqual(helper.NTFS_ARGV,('/usr/bin/python3','-I','/usr/libexec/ro_installer_ntfs.py','--check-fd'))
-        ntfs_args=next(node.value for node in ast.walk(tree) if isinstance(node,ast.Assign) and any(isinstance(target,ast.Name) and target.id=='ntfs_args' for target in node.targets))
-        self.assertEqual(ast.unparse(ntfs_args), '(*NTFS_ARGV, str(fd), str(size), str(sector))')
+        self.assertEqual(helper.NTFS_PREPARE_ARGV,('/usr/bin/python3','-I','/usr/libexec/ro_installer_ntfs.py','--prepare-fd'))
+        ntfs_args=[node.value for node in ast.walk(tree) if isinstance(node,ast.Assign) and any(isinstance(target,ast.Name) and target.id=='ntfs_args' for target in node.targets)]
+        self.assertEqual(len(ntfs_args),2)
+        self.assertEqual({ast.unparse(value) for value in ntfs_args}, {
+            '(*NTFS_ARGV, str(fd), str(size), str(sector))',
+            '(*NTFS_PREPARE_ARGV, str(fd), str(size), str(sector), str(target_bytes), inspection_fingerprint)',
+        })
         ntfs_call=next(call for call in process_calls if call.args[0].id=='ntfs_args')
         keywords={k.arg:ast.unparse(k.value) for k in ntfs_call.keywords}
         self.assertEqual(keywords['pass_fds'],'(fd, lease)')

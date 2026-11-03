@@ -72,7 +72,7 @@ class PreparationTests(unittest.TestCase):
                     worker.validate_resize_target_test(bad, observed, TARGET, sector)
 
     def prepare(self, fd, *, observed=None, target=TARGET, fingerprint=FINGERPRINT,
-                boot=None, metadata=None, inspections=None, packages=None):
+                boot=None, metadata=None, inspections=None, packages=None, evidence=False):
         observed = inspection() if observed is None else observed
         calls = []
         package_values = iter(packages or [PACKAGES, PACKAGES])
@@ -88,7 +88,8 @@ class PreparationTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(worker, 'inspect_fd', side_effect=inspections or [observed, observed]))
             stack.enter_context(mock.patch.object(worker, 'boot_sector', side_effect=boot or [(b'boot', 4096)]*2))
             stack.enter_context(mock.patch.object(worker, 'NativeNtfs', return_value=native))
-            value = worker.prepare_resize_target(fd, SIZE, 512, target, fingerprint)
+            method = worker.prepare_resize_evidence if evidence else worker.prepare_resize_target
+            value = method(fd, SIZE, 512, target, fingerprint)
         return value, calls
 
     def test_qualified_preparation_has_distinct_stable_fingerprint_and_fixed_target(self):
@@ -105,6 +106,18 @@ class PreparationTests(unittest.TestCase):
                                  ['resize-version', 'resize-packages', 'resize-target', 'resize-version', 'resize-packages'])
                 self.assertNotEqual(value, self.prepare(fd, target=TARGET+1048576)[0])
             finally: os.close(fd)
+
+    def test_evidence_shares_the_existing_inspection_and_unchanged_fingerprint(self):
+        with tempfile.TemporaryDirectory() as td:
+            path=Path(td)/'normal';path.write_bytes(b'unchanged');fd=os.open(path,os.O_RDONLY)
+            try:
+                expected=self.prepare(fd)[0]
+                evidence,calls=self.prepare(fd,evidence=True)
+                self.assertEqual(evidence,{'inspection':inspection(),'preparation':expected})
+                self.assertEqual([row[0] for row in calls],
+                    ['resize-version','resize-packages','resize-target','resize-version','resize-packages'])
+                self.assertEqual(path.read_bytes(),b'unchanged')
+            finally:os.close(fd)
 
     def test_capacity_floor_headroom_stale_input_and_source_or_toolchain_drift_refuse(self):
         with tempfile.TemporaryDirectory() as td:

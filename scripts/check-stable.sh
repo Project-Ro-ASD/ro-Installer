@@ -133,6 +133,8 @@ run_check "private NTFS native writer lifecycle on owned regular fixtures" \
   python3 -B test/scripts/ntfs_native_runner_test.py
 run_check "qualified NTFS target preparation and read-only dry run" \
   python3 -B test/scripts/ntfs_target_preparation_test.py
+run_check "read-only NTFS preparation API, DTO parity and graceful cancellation" \
+  python3 -B test/scripts/ntfs_preparation_api_test.py
 run_check "read-only NTFS metadata and regular-file integrity" \
   python3 -B test/scripts/ntfs_readonly_test.py
 run_check "bounded EFI source budget and descriptor identity" \
