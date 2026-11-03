@@ -4,6 +4,7 @@ import '../models/approved_full_disk_plan.dart';
 import 'dart:io';
 import '../models/approved_free_space_plan.dart';
 import '../models/approved_manual_plan.dart';
+import '../models/approved_ntfs_shrink_plan.dart';
 import '../models/standard_storage_layout.dart';
 import 'command_runner.dart';
 import 'session_command_runner.dart';
@@ -112,7 +113,36 @@ class MountRecord {
   }
 }
 
+/// A private tagged owner keeps NTFS and manual approvals distinct while sharing
+/// the same protected ESP mount and cleanup implementation.
+final class _EspReuseApproval {
+  const _EspReuseApproval.forManual(ApprovedManualPlan plan)
+    : manual = plan,
+      ntfs = null;
+  const _EspReuseApproval.forNtfs(ApprovedNtfsShrinkPlan plan)
+    : ntfs = plan,
+      manual = null;
+  final ApprovedManualPlan? manual;
+  final ApprovedNtfsShrinkPlan? ntfs;
+  bool get isNtfs => ntfs != null;
+  String get disk =>
+      manual?.plan.snapshot.device.path ?? ntfs!.plan.snapshot.device.path;
+  String get target {
+    if (manual != null) {
+      return manual!.plan.esp.target;
+    }
+    return '$disk${RegExp(r'[0-9]$').hasMatch(disk) ? 'p' : ''}${ntfs!.plan.esp.number}';
+  }
+
+  bool matchesManual(ApprovedManualPlan value) =>
+      manual != null && samePlanValue(manual!.json, value.json);
+  bool matchesNtfs(ApprovedNtfsShrinkPlan value) =>
+      ntfs != null && samePlanValue(ntfs!.json, value.json);
+}
+
 abstract class MountSession {
+  void bindCreatedNtfsLayout(CreatedNtfsLayout layout);
+  Future<bool> inspectNtfsEspReuse(ApprovedNtfsShrinkPlan plan);
   void bindCreatedManualLayout(CreatedManualLayout layout);
   Future<bool> mountReadOnlyEspProbe(ApprovedManualPlan plan);
   Future<bool> inspectEspReuse(ApprovedManualPlan plan);
@@ -156,7 +186,11 @@ class VerifiedMountSession implements MountSession {
   String? _namespace, _disk;
   CreatedFreeSpaceLayout? _freeLayout;
   CreatedManualLayout? _manualLayout;
-  ApprovedManualPlan? _espProbe, _espInspected;
+  CreatedNtfsLayout? _ntfsLayout;
+  bool _ntfsInspectionStarted = false;
+  _EspReuseApproval? _espProbe, _espInspected;
+  bool get _reusesEsp =>
+      _manualLayout?.reusesEsp == true || _ntfsLayout != null;
   bool _espProtected = false, _preparingEsp = false;
   static const espProbeTarget = '/mnt/.ro-installer-esp-probe';
   static const espStageTarget = '/mnt/.ro-installer-esp-stage';
@@ -204,6 +238,9 @@ class VerifiedMountSession implements MountSession {
 
   @override
   Future<void> validateTarget(String disk, {bool commit = false}) async {
+    if (_ntfsInspectionStarted && disk != _disk) {
+      throw StateError('NTFS target cannot change during ownership admission');
+    }
     await assertEmpty();
     final value = await control({
       'op': 'validate-target',
@@ -217,7 +254,9 @@ class VerifiedMountSession implements MountSession {
     _disk = disk;
   }
 
-  String _part(int n) => _manualLayout != null
+  String _part(int n) => _ntfsLayout != null
+      ? (n == 1 ? _ntfsLayout!.espPath : _ntfsLayout!.rootPath)
+      : _manualLayout != null
       ? (n == 1 ? _manualLayout!.espPath : _manualLayout!.rootPath)
       : _freeLayout != null
       ? (n == 1 ? _freeLayout!.espPath : _freeLayout!.rootPath)
@@ -231,6 +270,8 @@ class VerifiedMountSession implements MountSession {
         _disk != layout.snapshot.device.path ||
         _freeLayout != null ||
         _manualLayout != null ||
+        _ntfsLayout != null ||
+        _ntfsInspectionStarted ||
         _espProbe != null ||
         _espInspected != null) {
       throw StateError('Cannot bind an unverified storage layout');
@@ -247,15 +288,34 @@ class VerifiedMountSession implements MountSession {
         _disk != layout.snapshot.device.path ||
         _freeLayout != null ||
         _manualLayout != null ||
+        _ntfsLayout != null ||
+        _ntfsInspectionStarted ||
         _espProbe != null) {
       throw StateError('Cannot bind an unverified manual layout');
     }
     if ((layout.reusesEsp && _espInspected == null) ||
         (_espInspected != null &&
-            !samePlanValue(_espInspected!.json, layout.approved.json))) {
+            !_espInspected!.matchesManual(layout.approved))) {
       throw StateError('Reusable ESP preflight is missing or stale');
     }
     _manualLayout = layout;
+  }
+
+  @override
+  void bindCreatedNtfsLayout(CreatedNtfsLayout layout) {
+    if (!_verified ||
+        _attempted ||
+        _unsafe ||
+        _owned.isNotEmpty ||
+        _disk != layout.snapshot.device.path ||
+        _freeLayout != null ||
+        _manualLayout != null ||
+        _ntfsLayout != null ||
+        _espProbe != null ||
+        _espInspected?.matchesNtfs(layout.approved) != true) {
+      throw StateError('Missing or stale NTFS ESP ownership');
+    }
+    _ntfsLayout = layout;
   }
 
   Future<bool> _checked(String command, List<String> args) async {
@@ -265,6 +325,14 @@ class VerifiedMountSession implements MountSession {
 
   @override
   Future<bool> mountReadOnlyEspProbe(ApprovedManualPlan plan) async {
+    if (plan.plan.esp.formatOnInstall ||
+        plan.plan.esp.existingPartition == null) {
+      return false;
+    }
+    return _mountReadOnlyEspProbe(_EspReuseApproval.forManual(plan));
+  }
+
+  Future<bool> _mountReadOnlyEspProbe(_EspReuseApproval plan) async {
     if (!_verified ||
         _attempted ||
         _unsafe ||
@@ -272,9 +340,10 @@ class VerifiedMountSession implements MountSession {
         _espProbe != null ||
         _manualLayout != null ||
         _freeLayout != null ||
-        _disk != plan.plan.snapshot.device.path ||
-        plan.plan.esp.formatOnInstall ||
-        plan.plan.esp.existingPartition == null) {
+        _ntfsLayout != null ||
+        (_ntfsInspectionStarted && !plan.isNtfs) ||
+        _espInspected?.isNtfs == true ||
+        _disk != plan.disk) {
       return false;
     }
     _espProbe = plan;
@@ -285,7 +354,7 @@ class VerifiedMountSession implements MountSession {
         'vfat',
         '-o',
         'ro,nosuid,nodev,noexec',
-        plan.plan.esp.target,
+        plan.target,
         espProbeTarget,
       ]);
     } catch (_) {
@@ -344,10 +413,38 @@ class VerifiedMountSession implements MountSession {
 
   @override
   Future<bool> inspectEspReuse(ApprovedManualPlan plan) async {
+    if (plan.plan.esp.formatOnInstall ||
+        plan.plan.esp.existingPartition == null) {
+      return false;
+    }
+    return _inspectEspReuse(_EspReuseApproval.forManual(plan));
+  }
+
+  @override
+  Future<bool> inspectNtfsEspReuse(ApprovedNtfsShrinkPlan plan) async {
+    if (!_verified ||
+        _attempted ||
+        _unsafe ||
+        _ntfsInspectionStarted ||
+        _owned.isNotEmpty ||
+        _disk != plan.plan.snapshot.device.path ||
+        _freeLayout != null ||
+        _manualLayout != null ||
+        _ntfsLayout != null ||
+        _espProbe != null ||
+        _espInspected != null) {
+      return false;
+    }
+    // Failed preflight must never reopen the legacy full-disk mount fallback.
+    _ntfsInspectionStarted = true;
+    return _inspectEspReuse(_EspReuseApproval.forNtfs(plan));
+  }
+
+  Future<bool> _inspectEspReuse(_EspReuseApproval plan) async {
     if (_espInspected != null) return false;
     var valid = false;
     try {
-      if (await mountReadOnlyEspProbe(plan)) {
+      if (await _mountReadOnlyEspProbe(plan)) {
         final rows = await _read();
         if (!_known(rows)) throw StateError('ESP probe ownership changed');
         final mounted = rows.singleWhere((m) => m.target == espProbeTarget);
@@ -413,7 +510,7 @@ class VerifiedMountSession implements MountSession {
         _unsafe ||
         _espProtected ||
         _espProbe != null ||
-        _manualLayout?.reusesEsp != true ||
+        !_reusesEsp ||
         !_owned.values.any((m) => m.target == '/mnt' && m.type == 'btrfs') ||
         _owned.values.any(
           (m) => const [
@@ -482,7 +579,7 @@ class VerifiedMountSession implements MountSession {
 
   @override
   Future<bool> verifyProtectedEsp() async {
-    if (!_espProtected || _manualLayout?.reusesEsp != true) return false;
+    if (!_espProtected || !_reusesEsp) return false;
     try {
       final rows = await _read();
       if (!_known(rows) ||
@@ -540,7 +637,7 @@ class VerifiedMountSession implements MountSession {
           '/mnt/var/tmp',
         ].contains(target);
     final efi =
-        _manualLayout?.reusesEsp != true &&
+        !_reusesEsp &&
         args.length == 2 &&
         args[0] == _part(1) &&
         target == '/mnt/boot/efi';
@@ -549,16 +646,16 @@ class VerifiedMountSession implements MountSession {
         _owned.isEmpty &&
         args.length == 6 &&
         args.join(' ') ==
-            '-t vfat -o ro,nosuid,nodev,noexec ${_espProbe!.plan.esp.target} $espProbeTarget';
+            '-t vfat -o ro,nosuid,nodev,noexec ${_espProbe!.target} $espProbeTarget';
     final stage =
         _preparingEsp &&
-        _manualLayout?.reusesEsp == true &&
+        _reusesEsp &&
         args.length == 6 &&
         args.join(' ') ==
             '-t vfat -o rw,nosuid,nodev,noexec,umask=0077 ${_part(1)} $espStageTarget';
     final espBind =
         _preparingEsp &&
-        _manualLayout?.reusesEsp == true &&
+        _reusesEsp &&
         args.length == 3 &&
         args.first == '--bind' &&
         ((args[1] == espStageTarget && target == espTarget) ||
@@ -573,6 +670,9 @@ class VerifiedMountSession implements MountSession {
         _owned.values.any(
           (m) => m.target == espStageTarget && m.type == 'vfat',
         );
+    if (_ntfsInspectionStarted && _ntfsLayout == null && !probe) {
+      return false; // Never route a pending NTFS approval through full root2.
+    }
     if (!bind &&
         !tmp &&
         !root &&
@@ -605,7 +705,7 @@ class VerifiedMountSession implements MountSession {
         root
             ? _part(2)
             : probe
-            ? _espProbe!.plan.esp.target
+            ? _espProbe!.target
             : _part(1),
       ]);
       device = read.stdout.trim();
@@ -768,6 +868,11 @@ class VerifiedMountSession implements MountSession {
 /// Only explicit isMock/injected unit contexts use this implementation.
 /// It provides no Linux namespace/ownership evidence and is never GUI-selectable.
 class SimulatedMountSession implements MountSession {
+  @override
+  void bindCreatedNtfsLayout(CreatedNtfsLayout layout) =>
+      throw StateError('NTFS targets require verified storage ownership');
+  @override
+  Future<bool> inspectNtfsEspReuse(ApprovedNtfsShrinkPlan plan) async => false;
   @override
   void bindCreatedManualLayout(CreatedManualLayout layout) {}
   @override
