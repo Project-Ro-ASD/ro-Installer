@@ -1,0 +1,581 @@
+{
+  "valid": [
+    {
+      "name": "512",
+      "confirmation": {
+        "selection": {
+          "sourceNumber": 2,
+          "espNumber": 1,
+          "rootBytes": 68719476736
+        },
+        "intent": {
+          "schemaVersion": 1,
+          "layoutVersion": 1,
+          "mode": "alongside_ntfs_shrink",
+          "device": {
+            "path": "/dev/nvme0n1",
+            "majorMinor": "259:0",
+            "size": 274877906944,
+            "diskSequence": 11
+          },
+          "tableFingerprint": "a0139e95a676fc722cdfcee07e0e59ae0fd4fc52ef7d6e5dab3c87f52682f1ed",
+          "fileSystem": "btrfs",
+          "diskSwap": false,
+          "subvolumes": {
+            "root": "/",
+            "home": "/home",
+            "var_log": "/var/log",
+            "var_cache": "/var/cache",
+            "var_tmp": "/var/tmp"
+          },
+          "source": {
+            "number": 2,
+            "startSector": 2097152,
+            "endSector": 335544319,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000",
+            "newEndSector": 285212671,
+            "minimumFilesystemBytes": 53687091200,
+            "retainedBytes": 144955146240
+          },
+          "esp": {
+            "number": 1,
+            "startSector": 2048,
+            "endSector": 1050623,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000",
+            "formatOnInstall": false
+          },
+          "root": {
+            "number": 3,
+            "startSector": 285212672,
+            "endSector": 419430399,
+            "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+            "formatOnInstall": true
+          }
+        },
+        "inspectionFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "preparationFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "name": "4096",
+      "confirmation": {
+        "selection": {
+          "sourceNumber": 2,
+          "espNumber": 1,
+          "rootBytes": 68719476736
+        },
+        "intent": {
+          "schemaVersion": 1,
+          "layoutVersion": 1,
+          "mode": "alongside_ntfs_shrink",
+          "device": {
+            "path": "/dev/nvme0n1",
+            "majorMinor": "259:0",
+            "size": 274877906944,
+            "diskSequence": 11
+          },
+          "tableFingerprint": "539ae8cfc38efdb1fe43f750c543bfff1072170bb8bd13a5467f33cfff50fbcc",
+          "fileSystem": "btrfs",
+          "diskSwap": false,
+          "subvolumes": {
+            "root": "/",
+            "home": "/home",
+            "var_log": "/var/log",
+            "var_cache": "/var/cache",
+            "var_tmp": "/var/tmp"
+          },
+          "source": {
+            "number": 2,
+            "startSector": 262144,
+            "endSector": 41943039,
+            "typeGuid": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+            "partitionGuid": "33333333-3333-3333-3333-333333333333",
+            "attributesHex": "0000000000000000",
+            "newEndSector": 35651583,
+            "minimumFilesystemBytes": 53687091200,
+            "retainedBytes": 144955146240
+          },
+          "esp": {
+            "number": 1,
+            "startSector": 256,
+            "endSector": 131327,
+            "typeGuid": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+            "partitionGuid": "22222222-2222-2222-2222-222222222222",
+            "attributesHex": "0000000000000000",
+            "formatOnInstall": false
+          },
+          "root": {
+            "number": 3,
+            "startSector": 35651584,
+            "endSector": 52428799,
+            "typeGuid": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+            "formatOnInstall": true
+          }
+        },
+        "inspectionFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "preparationFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing selection",
+      "op": "remove",
+      "path": [
+        "selection"
+      ]
+    },
+    {
+      "name": "missing intent",
+      "op": "remove",
+      "path": [
+        "intent"
+      ]
+    },
+    {
+      "name": "missing inspectionFingerprint",
+      "op": "remove",
+      "path": [
+        "inspectionFingerprint"
+      ]
+    },
+    {
+      "name": "missing preparationFingerprint",
+      "op": "remove",
+      "path": [
+        "preparationFingerprint"
+      ]
+    },
+    {
+      "name": "extra rootGuid",
+      "op": "set",
+      "path": [
+        "rootGuid"
+      ],
+      "value": 1
+    },
+    {
+      "name": "extra preservationFingerprint",
+      "op": "set",
+      "path": [
+        "preservationFingerprint"
+      ],
+      "value": 1
+    },
+    {
+      "name": "extra snapshot",
+      "op": "set",
+      "path": [
+        "snapshot"
+      ],
+      "value": 1
+    },
+    {
+      "name": "extra minimumBytes",
+      "op": "set",
+      "path": [
+        "minimumBytes"
+      ],
+      "value": 1
+    },
+    {
+      "name": "extra commands",
+      "op": "set",
+      "path": [
+        "commands"
+      ],
+      "value": 1
+    },
+    {
+      "name": "extra fd",
+      "op": "set",
+      "path": [
+        "fd"
+      ],
+      "value": 1
+    },
+    {
+      "name": "extra confirmDestructive",
+      "op": "set",
+      "path": [
+        "confirmDestructive"
+      ],
+      "value": 1
+    },
+    {
+      "name": "sourceNumber bool",
+      "op": "set",
+      "path": [
+        "selection",
+        "sourceNumber"
+      ],
+      "value": true
+    },
+    {
+      "name": "sourceNumber float",
+      "op": "set",
+      "path": [
+        "selection",
+        "sourceNumber"
+      ],
+      "value": 2.0
+    },
+    {
+      "name": "sourceNumber changed",
+      "op": "set",
+      "path": [
+        "selection",
+        "sourceNumber"
+      ],
+      "value": 4096
+    },
+    {
+      "name": "sourceNumber null",
+      "op": "set",
+      "path": [
+        "selection",
+        "sourceNumber"
+      ],
+      "value": null
+    },
+    {
+      "name": "selection extra sourceNumber",
+      "op": "set",
+      "path": [
+        "selection",
+        "extrasourceNumber"
+      ],
+      "value": 1
+    },
+    {
+      "name": "espNumber bool",
+      "op": "set",
+      "path": [
+        "selection",
+        "espNumber"
+      ],
+      "value": true
+    },
+    {
+      "name": "espNumber float",
+      "op": "set",
+      "path": [
+        "selection",
+        "espNumber"
+      ],
+      "value": 1.0
+    },
+    {
+      "name": "espNumber changed",
+      "op": "set",
+      "path": [
+        "selection",
+        "espNumber"
+      ],
+      "value": 4096
+    },
+    {
+      "name": "espNumber null",
+      "op": "set",
+      "path": [
+        "selection",
+        "espNumber"
+      ],
+      "value": null
+    },
+    {
+      "name": "selection extra espNumber",
+      "op": "set",
+      "path": [
+        "selection",
+        "extraespNumber"
+      ],
+      "value": 1
+    },
+    {
+      "name": "rootBytes bool",
+      "op": "set",
+      "path": [
+        "selection",
+        "rootBytes"
+      ],
+      "value": true
+    },
+    {
+      "name": "rootBytes float",
+      "op": "set",
+      "path": [
+        "selection",
+        "rootBytes"
+      ],
+      "value": 68719476736.0
+    },
+    {
+      "name": "rootBytes changed",
+      "op": "set",
+      "path": [
+        "selection",
+        "rootBytes"
+      ],
+      "value": 4096
+    },
+    {
+      "name": "rootBytes null",
+      "op": "set",
+      "path": [
+        "selection",
+        "rootBytes"
+      ],
+      "value": null
+    },
+    {
+      "name": "selection extra rootBytes",
+      "op": "set",
+      "path": [
+        "selection",
+        "extrarootBytes"
+      ],
+      "value": 1
+    },
+    {
+      "name": "inspectionFingerprint upper",
+      "op": "set",
+      "path": [
+        "inspectionFingerprint"
+      ],
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "inspectionFingerprint short",
+      "op": "set",
+      "path": [
+        "inspectionFingerprint"
+      ],
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "inspectionFingerprint newline",
+      "op": "set",
+      "path": [
+        "inspectionFingerprint"
+      ],
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    },
+    {
+      "name": "inspectionFingerprint null",
+      "op": "set",
+      "path": [
+        "inspectionFingerprint"
+      ],
+      "value": null
+    },
+    {
+      "name": "preparationFingerprint upper",
+      "op": "set",
+      "path": [
+        "preparationFingerprint"
+      ],
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "preparationFingerprint short",
+      "op": "set",
+      "path": [
+        "preparationFingerprint"
+      ],
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "preparationFingerprint newline",
+      "op": "set",
+      "path": [
+        "preparationFingerprint"
+      ],
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    },
+    {
+      "name": "preparationFingerprint null",
+      "op": "set",
+      "path": [
+        "preparationFingerprint"
+      ],
+      "value": null
+    },
+    {
+      "name": "stale inspection",
+      "op": "set",
+      "path": [
+        "inspectionFingerprint"
+      ],
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "name": "mismatch intent.mode",
+      "op": "set",
+      "path": [
+        "intent",
+        "mode"
+      ],
+      "value": "alongside"
+    },
+    {
+      "name": "mismatch intent.schemaVersion",
+      "op": "set",
+      "path": [
+        "intent",
+        "schemaVersion"
+      ],
+      "value": true
+    },
+    {
+      "name": "mismatch intent.schemaVersion",
+      "op": "set",
+      "path": [
+        "intent",
+        "schemaVersion"
+      ],
+      "value": 1.0
+    },
+    {
+      "name": "mismatch intent.diskSwap",
+      "op": "set",
+      "path": [
+        "intent",
+        "diskSwap"
+      ],
+      "value": true
+    },
+    {
+      "name": "mismatch intent.fileSystem",
+      "op": "set",
+      "path": [
+        "intent",
+        "fileSystem"
+      ],
+      "value": "ext4"
+    },
+    {
+      "name": "mismatch intent.subvolumes.home",
+      "op": "set",
+      "path": [
+        "intent",
+        "subvolumes",
+        "home"
+      ],
+      "value": "/different"
+    },
+    {
+      "name": "mismatch intent.source.newEndSector",
+      "op": "set",
+      "path": [
+        "intent",
+        "source",
+        "newEndSector"
+      ],
+      "value": 0
+    },
+    {
+      "name": "mismatch intent.source.minimumFilesystemBytes",
+      "op": "set",
+      "path": [
+        "intent",
+        "source",
+        "minimumFilesystemBytes"
+      ],
+      "value": 1
+    },
+    {
+      "name": "mismatch intent.source.retainedBytes",
+      "op": "set",
+      "path": [
+        "intent",
+        "source",
+        "retainedBytes"
+      ],
+      "value": 1
+    },
+    {
+      "name": "mismatch intent.source.partitionGuid",
+      "op": "set",
+      "path": [
+        "intent",
+        "source",
+        "partitionGuid"
+      ],
+      "value": "11111111-1111-1111-1111-111111111111"
+    },
+    {
+      "name": "mismatch intent.esp.formatOnInstall",
+      "op": "set",
+      "path": [
+        "intent",
+        "esp",
+        "formatOnInstall"
+      ],
+      "value": true
+    },
+    {
+      "name": "mismatch intent.root.formatOnInstall",
+      "op": "set",
+      "path": [
+        "intent",
+        "root",
+        "formatOnInstall"
+      ],
+      "value": false
+    },
+    {
+      "name": "mismatch intent.root.number",
+      "op": "set",
+      "path": [
+        "intent",
+        "root",
+        "number"
+      ],
+      "value": 4096
+    },
+    {
+      "name": "mismatch intent.root.startSector",
+      "op": "set",
+      "path": [
+        "intent",
+        "root",
+        "startSector"
+      ],
+      "value": 0
+    },
+    {
+      "name": "mismatch intent.root.extra",
+      "op": "set",
+      "path": [
+        "intent",
+        "root",
+        "extra"
+      ],
+      "value": 1
+    },
+    {
+      "name": "mismatch intent.device.diskSequence",
+      "op": "set",
+      "path": [
+        "intent",
+        "device",
+        "diskSequence"
+      ],
+      "value": 999
+    },
+    {
+      "name": "mismatch intent.tableFingerprint",
+      "op": "set",
+      "path": [
+        "intent",
+        "tableFingerprint"
+      ],
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  ]
+}

@@ -304,6 +304,33 @@ def ntfs_shrink_plan(proposal):
                      'formatOnInstall': True}}
 
 
+def normalize_ntfs_confirmation(value, observed_proposal, inspection_fingerprint):
+    """Match public intent to a fresh trusted inspection, never write admission.
+
+    observed_proposal must be assembled by the root caller from fresh GPT and
+    source inspection; the public envelope carries no authoritative minimum.
+    The guarded worker must still reproduce the claimed preparation fingerprint.
+    """
+    if not isinstance(value, dict) or set(value) != {
+            'selection', 'intent', 'inspectionFingerprint', 'preparationFingerprint'}:
+        raise ValueError('Invalid NTFS confirmation')
+    if not isinstance(inspection_fingerprint, str) or not re.fullmatch('[0-9a-f]{64}', inspection_fingerprint):
+        raise ValueError('Invalid observed NTFS inspection fingerprint')
+    intent = ntfs_shrink_plan(observed_proposal)
+    preparation = value['preparationFingerprint']
+    if not isinstance(preparation, str) or not re.fullmatch('[0-9a-f]{64}', preparation):
+        raise ValueError('Invalid NTFS confirmation fingerprint')
+    expected = {
+        'selection': {name: observed_proposal[name] for name in
+                      ('sourceNumber', 'espNumber', 'rootBytes')},
+        'intent': intent, 'inspectionFingerprint': inspection_fingerprint,
+        'preparationFingerprint': preparation,
+    }
+    if json.dumps(value, sort_keys=True, allow_nan=False) != json.dumps(expected, sort_keys=True, allow_nan=False):
+        raise ValueError('NTFS confirmation differs from observed plan')
+    return expected
+
+
 def normalize_ntfs_approval(value):
     """Private helper/backend ownership, never public resize admission."""
     if not isinstance(value, dict) or set(value) != {'proposal', 'approval'}:
