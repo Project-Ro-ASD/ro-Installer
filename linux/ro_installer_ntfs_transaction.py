@@ -141,9 +141,7 @@ def native_lease(fd):
         else: os.environ[name] = previous
 
 
-PHASES = frozenset({'admission','context','power','prepare','native','filesystem','gpt',
-    'gpt.prepare','gpt.backup','gpt.primary','gpt.verify','metadata-committed','cleanup',
-    'kernel.close','kernel.identity','kernel.reread','kernel.ready','kernel.source','kernel.cleanup'})
+PHASES = core.TRANSACTION_PHASES
 
 
 def failure_result(error, *, phase='admission', entered=False):
@@ -197,14 +195,16 @@ def execute(frame):
 
 def main():
     if os.geteuid() != 0 or sys.argv[1:] != ['--execute']: return 2
+    entered = False
     try:
         core.ntfs.restrict_limit(resource.RLIMIT_CORE, 0)
         core.ntfs.restrict_limit(resource.RLIMIT_AS, 1024**3)
         core.ntfs.restrict_limit(resource.RLIMIT_CPU, 2*60*60)
         frame = parse_frame(sys.stdin.buffer.read(MAX_INPUT + 1))
+        entered = True
         result = execute(frame)
     except Exception as error:
-        result = failure_result(error)
+        result = failure_result(error, phase='unknown' if entered else 'admission', entered=entered)
     raw = json.dumps({'schemaVersion':1, **result}, separators=(',', ':'), allow_nan=False)
     if len(raw.encode()) > 8191: return 2
     try: sys.stdout.write(raw + '\n')

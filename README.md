@@ -322,6 +322,17 @@ partition geometry. Results contain bounded snapshot/progress data, with no boot
 bytes or native diagnostics. The payload audit requires the root-owned isolated
 worker; public helper/backend installation admission is still separate.
 
+The root engine uses a dedicated `ntfs-transaction` session RPC with canonical
+ownership only. The supervisor supplies the worker command, namespace and lease,
+permits one attempt, and validates the bounded terminal outcome without forwarding
+native diagnostics to command logs. Socket loss or engine exit drains an active
+worker before descendant cleanup; it never means safe cancellation. Malformed or
+missing results remain conservatively unknown, and failed storage prevents session
+success even if an engine exits zero. Existing generic command cleanup is unchanged.
+Accepted storage has a separate 135-minute operation envelope and three-hour engine
+envelope. Public NTFS admission must select a matching helper deadline before the
+mode is enabled; the existing helper operations retain their current limits.
+
 ### Read-only NTFS inspection primitive
 
 The root-only `ro_installer_ntfs.py` worker accepts an inherited read-only block

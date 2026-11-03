@@ -1,6 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'command_runner.dart';
+import 'helper_protocol.dart';
+import '../models/approved_ntfs_shrink_plan.dart';
+import '../models/ntfs_transaction_result.dart';
 
 /// Internal root-to-root transport, never part of the GUI/helper protocol.
 /// The root supervisor verifies SO_PEERCRED against its exact engine child.
@@ -18,7 +22,10 @@ class SessionCommandRunner extends CommandRunner {
     return SessionCommandRunner(path);
   }
 
-  Stream<Map<String, dynamic>> _exchange(Map<String, dynamic> request) async* {
+  Stream<Map<String, dynamic>> _exchange(
+    Map<String, dynamic> request, {
+    int? frameLimit,
+  }) async* {
     final socket = await Socket.connect(
       InternetAddress(socketPath, type: InternetAddressType.unix),
       0,
@@ -26,12 +33,36 @@ class SessionCommandRunner extends CommandRunner {
     try {
       socket.write('${jsonEncode(request)}\n');
       await socket.flush();
+      Stream<List<int>> input = socket.cast<List<int>>();
+      if (frameLimit != null) {
+        var pendingBytes = 0;
+        input = input.transform(
+          StreamTransformer.fromHandlers(
+            handleData: (List<int> chunk, EventSink<List<int>> sink) {
+              for (final byte in chunk) {
+                if (byte == 10) {
+                  pendingBytes = 0;
+                } else if (++pendingBytes > frameLimit) {
+                  sink.addError(const FormatException('Session frame limit'));
+                  return;
+                }
+              }
+              sink.add(chunk);
+            },
+            handleDone: (EventSink<List<int>> sink) {
+              if (pendingBytes != 0) {
+                sink.addError(const FormatException('Truncated session frame'));
+              }
+              sink.close();
+            },
+          ),
+        );
+      }
       await for (final line
-          in socket
-              .cast<List<int>>()
-              .transform(utf8.decoder)
-              .transform(const LineSplitter())) {
-        final value = jsonDecode(line);
+          in input.transform(utf8.decoder).transform(const LineSplitter())) {
+        final value = frameLimit == null
+            ? jsonDecode(line)
+            : decodeProtocolObject(line, limit: frameLimit);
         if (value is! Map<String, dynamic> || value.containsKey('error')) {
           throw const FormatException('Session rejected request');
         }
@@ -48,6 +79,31 @@ class SessionCommandRunner extends CommandRunner {
       throw const FormatException('Invalid session response');
     }
     return rows.single;
+  }
+
+  @override
+  Future<NtfsTransactionResult> runNtfsTransaction(
+    ApprovedNtfsShrinkPlan approved,
+  ) async {
+    try {
+      NtfsTransactionResult? result;
+      await for (final value in _exchange({
+        'op': 'ntfs-transaction',
+        'approvedPlan': approved.json,
+      }, frameLimit: 16384)) {
+        if (result != null || !exactFields(value, {'result'})) {
+          throw const FormatException('Invalid NTFS session response');
+        }
+        result = NtfsTransactionResult.fromJson(
+          value['result'],
+          approved: approved,
+        );
+      }
+      return result ?? const NtfsTransactionResult.unknown();
+    } catch (_) {
+      // Never retry or log private worker stdout after a transport failure.
+      return const NtfsTransactionResult.unknown();
+    }
   }
 
   @override

@@ -200,5 +200,17 @@ class WorkerTests(unittest.TestCase):
                 if status:execute.assert_not_called();self.assertFalse(result['sourceMayHaveChanged'])
                 self.assertLess(len(output.getvalue().encode()),8192)
 
+    def test_unexpected_execute_exception_never_claims_no_source_change(self):
+        output=io.StringIO()
+        with mock.patch.object(worker,'os',proxy(os,geteuid=lambda:0)), \
+             mock.patch.object(worker,'sys',proxy(sys,argv=['worker','--execute'],
+                 stdin=SimpleNamespace(buffer=io.BytesIO(json.dumps(FRAME).encode())),stdout=output)), \
+             mock.patch.object(worker.core.ntfs,'restrict_limit'), \
+             mock.patch.object(worker,'execute',side_effect=ValueError('PRIVATE_NATIVE_DETAIL')):
+            self.assertEqual(worker.main(),2)
+        result=json.loads(output.getvalue())
+        self.assertFalse(result['progressKnown']);self.assertTrue(result['sourceMayHaveChanged'])
+        self.assertTrue(result['gptWriteStarted']);self.assertNotIn('PRIVATE_NATIVE_DETAIL',output.getvalue())
+
 
 if __name__=='__main__':unittest.main()

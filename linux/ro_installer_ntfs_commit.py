@@ -401,5 +401,51 @@ class BlockNtfsTransaction(BlockGptIo):
         raise error from None
 
 
+TRANSACTION_PHASES = frozenset({'admission','context','power','prepare','native','filesystem','gpt',
+    'gpt.prepare','gpt.backup','gpt.primary','gpt.verify','metadata-committed','cleanup',
+    'kernel.close','kernel.identity','kernel.reread','kernel.ready','kernel.source','kernel.cleanup'})
+
+
+def ntfs_unknown_outcome(*, started=True, cleanup_failed=False):
+    if type(started) is not bool or type(cleanup_failed) is not bool:
+        raise ValueError('Invalid NTFS outcome flags')
+    return {'schemaVersion':1, 'status':'failed', 'phase':'unknown' if started else 'admission',
+            'progressKnown':not started, 'sourceMayHaveChanged':started,
+            'gptWriteStarted':started, 'verifiedGptCopies':0, 'cleanupFailed':cleanup_failed}
+
+
+def normalize_ntfs_outcome(value, approved_plan, exit_code):
+    """Private terminal protocol; native/kernel safety still comes from worker."""
+    approved = gpt.normalize_ntfs_approval(approved_plan)
+    if (not isinstance(value, dict) or type(value.get('schemaVersion')) is not int
+            or value['schemaVersion'] != 1 or type(exit_code) is not int):
+        raise ValueError('Invalid NTFS outcome')
+    if value.get('status') == 'success':
+        if set(value) != {'schemaVersion','status','snapshot','preservationFingerprint'} or exit_code != 0:
+            raise ValueError('Invalid NTFS success terminal')
+        ownership = approved['approval']
+        snapshot = gpt.verify_ntfs_created_layout(approved['proposal'], ownership['rootGuid'],
+            ownership['preservationFingerprint'],
+            {'snapshot':value['snapshot'], 'preservationFingerprint':value['preservationFingerprint']})
+        if snapshot['tableFingerprint'] == approved['proposal']['snapshot']['tableFingerprint']:
+            raise ValueError('Stale NTFS table fingerprint')
+        return {'schemaVersion':1, 'status':'success', 'snapshot':snapshot,
+                'preservationFingerprint':ownership['preservationFingerprint']}
+    fields = {'schemaVersion','status','phase','progressKnown','sourceMayHaveChanged',
+              'gptWriteStarted','verifiedGptCopies','cleanupFailed'}
+    flags = ('progressKnown','sourceMayHaveChanged','gptWriteStarted','cleanupFailed')
+    if (set(value) != fields or value['status'] != 'failed' or exit_code != 2
+            or not isinstance(value['phase'], str) or value['phase'] not in TRANSACTION_PHASES | {'unknown'}
+            or any(type(value[name]) is not bool for name in flags)):
+        raise ValueError('Invalid NTFS failure terminal')
+    copies = gpt.integer(value['verifiedGptCopies'], 0, 2)
+    if ((not value['sourceMayHaveChanged'] and (value['gptWriteStarted'] or copies))
+            or (copies and not value['gptWriteStarted'])
+            or (not value['progressKnown'] and (value['phase'] != 'unknown'
+                or not value['sourceMayHaveChanged'] or not value['gptWriteStarted'] or copies))):
+        raise ValueError('Contradictory NTFS failure progress')
+    return {**value, 'verifiedGptCopies':copies}
+
+
 if __name__ == '__main__':
     raise SystemExit(2)

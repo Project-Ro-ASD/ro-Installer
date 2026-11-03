@@ -1,0 +1,431 @@
+{
+  "failures": [
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "admission",
+      "progressKnown": true,
+      "sourceMayHaveChanged": false,
+      "gptWriteStarted": false,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "cleanup",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 2,
+      "cleanupFailed": true
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "context",
+      "progressKnown": true,
+      "sourceMayHaveChanged": false,
+      "gptWriteStarted": false,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "filesystem",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": false,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "gpt",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": false,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "gpt.backup",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "gpt.prepare",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": false,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "gpt.primary",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 1,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "gpt.verify",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 2,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "kernel.cleanup",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 2,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "kernel.close",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 2,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "kernel.identity",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 2,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "kernel.ready",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 2,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "kernel.reread",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 2,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "kernel.source",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 2,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "metadata-committed",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 2,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "native",
+      "progressKnown": true,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": false,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "power",
+      "progressKnown": true,
+      "sourceMayHaveChanged": false,
+      "gptWriteStarted": false,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "prepare",
+      "progressKnown": true,
+      "sourceMayHaveChanged": false,
+      "gptWriteStarted": false,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    },
+    {
+      "schemaVersion": 1,
+      "status": "failed",
+      "phase": "unknown",
+      "progressKnown": false,
+      "sourceMayHaveChanged": true,
+      "gptWriteStarted": true,
+      "verifiedGptCopies": 0,
+      "cleanupFailed": false
+    }
+  ],
+  "invalid": [
+    {
+      "name": "progressKnown-number",
+      "base": "failure",
+      "path": [
+        "progressKnown"
+      ],
+      "value": 1,
+      "op": "set"
+    },
+    {
+      "name": "sourceMayHaveChanged-number",
+      "base": "failure",
+      "path": [
+        "sourceMayHaveChanged"
+      ],
+      "value": 1,
+      "op": "set"
+    },
+    {
+      "name": "gptWriteStarted-number",
+      "base": "failure",
+      "path": [
+        "gptWriteStarted"
+      ],
+      "value": 1,
+      "op": "set"
+    },
+    {
+      "name": "cleanupFailed-number",
+      "base": "failure",
+      "path": [
+        "cleanupFailed"
+      ],
+      "value": 1,
+      "op": "set"
+    },
+    {
+      "name": "copies-boolean",
+      "base": "failure",
+      "path": [
+        "verifiedGptCopies"
+      ],
+      "value": true,
+      "op": "set"
+    },
+    {
+      "name": "copies-high",
+      "base": "failure",
+      "path": [
+        "verifiedGptCopies"
+      ],
+      "value": 3,
+      "op": "set"
+    },
+    {
+      "name": "copies-float",
+      "base": "failure",
+      "path": [
+        "verifiedGptCopies"
+      ],
+      "value": 1.0,
+      "op": "set"
+    },
+    {
+      "name": "false-source-table",
+      "base": "failure",
+      "path": [
+        "sourceMayHaveChanged"
+      ],
+      "value": false,
+      "op": "set"
+    },
+    {
+      "name": "false-table-copies",
+      "base": "failure",
+      "path": [
+        "gptWriteStarted"
+      ],
+      "value": false,
+      "op": "set"
+    },
+    {
+      "name": "unknown-phase-label",
+      "base": "failure",
+      "path": [
+        "phase"
+      ],
+      "value": "PRIVATE_LABEL",
+      "op": "set"
+    },
+    {
+      "name": "unknown-field",
+      "base": "failure",
+      "path": [
+        "device"
+      ],
+      "value": "/dev/other",
+      "op": "set"
+    },
+    {
+      "name": "missing-field",
+      "base": "failure",
+      "path": [
+        "phase"
+      ],
+      "value": null,
+      "op": "remove"
+    },
+    {
+      "name": "schema-boolean",
+      "base": "failure",
+      "path": [
+        "schemaVersion"
+      ],
+      "value": true,
+      "op": "set"
+    },
+    {
+      "name": "unknown-has-copies",
+      "base": "unknown",
+      "path": [
+        "verifiedGptCopies"
+      ],
+      "value": 1,
+      "op": "set"
+    },
+    {
+      "name": "unknown-hides-source",
+      "base": "unknown",
+      "path": [
+        "sourceMayHaveChanged"
+      ],
+      "value": false,
+      "op": "set"
+    },
+    {
+      "name": "unknown-hides-table",
+      "base": "unknown",
+      "path": [
+        "gptWriteStarted"
+      ],
+      "value": false,
+      "op": "set"
+    },
+    {
+      "name": "unknown-phase",
+      "base": "unknown",
+      "path": [
+        "phase"
+      ],
+      "value": "native",
+      "op": "set"
+    },
+    {
+      "name": "success-proof",
+      "base": "success",
+      "path": [
+        "preservationFingerprint"
+      ],
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "op": "set"
+    },
+    {
+      "name": "success-source",
+      "base": "success",
+      "path": [
+        "snapshot",
+        "partitions",
+        1,
+        "endSector"
+      ],
+      "value": 1,
+      "op": "set"
+    },
+    {
+      "name": "success-identity",
+      "base": "success",
+      "path": [
+        "snapshot",
+        "device",
+        "diskSequence"
+      ],
+      "value": 99,
+      "op": "set"
+    },
+    {
+      "name": "success-extra",
+      "base": "success",
+      "path": [
+        "phase"
+      ],
+      "value": "complete",
+      "op": "set"
+    },
+    {
+      "name": "success-schema-float",
+      "base": "success",
+      "path": [
+        "schemaVersion"
+      ],
+      "value": 1.0,
+      "op": "set"
+    },
+    {
+      "name": "success-root-guid",
+      "base": "success",
+      "path": [
+        "snapshot",
+        "partitions",
+        2,
+        "partitionGuid"
+      ],
+      "value": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "op": "set"
+    },
+    {
+      "name": "success-stale-fingerprint",
+      "base": "success",
+      "path": [
+        "snapshot",
+        "tableFingerprint"
+      ],
+      "value": "a0139e95a676fc722cdfcee07e0e59ae0fd4fc52ef7d6e5dab3c87f52682f1ed",
+      "op": "set"
+    }
+  ]
+}
