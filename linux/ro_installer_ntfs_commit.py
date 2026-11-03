@@ -1,17 +1,31 @@
 #!/usr/bin/python3 -I
-"""Private GPT commit building block. No CLI, filesystem or write admission.
+"""Private NTFS/GPT composition. No CLI or installation admission.
 
-Caller must establish NTFS post-state, source identity, namespace and lease.
-Only the fixed transaction worker may compose this with installation admission.
+Caller owns namespace, trusted lease and exclusive source claim. Metadata
+commit alone never authorizes kernel transition or root formatting.
 """
 import fcntl
 import importlib.util
 import os
+import re
+import stat
+import struct
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location('ro_commit_gpt', Path(__file__).with_name('ro_installer_gpt.py'))
 gpt = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gpt)
+
+
+def _companion(name):
+    spec = importlib.util.spec_from_file_location('ro_commit_' + name,
+        Path(__file__).with_name('ro_installer_' + name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ntfs, manual = _companion('ntfs'), _companion('manual')
 
 
 class GptCommitError(RuntimeError):
@@ -124,6 +138,115 @@ def commit_ntfs_gpt(io, proposal, root_guid, preservation_fingerprint):
     except Exception:
         # No raw metadata, native diagnostics or paths cross the error boundary.
         raise GptCommitError(phase, write_started, verified_copies) from None
+
+
+class NtfsTransactionError(RuntimeError):
+    def __init__(self, phase, source_may_have_changed, gpt_write_started=False,
+                 verified_gpt_copies=0, cleanup_failed=False):
+        super().__init__('NTFS_TRANSACTION_FAILED')
+        self.phase = phase
+        self.source_may_have_changed = source_may_have_changed
+        self.gpt_write_started = gpt_write_started
+        self.verified_gpt_copies = verified_gpt_copies
+        self.cleanup_failed = cleanup_failed
+
+
+def _source_binding(reader, writer, proposal):
+    before = proposal['snapshot']
+    source = next(part for part in before['partitions'] if part['number'] == proposal['sourceNumber'])
+    observed = []
+    for fd, mode in ((reader, os.O_RDONLY), (writer, os.O_RDWR)):
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        if flags & os.O_ACCMODE != mode or flags & (os.O_PATH | os.O_APPEND):
+            raise ValueError('Invalid source access')
+        observed.append(manual.partition_descriptor(before, source, fd))
+        sector = struct.unpack('=I', fcntl.ioctl(fd, 0x1268, bytes(4)))[0]
+        if sector != before['logicalSectorBytes']: raise ValueError('Source sector changed')
+    if observed[0] != observed[1]: raise ValueError('Source descriptions disagree')
+
+
+def resize_and_commit_ntfs(io, proposal, root_guid, preservation_fingerprint,
+                           inspection_fingerprint, preparation_fingerprint,
+                           source_read_fd, source_write_fd, lease_fd):
+    """Private composition through metadata commit, never kernel-ready admission.
+
+    Caller owns the trusted session/namespace/lease, exclusive source claim and
+    whole-disk IO. All original partition descriptions must close before any
+    kernel reread. This function owns only duplicates, never repairs or retries,
+    and returns a verified GPT snapshot rather than installation targets.
+    """
+    phase, changed, table_started, copies, cleanup_failed = 'prepare', False, False, 0, False
+    descriptors, result, error = [], None, None
+    try:
+        if (any(type(fd) is not int or fd < 3 for fd in (source_read_fd, source_write_fd, lease_fd))
+                or len({source_read_fd, source_write_fd, lease_fd}) != 3
+                or os.environ.get('RO_INSTALLER_LEASE_FD') != str(lease_fd)
+                or not stat.S_ISREG(os.fstat(lease_fd).st_mode)
+                or any(not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value)
+                       for value in (inspection_fingerprint, preparation_fingerprint))):
+            raise ValueError('Invalid transaction binding')
+        proposal = dict(proposal, snapshot=gpt.normalize_snapshot(proposal['snapshot']))
+        plan = gpt.ntfs_shrink_plan(proposal)
+        before = proposal['snapshot']; sector = before['logicalSectorBytes']
+        size = (plan['source']['endSector'] - plan['source']['startSector'] + 1) * sector
+        target = plan['source']['retainedBytes']
+        if type(io.sector) is not int or io.sector != sector or gpt.identity(io.device) != before['device']:
+            raise ValueError('Transaction IO differs from approved device')
+        def guarded():
+            if io.guard() is not True: raise ValueError('Transaction context refused')
+        guarded()
+        for fd in (source_read_fd, source_write_fd):
+            descriptors.append(fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 3))
+        reader, writer = descriptors
+        def bound():
+            guarded(); _source_binding(reader, writer, proposal)
+        bound()
+        patches = gpt.ntfs_gpt_update_plan(io.read, proposal, root_guid, preservation_fingerprint)
+        original_boot = ntfs.boot_sector(reader, size, sector)[0]
+        preparation = ntfs.prepare_resize_target(reader, size, sector, target, inspection_fingerprint)
+        if preparation['preparationFingerprint'] != preparation_fingerprint:
+            raise ValueError('Target preparation changed')
+        bound()
+        if (ntfs.boot_sector(reader, size, sector)[0] != original_boot
+                or gpt.ntfs_gpt_update_plan(io.read, proposal, root_guid, preservation_fingerprint) != patches):
+            raise ValueError('Transaction preimage changed')
+        phase, changed = 'native', True
+        try:
+            if ntfs.run_native_resize(writer, size, sector, target, lease_fd) is not True:
+                raise ValueError('Native writer did not complete')
+        except ntfs.NativeResizeError as failure:
+            changed, cleanup_failed = failure.started, failure.cleanup_failed
+            raise
+        phase = 'filesystem'
+        bound()
+        ntfs.inspect_resized_fd(reader, size, target, sector, original_boot)
+        bound()
+        phase = 'gpt'
+        class BoundIo:
+            device, sector = io.device, io.sector
+            read, write, flush = staticmethod(io.read), staticmethod(io.write), staticmethod(io.flush)
+            def guard(self):
+                bound()
+                return True
+        try:
+            result = commit_ntfs_gpt(BoundIo(), proposal, root_guid, preservation_fingerprint)
+            table_started, copies = True, 2
+        except GptCommitError as failure:
+            table_started, copies = failure.write_started, failure.verified_copies
+            cleanup_failed = cleanup_failed or failure.cleanup_failed
+            phase = 'gpt.' + failure.phase
+            raise
+        phase = 'metadata-committed'
+    except Exception:
+        error = NtfsTransactionError(phase, changed, table_started, copies, cleanup_failed)
+    finally:
+        for fd in descriptors:
+            try: os.close(fd)
+            except OSError:
+                if error is None: error = NtfsTransactionError('cleanup', changed, table_started, copies, True)
+                else: error.cleanup_failed = True
+    if error is not None: raise error from None
+    return result
 
 
 if __name__ == '__main__':

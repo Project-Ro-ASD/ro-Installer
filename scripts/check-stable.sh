@@ -105,6 +105,8 @@ run_check "private NTFS GPT commit ordering and partial-failure handling" \
   python3 -B test/scripts/ntfs_gpt_commit_test.py
 run_check "pure NTFS GPT update patches and independent normal-file parsing" \
   python3 -B test/scripts/ntfs_gpt_update_plan_test.py
+run_check "NTFS preparation/native/post-state/GPT transaction failure boundaries" \
+  python3 -B test/scripts/ntfs_transaction_test.py
 run_check "cross-language NTFS shrink geometry and free-space preference" \
   python3 -B test/scripts/ntfs_shrink_plan_test.py
 run_check "manual installation admission and read-only filesystem checks" \
