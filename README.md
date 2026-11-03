@@ -411,6 +411,16 @@ terminal carries this typed layout; failed, unknown and not-started terminals
 expose no layout or snapshot. Standalone GPT ownership remains separate from
 the guarded worker's filesystem/kernel validation and stage admission.
 
+The verified mount session accepts typed NTFS ESP inspection and created-layout
+bindings through the same protected EFI implementation used by manual installs.
+The read-only probe must close and its capacity/namespace checks must match the
+exact NTFS approval before binding. Starting NTFS inspection locks out legacy
+full-disk mount fallbacks even if preflight fails; only the verified new root and
+preserved ESP become mount targets after binding. The EFI base remains read-only,
+with only the installer-owned subtree writable and no staging view left behind.
+Filesystem health/UUID admission, guarded worker success and installation-stage
+integration remain separate prerequisites; this API does not enable a public mode.
+
 The fixed read-only GPT probe also carries the NTFS-specific preservation proof
 through `--ntfs-layout`. It accepts only distinct source/root slot numbers,
 verifies both GPT copies twice and checks kernel layout and device geometry
