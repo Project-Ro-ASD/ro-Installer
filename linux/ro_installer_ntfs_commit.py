@@ -4,12 +4,14 @@
 Caller owns namespace, trusted lease and exclusive source claim. Metadata
 commit alone never authorizes kernel transition or root formatting.
 """
+from collections import namedtuple
 import fcntl
 import importlib.util
 import os
 import re
 import stat
 import struct
+import time
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location('ro_commit_gpt', Path(__file__).with_name('ro_installer_gpt.py'))
@@ -140,6 +142,9 @@ def commit_ntfs_gpt(io, proposal, root_guid, preservation_fingerprint):
         raise GptCommitError(phase, write_started, verified_copies) from None
 
 
+MetadataCommit = namedtuple('MetadataCommit', 'snapshot original_boot filesystem')
+
+
 class NtfsTransactionError(RuntimeError):
     def __init__(self, phase, source_may_have_changed, gpt_write_started=False,
                  verified_gpt_copies=0, cleanup_failed=False):
@@ -173,7 +178,8 @@ def resize_and_commit_ntfs(io, proposal, root_guid, preservation_fingerprint,
     Caller owns the trusted session/namespace/lease, exclusive source claim and
     whole-disk IO. All original partition descriptions must close before any
     kernel reread. This function owns only duplicates, never repairs or retries,
-    and returns a verified GPT snapshot rather than installation targets.
+    and returns private boot/post-state provenance with the GPT snapshot.
+    This provenance is not a public protocol payload or installation target.
     """
     phase, changed, table_started, copies, cleanup_failed = 'prepare', False, False, 0, False
     descriptors, result, error = [], None, None
@@ -219,7 +225,7 @@ def resize_and_commit_ntfs(io, proposal, root_guid, preservation_fingerprint,
             raise
         phase = 'filesystem'
         bound()
-        ntfs.inspect_resized_fd(reader, size, target, sector, original_boot)
+        filesystem = ntfs.inspect_resized_fd(reader, size, target, sector, original_boot)
         bound()
         phase = 'gpt'
         class BoundIo:
@@ -246,7 +252,153 @@ def resize_and_commit_ntfs(io, proposal, root_guid, preservation_fingerprint,
                 if error is None: error = NtfsTransactionError('cleanup', changed, table_started, copies, True)
                 else: error.cleanup_failed = True
     if error is not None: raise error from None
-    return result
+    return MetadataCommit(result, original_boot, filesystem)
+
+
+KERNEL_TIMEOUT = 5
+
+
+class BlockNtfsTransaction(BlockGptIo):
+    """Own every source description through metadata and kernel transitions.
+
+    Caller supplies the whole-disk descriptor and trusted context guard, which
+    must retain the installer lease and private namespace. No public admission.
+    """
+    def __init__(self, whole_fd, proposal, assert_context):
+        self._proposal = dict(proposal, snapshot=gpt.normalize_snapshot(proposal['snapshot']))
+        self._plan = gpt.ntfs_shrink_plan(self._proposal)
+        self._reader = self._writer = self._fresh_reader = None
+        self._state = 'opening'
+        self._progress = (False, False, 0)
+        self._cleanup_failed = False
+        self._context = assert_context
+        before = self._proposal['snapshot']
+        super().__init__(whole_fd, before['device'], before['logicalSectorBytes'], self._source_guard)
+        try:
+            if not self.guard(): raise ValueError('Transaction context refused')
+            gpt.verify_kernel_layout(before)
+            source = next(p for p in before['partitions'] if p['number'] == self._proposal['sourceNumber'])
+            path, number = manual.partition_descriptor(before, source)
+            self._writer = os.open(path, os.O_RDWR | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+            if manual.partition_descriptor(before, source, self._writer) != (path, number):
+                raise ValueError('Source changed during open')
+            self._reader = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+            self._state = 'open'
+            if not self.guard(): raise ValueError('Source binding refused')
+        except BaseException:
+            try: self.close()
+            except OSError: pass
+            raise
+
+    def _source_guard(self):
+        if self._context() is not True: return False
+        if self._state in ('opening', 'kernel', 'ready'): return True
+        if self._state not in ('open', 'running'): return False
+        if self._reader is None or self._writer is None: return False
+        _source_binding(self._reader, self._writer, self._proposal)
+        return True
+
+    def close_sources(self):
+        error = None
+        for name in ('_reader', '_writer', '_fresh_reader'):
+            fd = getattr(self, name)
+            setattr(self, name, None)
+            if fd is not None:
+                try: os.close(fd)
+                except OSError as failure:
+                    if error is None: error = failure
+        if error is not None: raise error
+
+    def close(self):
+        self._state = 'closed'
+        error = None
+        try: self.close_sources()
+        except OSError as failure: error = failure
+        try: super().close()
+        except OSError as failure:
+            if error is None: error = failure
+        if error is not None:
+            self._cleanup_failed = True
+            raise error
+
+    def __exit__(self, kind, error, traceback):
+        try: self.close()
+        except OSError:
+            if error is None: raise NtfsTransactionError('cleanup', *self._progress, True) from None
+            if isinstance(error, (GptCommitError, NtfsTransactionError)): error.cleanup_failed = True
+
+    def run(self, root_guid, preservation_fingerprint, inspection_fingerprint, preparation_fingerprint, lease_fd):
+        if self._state != 'open': raise NtfsTransactionError('admission', *self._progress, self._cleanup_failed)
+        self._state = 'running'
+        self._progress = (True, False, 0)
+        phase, error, metadata = 'prepare', None, None
+        try:
+            metadata = resize_and_commit_ntfs(self, self._proposal, root_guid, preservation_fingerprint,
+                inspection_fingerprint, preparation_fingerprint, self._reader, self._writer, lease_fd)
+            self._progress = (True, True, 2)
+            phase = 'kernel.close'
+            self.close_sources()
+            self._state = 'kernel'
+            phase = 'kernel.identity'
+            if not self.guard(): raise ValueError('Kernel context refused')
+            phase = 'kernel.reread'
+            fcntl.ioctl(self.fd, 0x125f)  # BLKRRPART: fixed request through held whole FD.
+            phase = 'kernel.ready'
+            before = self._proposal['snapshot']; sector = self.sector
+            def exact_table():
+                if not self.guard(): raise ValueError('Kernel identity refused')
+                observed = gpt.verified_ntfs_snapshot(self.read, self.device, sector,
+                    self._proposal['sourceNumber'], self._plan['root']['number'])
+                final = gpt.verify_ntfs_created_layout(self._proposal, root_guid, preservation_fingerprint, observed)
+                if final != metadata.snapshot: raise ValueError('Committed GPT changed')
+                return final
+            deadline = time.monotonic() + KERNEL_TIMEOUT
+            while True:
+                final = exact_table()
+                try:
+                    gpt.verify_kernel_layout(final)
+                    break
+                except (ValueError, OSError):
+                    if time.monotonic() >= deadline: raise
+                    time.sleep(min(.05, max(0, deadline - time.monotonic())))
+            phase = 'kernel.source'
+            source = next(p for p in final['partitions'] if p['number'] == self._proposal['sourceNumber'])
+            path, number = manual.partition_descriptor(final, source)
+            self._fresh_reader = os.open(path, os.O_RDONLY | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+            def source_bound():
+                if (manual.partition_descriptor(final, source, self._fresh_reader) != (path, number)
+                        or struct.unpack('=I', fcntl.ioctl(self._fresh_reader, 0x1268, bytes(4)))[0] != sector):
+                    raise ValueError('Refreshed source changed')
+            source_bound()
+            old_size = (self._plan['source']['endSector'] - self._plan['source']['startSector'] + 1) * sector
+            target = self._plan['source']['retainedBytes']
+            after = ntfs.inspect_resized_fd(self._fresh_reader, old_size, target, sector,
+                metadata.original_boot, partition_bytes=target)
+            if any(after[key] != metadata.filesystem[key] for key in
+                   ('schemaVersion','volumeBytes','clusterBytes','minimumBytes','targetBytes')):
+                raise ValueError('Refreshed filesystem differs from committed state')
+            source_bound()
+            if exact_table() != final: raise ValueError('Final table changed')
+            gpt.verify_kernel_layout(final)
+            phase = 'kernel.cleanup'
+            self.close_sources()
+            self._state = 'ready'
+            return final
+        except NtfsTransactionError as failure:
+            error = failure
+        except Exception:
+            error = NtfsTransactionError(phase, metadata is not None, metadata is not None,
+                2 if metadata is not None else 0, phase in ('kernel.close', 'kernel.cleanup'))
+        finally:
+            if self._state != 'ready':
+                self._state = 'failed'
+                if error is not None:
+                    self._progress = (error.source_may_have_changed, error.gpt_write_started, error.verified_gpt_copies)
+                try: self.close_sources()
+                except OSError:
+                    if error is not None: error.cleanup_failed = True
+                if error is not None: self._cleanup_failed = error.cleanup_failed
+        raise error from None
 
 
 if __name__ == '__main__':

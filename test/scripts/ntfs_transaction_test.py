@@ -84,9 +84,11 @@ class TransactionTests(unittest.TestCase):
                 result=self.invoke(c)
                 self.assertEqual(c.events,['prepare','native','post']+['gpt']*4)
                 self.assertEqual(c.io.flushes,2)
+                self.assertEqual(result.original_boot,b'original-boot')
+                self.assertEqual(result.filesystem,{'inspectionFingerprint':'c'*64})
                 self.assertEqual(os.pread(c.reader,8,0),b'resized!')
                 final=core.gpt.verified_ntfs_snapshot(c.io.read,c.io.device,sector,2,3)
-                self.assertEqual(result,core.gpt.verify_ntfs_created_layout(c.p,ROOT_GUID,c.initial['preservationFingerprint'],final))
+                self.assertEqual(result.snapshot,core.gpt.verify_ntfs_created_layout(c.p,ROOT_GUID,c.initial['preservationFingerprint'],final))
                 self.assertEqual(final['preservationFingerprint'],c.initial['preservationFingerprint'])
                 target=core.gpt.ntfs_shrink_plan(c.p)['source']['retainedBytes']
                 self.assertEqual(c.resize.call_args.args[3],target)
@@ -236,7 +238,7 @@ class TransactionTests(unittest.TestCase):
             with mock.patch.object(core.manual,'partition_descriptor',side_effect=partition):
                 result=self.invoke(c)
             final=core.gpt.verified_ntfs_snapshot(c.io.read,c.io.device,c.io.sector,2,3)
-            self.assertEqual(result,core.gpt.verify_ntfs_created_layout(approved,ROOT_GUID,c.initial['preservationFingerprint'],final))
+            self.assertEqual(result.snapshot,core.gpt.verify_ntfs_created_layout(approved,ROOT_GUID,c.initial['preservationFingerprint'],final))
 
 
 if __name__=='__main__':unittest.main()
