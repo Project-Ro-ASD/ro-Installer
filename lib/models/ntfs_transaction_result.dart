@@ -5,7 +5,7 @@ import 'gpt_disk_snapshot.dart';
 /// Private worker terminal state; an unknown transport never proves no mutation.
 final class NtfsTransactionResult {
   const NtfsTransactionResult._(
-    this.snapshot,
+    this.createdLayout,
     this.phase,
     this.progressKnown,
     this.sourceMayHaveChanged,
@@ -35,14 +35,15 @@ final class NtfsTransactionResult {
     'kernel.cleanup',
     'unknown',
   };
-  final GptDiskSnapshot? snapshot;
+  final CreatedNtfsLayout? createdLayout;
+  GptDiskSnapshot? get snapshot => createdLayout?.snapshot;
   final String phase;
   final bool progressKnown,
       sourceMayHaveChanged,
       gptWriteStarted,
       cleanupFailed;
   final int verifiedGptCopies;
-  bool get succeeded => snapshot != null;
+  bool get succeeded => createdLayout != null;
 
   const NtfsTransactionResult.unknown()
     : this._(null, 'unknown', false, true, true, 0, false);
@@ -69,15 +70,16 @@ final class NtfsTransactionResult {
         throw const FormatException('Invalid NTFS success terminal');
       }
       final snapshot = GptDiskSnapshot.fromJson(input['snapshot']);
-      if (snapshot.tableFingerprint == approved.plan.snapshot.tableFingerprint) {
+      if (snapshot.tableFingerprint ==
+          approved.plan.snapshot.tableFingerprint) {
         throw const FormatException('Stale NTFS table fingerprint');
       }
-      approved.verifyCreated(
+      final created = approved.verifyCreated(
         snapshot,
         input['preservationFingerprint'] as String,
       );
       return NtfsTransactionResult._(
-        snapshot,
+        created,
         'complete',
         true,
         true,

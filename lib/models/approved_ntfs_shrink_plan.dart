@@ -85,7 +85,7 @@ final class ApprovedNtfsShrinkPlan {
       samePlanValue(state['_approvedNtfsPlan'], json);
 
   /// GPT ownership only: worker filesystem/kernel checks remain mandatory.
-  void verifyCreated(GptDiskSnapshot current, String proof) {
+  CreatedNtfsLayout verifyCreated(GptDiskSnapshot current, String proof) {
     if (proof != preservationFingerprint) {
       throw const FormatException('Protected GPT metadata changed');
     }
@@ -121,5 +121,22 @@ final class ApprovedNtfsShrinkPlan {
         })) {
       throw const FormatException('NTFS root ownership mismatch');
     }
+    return CreatedNtfsLayout._(this, current);
   }
+}
+
+/// Exact GPT ownership only; guarded worker filesystem/kernel checks are separate.
+final class CreatedNtfsLayout {
+  const CreatedNtfsLayout._(this.approved, this.snapshot);
+  final ApprovedNtfsShrinkPlan approved;
+  final GptDiskSnapshot snapshot;
+  String _partition(int number) {
+    final disk = approved.plan.snapshot.device.path;
+    return '$disk${RegExp(r'[0-9]$').hasMatch(disk) ? 'p' : ''}$number';
+  }
+
+  String get rootPath => _partition(approved.plan.rootNumber);
+  String get espPath => _partition(approved.plan.esp.number);
+  String get sourcePath => _partition(approved.plan.source.number);
+  bool get reusesEsp => true;
 }

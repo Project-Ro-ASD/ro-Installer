@@ -405,6 +405,12 @@ identity and policy. A preparation fingerprint remains a claim until the guarded
 worker independently reproduces it before mutation. This contract adds no public
 installation operation.
 
+Exact post-resize GPT ownership resolves source, reused ESP and new root targets
+from the approved disk and verified partition numbers. A successful private NTFS
+terminal carries this typed layout; failed, unknown and not-started terminals
+expose no layout or snapshot. Standalone GPT ownership remains separate from
+the guarded worker's filesystem/kernel validation and stage admission.
+
 The fixed read-only GPT probe also carries the NTFS-specific preservation proof
 through `--ntfs-layout`. It accepts only distinct source/root slot numbers,
 verifies both GPT copies twice and checks kernel layout and device geometry
