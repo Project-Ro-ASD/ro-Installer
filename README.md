@@ -284,6 +284,17 @@ requires a writable block FD with matching geometry/sequence. The caller must
 establish filesystem post-state, namespace and lease; this module has no CLI or
 installation admission.
 
+A private `resize_and_commit_ntfs` core composes target preparation, native
+resize, independent post-state inspection and GPT commit. It owns duplicates of
+separate read-only/writable source descriptions, checks their kernel identity and
+sector geometry at each boundary, and rechecks the exact GPT preimage before
+native start. Preparation must match the approved fingerprint. No GPT writes
+occur before successful source flush and filesystem validation. Canonical errors
+retain possible source modification and partial GPT progress without repair,
+retry or rollback. The returned snapshot proves metadata commit only: callers
+must close all original partition descriptions, refresh the kernel table and
+verify the shorter source before exposing installation targets.
+
 ### Read-only NTFS inspection primitive
 
 The root-only `ro_installer_ntfs.py` worker accepts an inherited read-only block
