@@ -29,6 +29,9 @@ BACKEND = ('/usr/libexec/ro-installer-backend', '--privileged-backend-v1')
 AUTO = ('/usr/bin/ro-installer',)
 SESSION_ENV = 'RO_INSTALLER_SESSION_SOCKET'
 ROOT_ENV = {'PATH':'/usr/sbin:/usr/bin','LC_ALL':'C','HOME':'/root'}
+NTFS_WORKER = ('/usr/bin/python3','-I','/usr/libexec/ro_installer_ntfs_transaction.py','--execute')
+NTFS_OPERATION_TIMEOUT = 2 * 60 * 60 + 15 * 60
+NTFS_SESSION_TIMEOUT = 3 * 60 * 60
 AUTO_ENV = ('RO_INSTALLER_AUTO_PROFILE','RO_INSTALLER_VM_TEST_MODE',
             'RO_INSTALLER_EXTRA_KERNEL_ARGS','RO_INSTALLER_AUTO_REBOOT','DISPLAY','WAYLAND_DISPLAY',
             'XAUTHORITY','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS',
@@ -268,6 +271,9 @@ class Supervisor:
         self.stop = threading.Event()
         self.threads = []
         self.serial = threading.Lock()
+        self.storage_condition = threading.Condition()
+        self.storage_active = self.storage_failed = self.ntfs_attempted = False
+        self.storage_accepting = True
         self.engine = None
         self.expected = None
         self.system = gate.System()
@@ -323,6 +329,8 @@ class Supervisor:
                         emit({'device':identity.public()})
                     elif op == 'idle' and set(request) == {'op'}:
                         emit({'idle':descendants(os.getpid()) == {self.engine.pid}})
+                    elif op == 'ntfs-transaction' and set(request) == {'op','approvedPlan'}:
+                        self.ntfs_transaction(request['approvedPlan'], emit)
                     elif op == 'observe' and set(request) == {'op','event'}:
                         recorded=False
                         if self.recorder is not None:
@@ -346,6 +354,110 @@ class Supervisor:
                     pass
             finally:
                 stream.close()
+
+    def ntfs_transaction(self, approved_plan, emit):
+        """Drain a dedicated storage worker even if its engine/socket disappears."""
+        spec = importlib.util.spec_from_file_location('ro_session_ntfs',
+            Path(__file__).with_name('ro_installer_ntfs_commit.py'))
+        core = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(core)
+        process, threads, output = None, [], bytearray()
+        errors, cleanup_errors = threading.Event(), threading.Event()
+        result = core.ntfs_unknown_outcome(started=False)
+        measured = time.monotonic()
+        deadline, code, leaked = measured + NTFS_OPERATION_TIMEOUT, -1, False
+        with self.storage_condition:
+            if self.stop.is_set() or not self.storage_accepting or self.ntfs_attempted or self.storage_failed:
+                self.storage_failed = True
+                raise RuntimeError('storage session cannot start')
+            self.ntfs_attempted = self.storage_active = True
+        try:
+            approved = core.gpt.normalize_ntfs_approval(approved_plan)
+            device = approved['proposal']['snapshot']['device']
+            if (self.expected is None or self.expected.public() != device
+                    or self.gate.validate_device(self.system, device['path']) != self.expected):
+                raise RuntimeError('storage target changed')
+            encoded = json.dumps({'namespace':self.namespace,'parentNamespace':self.before,
+                'approvedPlan':approved}, separators=(',',':')).encode()
+            if len(encoded) > 16384: raise RuntimeError('storage frame limit')
+            process = subprocess.Popen(NTFS_WORKER, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, close_fds=True, pass_fds=(self.lease,), env=ROOT_ENV,
+                start_new_session=True)
+            def read(pipe, capture):
+                try:
+                    while chunk := os.read(pipe.fileno(), 4096):
+                        if not capture or len(output) + len(chunk) > 8192:
+                            errors.set()  # Drain, never log diagnostics or cancel a writer.
+                        else: output.extend(chunk)
+                except OSError: errors.set()
+                finally:
+                    try: pipe.close()
+                    except OSError: cleanup_errors.set()
+            def write():
+                try:
+                    process.stdin.write(encoded)
+                    process.stdin.flush()
+                except OSError: errors.set()
+                finally:
+                    try: process.stdin.close()
+                    except OSError: cleanup_errors.set()
+            threads = [threading.Thread(target=read,args=(process.stdout,True)),
+                       threading.Thread(target=read,args=(process.stderr,False)),threading.Thread(target=write)]
+            for thread in threads: thread.start()
+        except Exception:
+            errors.set()
+            if process is not None and (len(threads) < 3 or threads[-1].ident is None):
+                # No stdin writer started: EOF lets the fixed worker refuse its
+                # empty/incomplete frame without waiting out the write budget.
+                try: process.stdin.close()
+                except OSError: cleanup_errors.set()
+        finally:
+            if process is not None:
+                try:
+                    interrupted = False
+                    while True:
+                        try:
+                            code = process.wait(timeout=None if interrupted else max(.01, deadline-time.monotonic()))
+                            if interrupted: code = -124
+                            break
+                        except subprocess.TimeoutExpired:
+                            interrupted = True
+                            errors.set()
+                            try: process.kill()
+                            except OSError: cleanup_errors.set()
+                        except OSError:
+                            cleanup_errors.set()
+                            if time.monotonic() >= deadline:
+                                interrupted = True
+                                try: process.kill()
+                                except OSError: pass
+                            time.sleep(.01)
+                    leaked = kill_owned_children(exclude=(self.engine.pid,))
+                    if leaked: errors.set()
+                    for thread in threads:
+                        if thread.ident is not None: thread.join()
+                    for stream in (process.stdin,process.stdout,process.stderr):
+                        if not stream.closed: stream.close()
+                    if not errors.is_set() and not cleanup_errors.is_set():
+                        value = json.loads(bytes(output).decode('utf-8'),object_pairs_hook=self.gate.unique_object,
+                            parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite terminal')))
+                        result = core.normalize_ntfs_outcome(value, approved, code)
+                    else: result = core.ntfs_unknown_outcome(cleanup_failed=leaked or cleanup_errors.is_set())
+                except Exception:
+                    result = core.ntfs_unknown_outcome(cleanup_failed=leaked or cleanup_errors.is_set())
+            with self.storage_condition:
+                self.storage_failed = self.storage_failed or errors.is_set() or result['status'] != 'success'
+                self.storage_active = False
+                self.storage_condition.notify_all()
+            try: emit({'result':result})
+            except Exception:
+                errors.set()
+                with self.storage_condition: self.storage_failed = True
+            record_event(self.recorder,'command.end',operation='unclassified',
+                status='failed' if self.storage_failed else 'success',
+                duration=min(86400000,max(0,int((time.monotonic()-measured)*1000))),
+                code=code if not errors.is_set() and not cleanup_errors.is_set() else -126,
+                error='COMMAND_FAILED' if self.storage_failed else None)
 
     def command(self, request, emit):
         if set(request) != {'op','command','args','stdin','timeoutMs'}:
@@ -415,24 +527,40 @@ class Supervisor:
         record_event(self.recorder,'span.start',operation='engine',duration=0)
         server=threading.Thread(target=self.serve)
         server.start()
+        measured=time.monotonic()
+        status,leaked=9,False
         try:
             try:
                 status=self.engine.wait(timeout=self.gate.BACKEND_TIMEOUT)
             except subprocess.TimeoutExpired:
-                self.engine.kill()
-                self.engine.wait()
-                status=9
-            leaked=bool(descendants(os.getpid()))
-            return status if not leaked else 9
+                with self.storage_condition:
+                    extended=self.ntfs_attempted
+                    if not extended:
+                        self.storage_accepting=False
+                        self.stop.set()
+                if extended:
+                    try: status=self.engine.wait(timeout=max(.01,NTFS_SESSION_TIMEOUT-(time.monotonic()-measured)))
+                    except subprocess.TimeoutExpired:
+                        self.engine.kill();self.engine.wait();status=9
+                else:
+                    self.engine.kill();self.engine.wait();status=9
+            with self.storage_condition:
+                leaked=self.storage_active
+            leaked=leaked or bool(descendants(os.getpid()))
         finally:
-            self.stop.set()
+            with self.storage_condition:
+                self.storage_accepting=False
+                self.stop.set()
             self.socket.close()
             server.join()
+            with self.storage_condition:
+                while self.storage_active: self.storage_condition.wait()
             kill_owned_children()
             for thread in self.threads:thread.join()
             while True:
                 try:os.waitpid(-1,0)
                 except ChildProcessError:break
+        return 9 if leaked or self.storage_failed else status
 
 
 def main():

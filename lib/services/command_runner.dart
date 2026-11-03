@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'session_command_runner.dart';
+import '../models/approved_ntfs_shrink_plan.dart';
+import '../models/ntfs_transaction_result.dart';
 
 enum CommandLogType { command, stdout, stderr, mock }
 
@@ -66,6 +68,11 @@ typedef CommandLogCallback = void Function(CommandLogEvent event);
 ///   CommandRunner.instance         → mevcut aktif runner'a erişir
 ///   CommandRunner.setInstance(...)  → test ortamında runner değiştirir
 abstract class CommandRunner {
+  /// Only the verified session transport may start the private NTFS worker.
+  Future<NtfsTransactionResult> runNtfsTransaction(
+    ApprovedNtfsShrinkPlan approved,
+  ) async => const NtfsTransactionResult.notStarted();
+
   /// Mevcut aktif CommandRunner.
   /// Varsayılan olarak [RealCommandRunner] kullanılır.
   /// Test ortamında [setInstance] ile değiştirilebilir.
