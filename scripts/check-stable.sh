@@ -91,6 +91,8 @@ run_check "root-session power inhibition and private-bus descriptor lifetime" \
 run_check "explicit real-namespace acceptance status regressions" \
   python3 -B test/scripts/namespace_acceptance_test.py
 
+run_check "required namespace CI verdict and scoped capability regressions" \
+  python3 -B test/scripts/namespace_ci_test.py
 run_check "P0-04 secure records, native transport, user export and v2 protocol" \
   python3 -B -m unittest discover -s test/scripts -p '*observability*test.py'
 run_check "P0-04 unprivileged export attacks" \
